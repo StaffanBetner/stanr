@@ -181,10 +181,10 @@ Rcpp::List run_sampling(Model& model, Rcpp::List args) {
   }
 
   newstan::r_interrupt interrupt;
-  stan::callbacks::stream_writer info(std::cout);
-  stan::callbacks::stream_writer err(std::cerr);
-  stan::callbacks::stream_logger logger(std::cout, std::cout, std::cout,
-                                        std::cerr, std::cerr);
+  stan::callbacks::stream_writer info(Rcpp::Rcout);
+  stan::callbacks::stream_writer err(Rcpp::Rcerr);
+  stan::callbacks::stream_logger logger(Rcpp::Rcout, Rcpp::Rcout, Rcpp::Rcout,
+                                        Rcpp::Rcerr, Rcpp::Rcerr);
 
   int return_code = stan::services::error_codes::CONFIG;
 
@@ -339,11 +339,9 @@ Rcpp::List run_sampling(Model& model, Rcpp::List args) {
 
 
   // ─── Clean up ──────────────────────────────────────────────────
-/*
   for (int i = 0; i < num_chains; ++i) {
     delete init_ctxs[i];
   }
-*/
   return Rcpp::List::create(
     Rcpp::_["samples"] = combined,
     Rcpp::_["return_code"] = return_code,
@@ -621,7 +619,11 @@ Rcpp::List run_pathfinder(Model& model, Rcpp::List args) {
 }
 
 extern "C" SEXP newstan_run(SEXP model_ptr, SEXP args) {
-  stan::math::init_threadpool_tbb();
+  static bool tbb_initialized = false;
+  if (!tbb_initialized) {
+    stan::math::init_threadpool_tbb();
+    tbb_initialized = true;
+  }
 
   auto model = Rcpp::XPtr<stan::model::model_base>(model_ptr);
 
@@ -645,7 +647,7 @@ extern "C" SEXP newstan_run(SEXP model_ptr, SEXP args) {
   } else {
     std::ostringstream msg;
     msg << "Unknown method: " << method;
-    std::cout << msg.str() << std::endl;
+    Rcpp::Rcout << msg.str() << std::endl;
     return_code = stan::services::error_codes::CONFIG;
   }
 

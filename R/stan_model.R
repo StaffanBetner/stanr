@@ -46,49 +46,28 @@ stan_model <- function(file = NULL, code = NULL, model_name = NULL,
   fun_base <- "
     #include <Rcpp.h>
 
+    // [[Rcpp::depends(BH)]]
+    // [[Rcpp::depends(RcppEigen)]]
+    // [[Rcpp::depends(RcppParallel)]]
+
     // [[Rcpp::export]]
     Rcpp::XPtr<stan::model::model_base> new_model(Rcpp::XPtr<stan::io::var_context> data_context, unsigned int seed) {
-      Rcpp::XPtr<stan::model::model_base> m(new stan_model(*data_context.get(), seed, &std::cout));
+      Rcpp::XPtr<stan::model::model_base> m(new stan_model(*data_context.get(), seed, &Rcpp::Rcout));
       return m;
     }
   "
 
   cppflags <- paste(
     paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
-    paste0("-I", system.file("include", package = "RcppEigen", mustWork = TRUE)),
-    paste0("-I", system.file("include", package = "RcppParallel", mustWork = TRUE)),
-    RcppParallel:::tbbCxxFlags(),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS -O3 -w"
   )
-
-  LdFlags <- function(as_character = FALSE) {
-    TBB_LIB <- Sys.getenv("TBB_LINK_LIB", Sys.getenv("TBB_LIB"))
-    if (dir.exists(TBB_LIB)) {
-      TBB_LIB <- normalizePath(TBB_LIB)
-    } else {
-      TBB_LIB <- system.file("lib", .Platform$r_arch, package = "RcppParallel", mustWork = TRUE)
-    }
-
-    PKG_LIBS <- paste0("-L", shQuote(TBB_LIB))
-    # RTools aarch64 does not support rpath, but it is not used on Windows anyway
-    if (!(.Platform$OS.type == "windows" && R.version$arch == "aarch64")) {
-      PKG_LIBS <- paste0(PKG_LIBS, " -Wl,-rpath,", shQuote(TBB_LIB))
-    }
-    PKG_LIBS <- paste0(PKG_LIBS, " -ltbb -ltbbmalloc")
-
-    if (isTRUE(as_character)) return(PKG_LIBS)
-    cat(PKG_LIBS, " ")
-    return(invisible(NULL))
-  }
-
 
   env <- new.env()
 
   withr::with_makevars(
     c(
       USE_CXX17 = 1,
-      PKG_CPPFLAGS = cppflags,
-      PKG_LIBS = LdFlags(as_character = TRUE)
+      PKG_CPPFLAGS = cppflags
     ),
     Rcpp::sourceCpp(code = paste0(cpp_code, fun_base, sep = "\n"), env = env, rebuild = TRUE, verbose = TRUE)
   )

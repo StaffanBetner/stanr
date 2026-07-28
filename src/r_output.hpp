@@ -29,7 +29,7 @@ class r_logger : public stan::callbacks::logger {
   }
 
   void info(const std::string& msg) override {
-    std::cout << msg << std::endl;
+    Rcpp::Rcout << msg << std::endl;
     if (!verbose_) return;
     Rprintf("[INFO] %s\n", msg.c_str());
   }
@@ -54,17 +54,23 @@ class r_sample_writer : public stan::callbacks::writer {
   int n_rows_;
   int n_cols_;
   bool initialized_;
+  int expected_rows_;
 
  public:
   explicit r_sample_writer(int expected_rows = 0)
     : n_rows_(0)
     , n_cols_(0)
-    , initialized_(false) {}
+    , initialized_(false)
+    , expected_rows_(expected_rows) {}
 
   void operator()(const std::vector<std::string>& names) override {
     n_cols_ = static_cast<int>(names.size());
     colnames_ = names;
     values_.resize(n_cols_);
+    // Pre-allocate each column to avoid repeated reallocations during sampling
+    for (int j = 0; j < n_cols_; ++j) {
+      values_[j].reserve(static_cast<size_t>(expected_rows_));
+    }
     initialized_ = true;
   }
 
@@ -149,17 +155,23 @@ class r_diagnostic_writer : public stan::callbacks::writer {
   int n_rows_;
   int n_cols_;
   bool initialized_;
+  int expected_rows_;
 
  public:
   explicit r_diagnostic_writer(int expected_rows = 0)
     : n_rows_(0)
     , n_cols_(0)
-    , initialized_(false) {}
+    , initialized_(false)
+    , expected_rows_(expected_rows) {}
 
   void operator()(const std::vector<std::string>& names) override {
     n_cols_ = static_cast<int>(names.size());
     colnames_ = names;
     values_.resize(n_cols_);
+    // Pre-allocate each column to avoid repeated reallocations during sampling
+    for (int j = 0; j < n_cols_; ++j) {
+      values_[j].reserve(static_cast<size_t>(expected_rows_));
+    }
     initialized_ = true;
   }
 
