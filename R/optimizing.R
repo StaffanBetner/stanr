@@ -79,14 +79,13 @@ optimizing <- function(
     result <- .Call(`newstan_run`, mod_ptr, args)
   )
 
-  # Extract parameter values from last row of par dataframe
-  par_df <- result$par
-  par_vec <- if (is.data.frame(par_df) && nrow(par_df) > 0) {
-    as.numeric(par_df[nrow(par_df), ])
+  # Extract parameter values from last row of par matrix
+  par_mat <- result$par
+  par_vec <- if (is.matrix(par_mat) && nrow(par_mat) > 0) {
+    par_mat[nrow(par_mat), , drop = TRUE]
   } else {
     numeric(0)
   }
-  names(par_vec) <- colnames(par_df)
 
   list(
     par = par_vec,

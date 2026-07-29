@@ -51,7 +51,7 @@ generated_quantities <- function(
   )
 
   result <- .Call(`newstan_run`, mod_ptr, args)
-  gqs_draws <- posterior::as_draws_df(result$samples)
+  gqs_draws <- posterior::as_draws_df(as.data.frame(result$samples))
 
   list(
     draws = gqs_draws,

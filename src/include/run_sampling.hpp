@@ -2,6 +2,7 @@
 #define NEWSTAN_RUN_SAMPLING_HPP
 
 #include <Rcpp.h>
+#include <memory>
 #include <stan/services/sample/hmc_nuts_unit_e_adapt.hpp>
 #include <stan/services/sample/hmc_nuts_diag_e_adapt.hpp>
 #include <stan/services/sample/hmc_nuts_dense_e_adapt.hpp>
@@ -55,8 +56,7 @@ namespace newstan {
     // Build per-chain contexts and writers
     // Data contexts must be pointers (Stan expects vector<PointerType> and accesses *init[i])
     // Writers must be objects (Stan accesses writer[i] directly as a reference)
-    std::vector<newstan::r_data_context*> data_ctxs(num_chains);
-    std::vector<newstan::r_data_context*> init_ctxs(num_chains);
+    std::vector<std::shared_ptr<newstan::r_data_context>> init_ctxs(num_chains);
     std::vector<newstan::r_sample_writer> init_writers;
     std::vector<newstan::r_sample_writer> sample_writers;
     std::vector<newstan::r_diagnostic_writer> diag_writers;
@@ -68,7 +68,7 @@ namespace newstan {
     metric_writers.reserve(num_chains);
 
     for (int i = 0; i < num_chains; ++i) {
-      init_ctxs[i] = new newstan::r_data_context(init_list);
+      init_ctxs[i] = std::shared_ptr<newstan::r_data_context>(new newstan::r_data_context(init_list));
       init_writers.emplace_back(1);  // init writer only receives one row
       sample_writers.emplace_back(expected_rows);
       diag_writers.emplace_back(expected_rows);
@@ -233,10 +233,6 @@ namespace newstan {
 
     logger.flush();
 
-    // ─── Clean up ──────────────────────────────────────────────────
-    for (int i = 0; i < num_chains; ++i) {
-      delete init_ctxs[i];
-    }
     return Rcpp::List::create(
       Rcpp::_["samples"] = combined,
       Rcpp::_["return_code"] = return_code,

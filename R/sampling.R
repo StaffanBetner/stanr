@@ -121,11 +121,13 @@ sampling <- function(
     !(draw_names %in% diagnostic_vars) & draw_names != ".chain"
   ]
   if (algorithm == "Fixed_param") {
-    diagnostics <- posterior::draws_df("stepsize__" = NA,
-                                       "treedepth__" = NA,
-                                       "n_leapfrog__" = NA,
-                                       "divergent__" = NA,
-                                       "energy__" = NA)
+    diagnostics <- posterior::draws_df(
+      "stepsize__" = NA,
+      "treedepth__" = NA,
+      "n_leapfrog__" = NA,
+      "divergent__" = NA,
+      "energy__" = NA
+    )
   } else {
     diagnostics <- posterior::subset_draws(draws, variable = diagnostic_vars)
   }

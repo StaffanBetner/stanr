@@ -81,25 +81,24 @@ namespace newstan {
     }
 
     // Extract results from sample_writer
-    Rcpp::DataFrame df = sample_writer.to_dataframe();
-    Rcpp::NumericVector par_vec;
+    Rcpp::NumericMatrix mat = sample_writer.to_r_matrix();
     double lp_val = NA_REAL;
 
-    if (df.nrow() > 0 && df.ncol() >= 1) {
-      // Last row contains the solution; first column is lp__
-      int last_row = df.nrow() - 1;
-      Rcpp::CharacterVector colnames = df.names();
-      for (int j = 0; j < df.ncol(); ++j) {
+    if (mat.nrow() > 0 && mat.ncol() >= 1) {
+      // Last row contains the solution; find lp__ column
+      Rcpp::List dimnames = mat.attr("dimnames");
+      Rcpp::CharacterVector colnames = Rcpp::as<Rcpp::CharacterVector>(
+        Rcpp::wrap(dimnames[1]));
+      for (int j = 0; j < mat.ncol(); ++j) {
         if (colnames[j] == "lp__") {
-          Rcpp::NumericVector col = df[j];
-          lp_val = col[last_row];
+          lp_val = mat(mat.nrow() - 1, j);
           break;
         }
       }
     }
 
     return Rcpp::List::create(
-      Rcpp::_["par"] = df,
+      Rcpp::_["par"] = mat,
       Rcpp::_["value"] = lp_val,
       Rcpp::_["return_code"] = return_code,
       Rcpp::_["method"] = "optimizing",

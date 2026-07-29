@@ -2,6 +2,7 @@
 #define NEWSTAN_R_OUTPUT_HPP
 
 #include <Rcpp.h>
+#include <RcppEigen.h>
 #include <stan/callbacks/logger.hpp>
 #include <stan/callbacks/writer.hpp>
 #include <stan/callbacks/structured_writer.hpp>
@@ -13,15 +14,15 @@
 namespace newstan {
 
 // ===================================================================
-// Sample writer — collects parameter samples using plain C++ storage
-// to avoid thread-unsafe R calls during parallel (multi-chain) sampling.
+// Sample writer — collects parameter samples using Eigen::MatrixXd
+// for cache-friendly, vectorized storage. Thread-safe for single-writer
+// access per chain during parallel (multi-chain) sampling.
 // ===================================================================
 
 class r_sample_writer : public stan::callbacks::writer {
  private:
-  // Plain C++ storage — safe to access from multiple TBB threads
   std::vector<std::string> colnames_;
-  std::vector<std::vector<double>> values_;  // column-major: values_[col][row]
+  Eigen::MatrixXd values_;       // column-major: rows=samples, cols=parameters
   int n_rows_;
   int n_cols_;
   bool initialized_;
@@ -37,10 +38,9 @@ class r_sample_writer : public stan::callbacks::writer {
   void operator()(const std::vector<std::string>& names) override {
     n_cols_ = static_cast<int>(names.size());
     colnames_ = names;
-    values_.resize(n_cols_);
-    // Pre-allocate each column to avoid repeated reallocations during sampling
-    for (int j = 0; j < n_cols_; ++j) {
-      values_[j].reserve(static_cast<size_t>(expected_rows_));
+    // Pre-allocate Eigen matrix with expected capacity
+    if (expected_rows_ > 0) {
+      values_.resize(expected_rows_, n_cols_);
     }
     initialized_ = true;
   }
@@ -48,12 +48,25 @@ class r_sample_writer : public stan::callbacks::writer {
   void operator()(const std::vector<double>& state) override {
     if (!initialized_) return;
     int n = static_cast<int>(state.size());
-    if (n != n_cols_) return;  // Skip rows that don't match
+    if (n != n_cols_) return;
 
-    // Append values to each column
-    for (int j = 0; j < n_cols_; ++j) {
-      values_[j].push_back(state[j]);
+    // Grow matrix if we exceed allocated rows
+    if (n_rows_ >= static_cast<int>(values_.rows())) {
+      int new_rows = std::max(
+        static_cast<int>(std::ceil(1.5 * values_.rows())),
+        n_rows_ + 100
+      );
+      Eigen::MatrixXd new_values(new_rows, n_cols_);
+      // Copy existing data
+      if (n_rows_ > 0) {
+        new_values.topLeftCorner(n_rows_, n_cols_) =
+          values_.topLeftCorner(n_rows_, n_cols_);
+      }
+      values_ = std::move(new_values);
     }
+
+    values_.row(n_rows_) = Eigen::Map<const Eigen::RowVectorXd>(
+      state.data(), static_cast<Eigen::Index>(n));
     n_rows_++;
   }
 
@@ -70,42 +83,29 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   /**
-   * Convert collected data to an R data.frame.
+   * Convert collected data to an R matrix via RcppEigen.
    *
    * MUST be called from the main R thread (not from a TBB worker thread).
-   * This is where we create R objects from our plain C++ storage.
    */
-  Rcpp::DataFrame to_dataframe() const {
-    if (!initialized_ || n_rows_ == 0) {
-      return Rcpp::DataFrame::create();
+  Rcpp::NumericMatrix to_r_matrix() const {
+    Rcpp::NumericMatrix r_mat(n_rows_, n_cols_);
+    if (n_rows_ > 0) {
+      Eigen::Map<Eigen::MatrixXd>(r_mat.begin(), n_rows_, n_cols_) =
+        values_.topLeftCorner(n_rows_, n_cols_);
     }
-
-    Rcpp::List df_list(n_cols_);
-    for (int j = 0; j < n_cols_; ++j) {
-      Rcpp::NumericVector col(n_rows_);
-      for (int k = 0; k < n_rows_; ++k) {
-        col[k] = values_[j][k];
-      }
-      df_list[j] = col;
-    }
-
-    Rcpp::DataFrame df = Rcpp::DataFrame(df_list);
-    df.names() = Rcpp::CharacterVector(colnames_.begin(), colnames_.end());
-    return df;
+    r_mat.attr("dimnames") = Rcpp::List::create(
+      R_NilValue,
+      Rcpp::CharacterVector(colnames_.begin(), colnames_.end())
+    );
+    return r_mat;
   }
 
   /**
-   * Convert collected data to an Eigen matrix (rows = samples, cols = parameters).
-   * Data is stored column-major internally, so we transpose when building the matrix.
+   * Return a copy of the collected data as an Eigen matrix.
    */
   Eigen::MatrixXd to_matrix() const {
-    Eigen::MatrixXd mat(n_rows_, n_cols_);
-    for (int j = 0; j < n_cols_; ++j) {
-      for (int k = 0; k < n_rows_; ++k) {
-        mat(k, j) = values_[j][k];
-      }
-    }
-    return mat;
+    if (n_rows_ == 0) return Eigen::MatrixXd(0, n_cols_);
+    return values_.topLeftCorner(n_rows_, n_cols_);
   }
 
   const std::vector<std::string>& colnames() const { return colnames_; }
@@ -115,14 +115,13 @@ class r_sample_writer : public stan::callbacks::writer {
 
 // ===================================================================
 // Diagnostic writer — collects diagnostic columns (energy__, divergent__, etc.)
-// Uses plain C++ storage to avoid thread-unsafe R calls during parallel sampling.
+// Uses Eigen::MatrixXd for cache-friendly storage during parallel sampling.
 // ===================================================================
 
 class r_diagnostic_writer : public stan::callbacks::writer {
  private:
-  // Plain C++ storage — safe to access from multiple TBB threads
   std::vector<std::string> colnames_;
-  std::vector<std::vector<double>> values_;  // column-major: values_[col][row]
+  Eigen::MatrixXd values_;       // column-major: rows=samples, cols=diagnostics
   int n_rows_;
   int n_cols_;
   bool initialized_;
@@ -138,10 +137,8 @@ class r_diagnostic_writer : public stan::callbacks::writer {
   void operator()(const std::vector<std::string>& names) override {
     n_cols_ = static_cast<int>(names.size());
     colnames_ = names;
-    values_.resize(n_cols_);
-    // Pre-allocate each column to avoid repeated reallocations during sampling
-    for (int j = 0; j < n_cols_; ++j) {
-      values_[j].reserve(static_cast<size_t>(expected_rows_));
+    if (expected_rows_ > 0) {
+      values_.resize(expected_rows_, n_cols_);
     }
     initialized_ = true;
   }
@@ -151,9 +148,21 @@ class r_diagnostic_writer : public stan::callbacks::writer {
     int n = static_cast<int>(state.size());
     if (n != n_cols_) return;
 
-    for (int j = 0; j < n_cols_; ++j) {
-      values_[j].push_back(state[j]);
+    if (n_rows_ >= static_cast<int>(values_.rows())) {
+      int new_rows = std::max(
+        static_cast<int>(std::ceil(1.5 * values_.rows())),
+        n_rows_ + 100
+      );
+      Eigen::MatrixXd new_values(new_rows, n_cols_);
+      if (n_rows_ > 0) {
+        new_values.topLeftCorner(n_rows_, n_cols_) =
+          values_.topLeftCorner(n_rows_, n_cols_);
+      }
+      values_ = std::move(new_values);
     }
+
+    values_.row(n_rows_) = Eigen::Map<const Eigen::RowVectorXd>(
+      state.data(), static_cast<Eigen::Index>(n));
     n_rows_++;
   }
 
@@ -163,35 +172,25 @@ class r_diagnostic_writer : public stan::callbacks::writer {
 
   void operator()(const Eigen::MatrixXd& values) override {}
 
-  Rcpp::DataFrame to_dataframe() const {
-    if (!initialized_ || n_rows_ == 0) return Rcpp::DataFrame::create();
-
-    Rcpp::List df_list(n_cols_);
-    for (int j = 0; j < n_cols_; ++j) {
-      Rcpp::NumericVector col(n_rows_);
-      for (int k = 0; k < n_rows_; ++k) {
-        col[k] = values_[j][k];
-      }
-      df_list[j] = col;
+  Rcpp::NumericMatrix to_r_matrix() const {
+    Rcpp::NumericMatrix r_mat(n_rows_, n_cols_);
+    if (n_rows_ > 0) {
+      Eigen::Map<Eigen::MatrixXd>(r_mat.begin(), n_rows_, n_cols_) =
+        values_.topLeftCorner(n_rows_, n_cols_);
     }
-
-    Rcpp::DataFrame df = Rcpp::DataFrame(df_list);
-    df.names() = Rcpp::CharacterVector(colnames_.begin(), colnames_.end());
-    return df;
+    r_mat.attr("dimnames") = Rcpp::List::create(
+      R_NilValue,
+      Rcpp::CharacterVector(colnames_.begin(), colnames_.end())
+    );
+    return r_mat;
   }
 
   Eigen::MatrixXd to_matrix() const {
-    Eigen::MatrixXd mat(n_rows_, n_cols_);
-    for (int j = 0; j < n_cols_; ++j) {
-      for (int k = 0; k < n_rows_; ++k) {
-        mat(k, j) = values_[j][k];
-      }
-    }
-    return mat;
+    if (n_rows_ == 0) return Eigen::MatrixXd(0, n_cols_);
+    return values_.topLeftCorner(n_rows_, n_cols_);
   }
 
   const std::vector<std::string>& colnames() const { return colnames_; }
-  const std::vector<double>& values_col(int j) const { return values_[j]; }
   int n_rows() const { return n_rows_; }
   int n_cols() const { return n_cols_; }
 };

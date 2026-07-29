@@ -1,12 +1,15 @@
 #ifndef NEWSTAN_STACK_WRITER_CHAINS_HPP
 #define NEWSTAN_STACK_WRITER_CHAINS_HPP
 
-
 #include <Rcpp.h>
+#include <RcppEigen.h>
+#include <Eigen/Dense>
+#include <cstring>
 
 namespace newstan {
 
-  // Helper: stack per-chain dataframes and add a .chain column
+  // Helper: stack per-chain Eigen matrices and add a .chain column.
+  // Uses Eigen vertical concatenation for fast, vectorized stacking.
   template <typename Writer>
   inline Rcpp::DataFrame stack_writer_chains(
     const std::vector<Writer>& writers, int num_chains) {
@@ -22,31 +25,38 @@ namespace newstan {
       return Rcpp::DataFrame::create();
     }
 
-    // Build column vectors from stacked per-chain data
-    Rcpp::List df_list(n_cols);
+    // Pre-allocate combined matrix with Eigen
+    Eigen::MatrixXd combined(total_rows, n_cols);
+
+    // Vertical concatenation using Eigen block assignment (vectorized memcpy)
+    int offset = 0;
+    for (int i = 0; i < num_chains; ++i) {
+      Eigen::MatrixXd const& mat = writers[i].to_matrix();
+      int n = writers[i].n_rows();
+      if (n > 0) {
+        combined.block(offset, 0, n, n_cols) = mat;
+        offset += n;
+      }
+    }
+
+    // Build R data.frame from combined matrix columns
+    Rcpp::List df_list(n_cols + 1);
     for (int j = 0; j < n_cols; ++j) {
       Rcpp::NumericVector col(total_rows);
-      int offset = 0;
-      for (int i = 0; i < num_chains; ++i) {
-        auto df_i = writers[i].to_dataframe();
-        Rcpp::NumericVector col_i = Rcpp::as<Rcpp::NumericVector>(df_i[j]);
-        for (int k = 0; k < col_i.size(); ++k) {
-          col[offset + k] = col_i[k];
-        }
-        offset += col_i.size();
-      }
+      std::memcpy(col.begin(), combined.col(j).data(),
+                  static_cast<size_t>(total_rows) * sizeof(double));
       df_list[j] = col;
     }
 
     // Append chain ID as the last column
     Rcpp::IntegerVector chain_col(total_rows);
-    int offset = 0;
+    offset = 0;
     for (int i = 0; i < num_chains; ++i) {
       int n = writers[i].n_rows();
-      for (int j = 0; j < n; ++j) chain_col[offset + j] = i + 1;
+      std::fill(chain_col.begin() + offset, chain_col.begin() + offset + n, i + 1);
       offset += n;
     }
-    df_list.push_back(chain_col);
+    df_list[n_cols] = chain_col;
 
     Rcpp::DataFrame df = Rcpp::DataFrame(df_list);
 

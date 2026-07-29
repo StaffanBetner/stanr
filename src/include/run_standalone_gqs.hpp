@@ -28,7 +28,7 @@ namespace newstan {
         interrupt, logger, sample_writer);
 
     return Rcpp::List::create(
-      Rcpp::_["samples"] = sample_writer.to_dataframe(),
+      Rcpp::_["samples"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
       Rcpp::_["method"] = "standalone_gqs"
     );
