@@ -28,6 +28,12 @@ namespace newstan {
       return Rcpp::as<std::string>(args[key]);
     return default_val;
   }
+
+  inline bool get_bool(Rcpp::List args, const std::string& key, bool default_val) {
+    if (args.containsElementNamed(key.c_str()))
+      return Rcpp::as<bool>(args[key]);
+    return default_val;
+  }
 }
 
 #endif

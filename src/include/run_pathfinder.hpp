@@ -5,6 +5,8 @@
 #include <stan/callbacks/stream_logger.hpp>
 //#include <stan/services/pathfinder/multi.hpp>
 #include <stan/services/pathfinder/single.hpp>
+#include <stan/callbacks/json_writer.hpp>
+#include <sstream>
 #include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
@@ -29,7 +31,8 @@ namespace newstan {
 
     newstan::r_data_context init_ctx(init_list);
     newstan::r_sample_writer sample_writer;
-    newstan::r_metric_writer metric_writer;
+    stan::callbacks::json_writer<std::ostringstream> metric_writer(
+        std::make_unique<std::ostringstream>());
     stan::callbacks::stream_logger logger(Rcpp::Rcout, Rcpp::Rcout, Rcpp::Rcout,
                                           Rcpp::Rcerr, Rcpp::Rcerr);
     newstan::r_interrupt interrupt;

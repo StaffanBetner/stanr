@@ -20,8 +20,8 @@ a Stan model with a generated quantities block.}
 
 \item{data}{Named list of data variables to pass to the model.}
 
-\item{draws}{An object containing posterior draws (e.g., the \code{draws} element
-from a \code{\link[=sampling]{sampling()}} result).}
+\item{draws}{An object containing posterior draws of constrained parameters
+(e.g., the \code{draws} element from a \code{\link[=sampling]{sampling()}} result).}
 
 \item{seed}{Random seed (NA = random).}
 

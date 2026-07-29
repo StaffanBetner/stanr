@@ -9,7 +9,6 @@
 #include <Eigen/Dense>
 #include <vector>
 #include <string>
-#include <sstream>
 
 namespace newstan {
 
@@ -193,115 +192,6 @@ class r_diagnostic_writer : public stan::callbacks::writer {
   const std::vector<std::string>& colnames() const { return colnames_; }
   int n_rows() const { return n_rows_; }
   int n_cols() const { return n_cols_; }
-};
-
-// ===================================================================
-// Metric writer — collects adaptation metrics as JSON string
-// ===================================================================
-
-class r_metric_writer : public stan::callbacks::structured_writer {
- private:
-  std::ostringstream ss_;
-  int depth_;
-  std::vector<bool> has_key_;  // Track if a key was already written in current record
-
- public:
-  r_metric_writer() : depth_(0) {}
-
-  void begin_record() override {
-    if (depth_ > 0) ss_ << ",";
-    for (int i = 0; i < depth_; ++i) ss_ << "  ";
-    has_key_.push_back(false);
-    depth_++;
-  }
-
-  void begin_record(const std::string& key) override {
-    if (depth_ > 0) ss_ << ",";
-    for (int i = 0; i < depth_; ++i) ss_ << "  ";
-    ss_ << "\"" << key << "\": {";
-    ss_ << "\n";
-    has_key_.push_back(false);
-    depth_++;
-  }
-
-  void end_record() override {
-    depth_--;
-    if (depth_ > 0) {
-      ss_ << "\n";
-      for (int i = 0; i < depth_ - 1; ++i) ss_ << "  ";
-    }
-    ss_ << "}";
-  }
-
-  void write(const std::string& key) override {
-    indent(key);
-    ss_ << "null";
-  }
-
-  void write(const std::string& key, const std::string& value) override {
-    indent(key);
-    ss_ << "\"" << value << "\"";
-  }
-
-  void write(const std::string& key, bool value) override {
-    indent(key);
-    ss_ << (value ? "true" : "false");
-  }
-
-  void write(const std::string& key, int value) override {
-    indent(key);
-    ss_ << value;
-  }
-
-  void write(const std::string& key, unsigned int value) override {
-    indent(key);
-    ss_ << value;
-  }
-
-  void write(const std::string& key, size_t value) {
-    indent(key);
-    ss_ << value;
-  }
-
-  void write(const std::string& key, double value) override {
-    indent(key);
-    ss_ << value;
-  }
-
-  void write(const std::string& key, const Eigen::VectorXd& vec) override {
-    indent(key);
-    ss_ << "[";
-    for (Eigen::Index i = 0; i < vec.size(); ++i) {
-      if (i > 0) ss_ << ", ";
-      ss_ << vec[i];
-    }
-    ss_ << "]";
-  }
-
-  void write(const std::string& key, const Eigen::MatrixXd& mat) override {
-    indent(key);
-    ss_ << "[";
-    for (Eigen::Index i = 0; i < mat.rows(); ++i) {
-      if (i > 0) ss_ << ", ";
-      ss_ << "[";
-      for (Eigen::Index j = 0; j < mat.cols(); ++j) {
-        if (j > 0) ss_ << ", ";
-        ss_ << mat(i, j);
-      }
-      ss_ << "]";
-    }
-    ss_ << "]";
-  }
-
-  std::string json_string() const { return ss_.str(); }
-
- private:
-  void indent(const std::string& key) {
-    if (has_key_.back()) ss_ << ", ";
-    has_key_.back() = true;
-    for (int i = 0; i < depth_; ++i) ss_ << "  ";
-    ss_ << "\"" << key << "\": ";
-  }
 };
 
 }  // namespace newstan

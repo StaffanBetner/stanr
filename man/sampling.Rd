@@ -16,11 +16,14 @@ sampling(
   seed = NA,
   init = 0,
   init_radius = 2,
-  algorithm = "NUTS",
+  algorithm = "hmc",
+  engine = "nuts",
   metric = "diag_e",
+  inv_metric = NULL,
   stepsize = 1,
   stepsize_jitter = 0,
   max_depth = 10,
+  int_time = 10,
   delta = 0.8,
   gamma = 0.05,
   kappa = 0.75,
@@ -28,6 +31,7 @@ sampling(
   init_buffer = 75,
   term_buffer = 50,
   window = 25,
+  adapt_engaged = TRUE,
   refresh = 100,
   verbose = TRUE,
   ...
@@ -57,17 +61,29 @@ parallel via TBB \code{parallel_for} inside the Stan services.}
 
 \item{init_radius}{Radius for random initialization (default: 2).}
 
-\item{algorithm}{Sampler algorithm: \code{"NUTS"}, \code{"NUTS_FIXED"}, \code{"HMC"}, or
-\code{"Fixed_param"} (default: \code{"NUTS"}).}
+\item{algorithm}{Sampler algorithm: \code{"hmc"} or \code{"fixed_param"} (default: \code{"hmc"}).}
+
+\item{engine}{HMC engine: \code{"nuts"} or \code{"static"} (default: \code{"nuts"}). Only
+used when \code{algorithm = "hmc"}.}
 
 \item{metric}{Euclidean metric: \code{"unit_e"}, \code{"diag_e"}, or \code{"dense_e"}
 (default: \code{"diag_e"}).}
 
-\item{stepsize}{Initial stepsize (NA = adapt).}
+\item{inv_metric}{Precomputed inverse metric. For \code{"diag_e"}, a numeric vector
+of length equal to the number of unconstrained parameters. For \code{"dense_e"},
+a square matrix. Can be a single metric (recycled across chains) or a list
+of metrics (one per chain). Corresponds to CmdStan's \code{metric_file} argument.
+Default: \code{NULL} (identity metric).}
+
+\item{stepsize}{Initial stepsize (default: 1).}
 
 \item{stepsize_jitter}{Uniform jitter for stepsize (default: 0).}
 
-\item{max_depth}{Maximum tree depth for NUTS (default: 10).}
+\item{max_depth}{Maximum tree depth for NUTS (default: 10). Not used
+for static HMC.}
+
+\item{int_time}{Integration time for static HMC (default: 10). Not used
+for NUTS.}
 
 \item{delta}{Target acceptance rate (default: 0.8).}
 
@@ -82,6 +98,9 @@ parallel via TBB \code{parallel_for} inside the Stan services.}
 \item{term_buffer}{Warmup terminal buffer (default: 50).}
 
 \item{window}{Adaptation window size (default: 25).}
+
+\item{adapt_engaged}{Enable stepsize/metric adaptation during warmup
+(default: TRUE). When FALSE, uses fixed stepsize throughout.}
 
 \item{refresh}{Output refresh frequency (iterations between log messages,
 default: 100).}

@@ -4,7 +4,13 @@
 \alias{stan_model}
 \title{Compile and load a Stan model}
 \usage{
-stan_model(file = NULL, code = NULL, model_name = NULL, verbose = FALSE)
+stan_model(
+  file = NULL,
+  code = NULL,
+  model_name = NULL,
+  verbose = FALSE,
+  force_recompile = FALSE
+)
 }
 \arguments{
 \item{file}{Path to a \code{.stan} file (or \code{NULL} if \code{code} is provided)}
