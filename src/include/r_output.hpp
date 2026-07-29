@@ -34,6 +34,36 @@ class r_sample_writer : public stan::callbacks::writer {
     , initialized_(false)
     , expected_rows_(expected_rows) {}
 
+ private:
+  // Append a single row (Eigen row vector) to the matrix, growing if needed
+  template <typename RowType>
+  void append_row(const RowType& row) {
+    int n = static_cast<int>(row.size());
+    if (n_cols_ != 0 && n != n_cols_) return;
+    if (n_cols_ == 0) {
+      n_cols_ = n;
+      if (expected_rows_ > 0) {
+        values_.resize(expected_rows_, n_cols_);
+      }
+    }
+    if (n_rows_ >= static_cast<int>(values_.rows())) {
+      int new_rows = std::max(
+        static_cast<int>(std::ceil(1.5 * values_.rows())),
+        n_rows_ + 100
+      );
+      Eigen::MatrixXd new_values(new_rows, n_cols_);
+      if (n_rows_ > 0) {
+        new_values.topLeftCorner(n_rows_, n_cols_) =
+          values_.topLeftCorner(n_rows_, n_cols_);
+      }
+      values_ = std::move(new_values);
+    }
+    values_.row(n_rows_) = row;
+    n_rows_++;
+  }
+
+ public:
+
   void operator()(const std::vector<std::string>& names) override {
     n_cols_ = static_cast<int>(names.size());
     colnames_ = names;
@@ -46,27 +76,8 @@ class r_sample_writer : public stan::callbacks::writer {
 
   void operator()(const std::vector<double>& state) override {
     if (!initialized_) return;
-    int n = static_cast<int>(state.size());
-    if (n != n_cols_) return;
-
-    // Grow matrix if we exceed allocated rows
-    if (n_rows_ >= static_cast<int>(values_.rows())) {
-      int new_rows = std::max(
-        static_cast<int>(std::ceil(1.5 * values_.rows())),
-        n_rows_ + 100
-      );
-      Eigen::MatrixXd new_values(new_rows, n_cols_);
-      // Copy existing data
-      if (n_rows_ > 0) {
-        new_values.topLeftCorner(n_rows_, n_cols_) =
-          values_.topLeftCorner(n_rows_, n_cols_);
-      }
-      values_ = std::move(new_values);
-    }
-
-    values_.row(n_rows_) = Eigen::Map<const Eigen::RowVectorXd>(
-      state.data(), static_cast<Eigen::Index>(n));
-    n_rows_++;
+    this->append_row(Eigen::Map<const Eigen::RowVectorXd>(
+      state.data(), static_cast<Eigen::Index>(state.size())));
   }
 
   void operator()() override {
@@ -78,7 +89,23 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   void operator()(const Eigen::MatrixXd& values) override {
-    // Matrix output — not used by standard sampling
+    // Handle matrix outputs. Each row is treated as a sample.
+    if (!initialized_) return;
+    for (Eigen::Index i = 0; i < values.rows(); ++i) {
+      this->append_row(values.row(i));
+    }
+  }
+
+  void operator()(const Eigen::Matrix<double, -1, 1>& values) override {
+    // Column vector — treat as a single row sample (transposed)
+    if (!initialized_) return;
+    this->append_row(values.transpose());
+  }
+
+  void operator()(const Eigen::Matrix<double, 1, -1>& values) override {
+    // Row vector — treat as a single row sample (used by pathfinder)
+    if (!initialized_) return;
+    this->append_row(values);
   }
 
   /**
@@ -110,6 +137,10 @@ class r_sample_writer : public stan::callbacks::writer {
   const std::vector<std::string>& colnames() const { return colnames_; }
   int n_rows() const { return n_rows_; }
   int n_cols() const { return n_cols_; }
+
+  // Signal that this writer is valid so Stan's concurrent_writer
+  // writes directly to us rather than copying via value semantics.
+  bool is_valid() const noexcept override { return true; }
 };
 
 // ===================================================================

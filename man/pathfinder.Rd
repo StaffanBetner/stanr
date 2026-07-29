@@ -11,6 +11,8 @@ pathfinder(
   history_size = 5,
   num_elbo_draws = 64,
   num_draws = 300,
+  num_paths = 1,
+  num_multi_draws = 1000,
   seed = NA,
   init = 0,
   init_radius = 2,
@@ -31,6 +33,12 @@ pathfinder(
 
 \item{num_draws}{Approximate posterior draws per path (default: 300).}
 
+\item{num_paths}{Number of single pathfinders to run (default: 1).
+When \code{num_paths > 1}, runs multi-path pathfinder with PSIS resampling.}
+
+\item{num_multi_draws}{Number of draws to return from PSIS resampling
+(default: 1000). Only used when \code{num_paths > 1}.}
+
 \item{seed}{Random seed (NA = random).}
 
 \item{init}{Initial values (numeric vector, or \code{"random"}).}
@@ -45,6 +53,8 @@ pathfinder(
 A list containing:
 \itemize{
 \item \code{draws}: a \code{posterior::as_draws_df} object with approximate posterior draws.
+\item \code{diagnostics}: a \code{posterior::as_draws_df} object with pathfinder diagnostics
+(\code{lp_approx__}, \code{lp__}, \code{path__}).
 \item \code{return_code}: integer status code.
 \item \code{args}: named list of Pathfinder arguments.
 }

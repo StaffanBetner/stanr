@@ -3,10 +3,11 @@
 
 #include <Rcpp.h>
 #include <stan/callbacks/stream_logger.hpp>
-//#include <stan/services/pathfinder/multi.hpp>
 #include <stan/services/pathfinder/single.hpp>
+#include <stan/services/pathfinder/multi.hpp>
 #include <stan/callbacks/json_writer.hpp>
 #include <sstream>
+#include <vector>
 #include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
@@ -22,6 +23,8 @@ namespace newstan {
     int history_size      = get_int(args, "history_size", 5);
     int num_elbo_draws    = get_int(args, "num_elbo_draws", 64);
     int num_draws         = get_int(args, "num_draws", 300);
+    int num_paths         = get_int(args, "num_paths", 1);
+    int num_multi_draws   = get_int(args, "num_multi_draws", 1000);
     bool verbose          = Rcpp::as<bool>(args["verbose"]);
 
     Rcpp::List data_list  = Rcpp::as<Rcpp::List>(args["data"]);
@@ -29,29 +32,98 @@ namespace newstan {
                         ? Rcpp::as<Rcpp::List>(args["init"])
                         : data_list;
 
-    newstan::r_data_context init_ctx(init_list);
-    newstan::r_sample_writer sample_writer;
-    stan::callbacks::json_writer<std::ostringstream> metric_writer(
-        std::make_unique<std::ostringstream>());
     stan::callbacks::stream_logger logger(Rcpp::Rcout, Rcpp::Rcout, Rcpp::Rcout,
                                           Rcpp::Rcerr, Rcpp::Rcerr);
     newstan::r_interrupt interrupt;
 
-    int return_code = stan::services::pathfinder::pathfinder_lbfgs_single<false, false>(
-        model, init_ctx, seed, chain_id, init_radius,
-        history_size, 0.001,  // init_alpha, default
-        1e-12, 10000.0, 1e-8, 1e7, 1e-8,  // tolerances
-        iter, num_elbo_draws, num_draws, false,
-        get_int(args, "refresh", 100),
-        interrupt, logger,
-        sample_writer, sample_writer,
-        metric_writer,
-        true);  // calculate_lp
+    int return_code;
 
-    return Rcpp::List::create(
-      Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "pathfinder"
-    );
+    if (num_paths <= 1) {
+      // Single pathfinder
+      newstan::r_data_context init_ctx(init_list);
+      newstan::r_sample_writer sample_writer;
+      stan::callbacks::json_writer<std::ostringstream> metric_writer(
+          std::make_unique<std::ostringstream>());
+
+      return_code = stan::services::pathfinder::pathfinder_lbfgs_single<false, false>(
+          model, init_ctx, seed, chain_id, init_radius,
+          history_size, 0.001,  // init_alpha, default
+          1e-12, 10000.0, 1e-8, 1e7, 1e-8,  // tolerances
+          iter, num_elbo_draws, num_draws, false,
+          get_int(args, "refresh", 100),
+          interrupt, logger,
+          sample_writer, sample_writer,
+          metric_writer,
+          true);  // calculate_lp
+
+      return Rcpp::List::create(
+        Rcpp::_["return_code"] = return_code,
+        Rcpp::_["method"] = "pathfinder",
+        Rcpp::_["draws"] = sample_writer.to_r_matrix()
+      );
+    } else {
+      // Multi-path pathfinder — delegates to pathfinder_lbfgs_multi
+      // Create one init context per path (all share same init data)
+      std::vector<stan::io::var_context*> init_ctxs;
+      init_ctxs.reserve(num_paths);
+      std::vector<std::unique_ptr<newstan::r_data_context>> init_ctx_ptrs;
+      init_ctx_ptrs.reserve(num_paths);
+      for (int i = 0; i < num_paths; ++i) {
+        auto ctx = std::make_unique<newstan::r_data_context>(init_list);
+        init_ctxs.push_back(ctx.get());
+        init_ctx_ptrs.push_back(std::move(ctx));
+      }
+
+      // Per-path parameter writers (stan::callbacks::writer)
+      std::vector<newstan::r_sample_writer> single_param_writers(num_paths);
+      // Per-path diagnostic writers need structured_writer interface
+      std::vector<stan::callbacks::json_writer<std::ostringstream>> single_diag_writers;
+      single_diag_writers.reserve(num_paths);
+      for (int i = 0; i < num_paths; ++i) {
+        single_diag_writers.emplace_back(std::make_unique<std::ostringstream>());
+      }
+
+      // Final combined parameter writer
+      newstan::r_sample_writer param_writer;
+      // Final diagnostic writer (structured_writer)
+      stan::callbacks::json_writer<std::ostringstream> diag_writer(
+          std::make_unique<std::ostringstream>());
+
+      // Init writers (one per path, for writing initial values)
+      std::vector<newstan::r_sample_writer> init_writers(num_paths);
+
+      return_code = stan::services::pathfinder::pathfinder_lbfgs_multi(
+          model,
+          std::move(init_ctxs),
+          seed,
+          chain_id,
+          init_radius,
+          history_size,
+          0.001,  // init_alpha
+          1e-12, 10000.0, 1e-8, 1e7, 1e-8,  // tolerances
+          iter,
+          num_elbo_draws,
+          num_draws,
+          num_multi_draws,
+          num_paths,
+          false,  // save_iterations
+          get_int(args, "refresh", 100),
+          interrupt,
+          logger,
+          init_writers,
+          single_param_writers,
+          single_diag_writers,
+          param_writer,
+          diag_writer,
+          true,   // calculate_lp
+          true);  // psis_resample
+
+      return Rcpp::List::create(
+        Rcpp::_["return_code"] = return_code,
+        Rcpp::_["method"] = "pathfinder",
+        Rcpp::_["draws"] = param_writer.to_r_matrix()
+      );
+    }
   }
 }
 
