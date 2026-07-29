@@ -33,9 +33,8 @@ generated_quantities <- function(
     seed <- as.integer(stats::runif(1, 1, 2^31 - 1))
   }
 
-  dat_ptr <- .Call(`r_data_context`, data)
-  mod_ptr <- stanmod$new_model(dat_ptr, seed)
-  pars <- .Call(`constrained_par_names`, mod_ptr)
+  model_instance <- new_model_instance(stanmod, data, seed)
+  pars <- .Call(`constrained_par_names`, model_instance$model)
 
   # Convert draws to matrix (rows=samples, columns=parameters)
   draws_matrix <- if (inherits(fitted_params, "draws")) {
@@ -54,7 +53,8 @@ generated_quantities <- function(
 
   withr::with_envvar(
     c(STAN_NUM_THREADS = num_threads),
-    result <- .Call(`newstan_run`, mod_ptr, args)
+    result <- .Call(`newstan_run`, model_instance$model,
+                    c(args, list(bridge = model_instance$bridge)))
   )
 
   gqs_draws <- posterior::as_draws_df(as.data.frame(result$samples))

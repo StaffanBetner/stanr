@@ -40,9 +40,8 @@ laplace <- function(
          call. = FALSE)
   }
 
-  dat_ptr <- .Call(`r_data_context`, data)
-  mod_ptr <- stanmod$new_model(dat_ptr, seed)
-  pars <- .Call(`constrained_par_names`, mod_ptr)
+  model_instance <- new_model_instance(stanmod, data, seed)
+  pars <- .Call(`constrained_par_names`, model_instance$model)
   mode <- mode[pars]
   if (anyNA(mode)) {
     stop("mode must contain every constrained model parameter.", call. = FALSE)
@@ -61,7 +60,8 @@ laplace <- function(
 
   withr::with_envvar(
     c(STAN_NUM_THREADS = num_threads),
-    result <- .Call(`newstan_run`, mod_ptr, args)
+    result <- .Call(`newstan_run`, model_instance$model,
+                    c(args, list(bridge = model_instance$bridge)))
   )
 
   list(

@@ -92,12 +92,12 @@ pathfinder <- function(
     init = normalize_init(init)
   )
 
-  dat_ptr <- .Call(`r_data_context`, data)
-  mod_ptr <- stanmod$new_model(dat_ptr, seed)
+  model_instance <- new_model_instance(stanmod, data, seed)
 
   withr::with_envvar(
     c(STAN_NUM_THREADS = num_threads),
-    result <- .Call(`newstan_run`, mod_ptr, args)
+    result <- .Call(`newstan_run`, model_instance$model,
+                    c(args, list(bridge = model_instance$bridge)))
   )
 
   # Handle non-zero return codes
