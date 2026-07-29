@@ -5,7 +5,10 @@
 #include <stan/io/var_context.hpp>
 #include <stan/io/validate_dims.hpp>
 #include <Eigen/Dense>
+#include <cmath>
+#include <limits>
 #include <map>
+#include <set>
 #include <vector>
 #include <string>
 
@@ -14,69 +17,92 @@ namespace newstan {
 /**
  * R list -> stan::io::var_context adapter.
  *
- * Zero-copy: holds a reference to the R list, reads values on demand.
- * Dimensions are cached at construction time.
+ * Values and dimensions are copied at construction time so methods can be
+ * called safely from Stan's TBB worker threads without touching the R API.
  *
  * Adapted from rstan::io::rlist_ref_var_context.
  */
 class r_data_context : public stan::io::var_context {
  private:
-  Rcpp::List list_;
-  std::map<std::string, std::vector<size_t>> dims_r_;
-  std::map<std::string, std::vector<size_t>> dims_i_;
+  std::map<std::string, std::vector<double>> vals_r_;
+  std::map<std::string, std::vector<int>> vals_i_;
+  std::map<std::string, std::vector<size_t>> dims_;
   std::vector<size_t> empty_vec_ui_;
-
-  bool contains_r_only(const std::string& name) const {
-    return dims_r_.count(name) > 0;
-  }
 
  public:
   /**
    * Construct from an R list (named list of numeric/integer vectors).
    */
-  explicit r_data_context(Rcpp::List list) : list_(list) {
-    if (0 == list_.size()) return;
+  explicit r_data_context(Rcpp::List list) {
+    if (list.size() == 0) return;
+    if (Rf_isNull(list.names())) {
+      Rcpp::stop("Stan data and initialization lists must be named.");
+    }
 
     std::vector<std::string> varnames =
-        Rcpp::as<std::vector<std::string>>(list_.names());
+        Rcpp::as<std::vector<std::string>>(list.names());
+    std::set<std::string> seen_names;
 
-    for (R_xlen_t i = 0; i < list_.size(); i++) {
-      SEXP ee = list_[i];
+    for (R_xlen_t i = 0; i < list.size(); ++i) {
+      const std::string& name = varnames[i];
+      if (name.empty()) {
+        Rcpp::stop("Stan data and initialization lists cannot contain empty names.");
+      }
+      if (!seen_names.insert(name).second) {
+        Rcpp::stop("Stan data and initialization lists cannot contain duplicate names.");
+      }
+
+      SEXP ee = list[i];
       SEXP dim = Rf_getAttrib(ee, R_DimSymbol);
-      R_len_t eelen = Rf_length(ee);
-
-      typedef std::map<std::string, std::vector<size_t>>::value_type psd_v_t;
+      std::vector<size_t> dims;
+      if (Rf_length(dim) > 0) {
+        Rcpp::IntegerVector dim_i(dim);
+        dims.reserve(dim_i.size());
+        for (R_xlen_t j = 0; j < dim_i.size(); ++j) {
+          if (dim_i[j] == NA_INTEGER || dim_i[j] < 0) {
+            Rcpp::stop("Invalid dimensions for variable '" + name + "'.");
+          }
+          dims.push_back(static_cast<size_t>(dim_i[j]));
+        }
+      } else if (Rf_xlength(ee) != 1) {
+        dims.push_back(static_cast<size_t>(Rf_xlength(ee)));
+      }
 
       if (Rf_isInteger(ee)) {
-        if (Rf_length(dim) > 0) {
-          std::vector<size_t> d;
-          std::vector<unsigned int> dim_u =
-              Rcpp::as<std::vector<unsigned int>>(dim);
-          for (auto v : dim_u) d.push_back(static_cast<size_t>(v));
-          dims_i_.insert(psd_v_t(varnames[i], d));
-        } else {
-          if (1 == eelen) {
-            dims_i_.insert(psd_v_t(varnames[i], empty_vec_ui_));
-          } else {
-            dims_i_.insert(
-                psd_v_t(varnames[i], std::vector<size_t>(1, static_cast<size_t>(eelen))));
+        Rcpp::IntegerVector input(ee);
+        std::vector<int> ints(input.size());
+        std::vector<double> reals(input.size());
+        for (R_xlen_t j = 0; j < input.size(); ++j) {
+          if (input[j] == NA_INTEGER) {
+            Rcpp::stop("Integer variable '" + name + "' contains NA.");
           }
+          ints[j] = input[j];
+          reals[j] = static_cast<double>(input[j]);
         }
+        vals_i_.emplace(name, std::move(ints));
+        vals_r_.emplace(name, std::move(reals));
+        dims_.emplace(name, std::move(dims));
       } else if (Rf_isNumeric(ee)) {
-        if (Rf_length(dim) > 0) {
-          std::vector<size_t> d;
-          std::vector<unsigned int> dim_u =
-              Rcpp::as<std::vector<unsigned int>>(dim);
-          for (auto v : dim_u) d.push_back(static_cast<size_t>(v));
-          dims_r_.insert(psd_v_t(varnames[i], d));
-        } else {
-          if (1 == eelen) {
-            dims_r_.insert(psd_v_t(varnames[i], empty_vec_ui_));
-          } else {
-            dims_r_.insert(
-                psd_v_t(varnames[i], std::vector<size_t>(1, static_cast<size_t>(eelen))));
+        Rcpp::NumericVector input(ee);
+        std::vector<double> reals(input.begin(), input.end());
+        std::vector<int> ints;
+        ints.reserve(input.size());
+        bool is_integer_valued = true;
+        for (R_xlen_t j = 0; j < input.size(); ++j) {
+          const double value = input[j];
+          if (!std::isfinite(value) || std::trunc(value) != value
+              || value < static_cast<double>(std::numeric_limits<int>::min())
+              || value > static_cast<double>(std::numeric_limits<int>::max())) {
+            is_integer_valued = false;
+            break;
           }
+          ints.push_back(static_cast<int>(value));
         }
+        vals_r_.emplace(name, std::move(reals));
+        if (is_integer_valued) {
+          vals_i_.emplace(name, std::move(ints));
+        }
+        dims_.emplace(name, std::move(dims));
       }
       // else: ignore non-numeric data
     }
@@ -84,14 +110,13 @@ class r_data_context : public stan::io::var_context {
 
   // var_context interface
   bool contains_r(const std::string& name) const override {
-    return contains_r_only(name) || contains_i(name);
+    return vals_r_.count(name) > 0;
   }
 
   std::vector<double> vals_r(const std::string& name) const override {
-    if (contains_r(name)) {
-      SEXP ee = list_[name.c_str()];
-      Rcpp::NumericVector nv = Rcpp::as<Rcpp::NumericVector>(ee);
-      return std::vector<double>(nv.begin(), nv.end());
+    const auto it = vals_r_.find(name);
+    if (it != vals_r_.end()) {
+      return it->second;
     }
     return std::vector<double>();
   }
@@ -101,55 +126,42 @@ class r_data_context : public stan::io::var_context {
   }
 
   std::vector<size_t> dims_r(const std::string& name) const override {
-    if (contains_r_only(name)) {
-      return dims_r_.find(name)->second;
-    } else if (contains_i(name)) {
-      return dims_i_.find(name)->second;
+    const auto it = dims_.find(name);
+    if (it != dims_.end()) {
+      return it->second;
     }
     return empty_vec_ui_;
   }
 
   bool contains_i(const std::string& name) const override {
-    // Check dims_i_ first, then fall back to dims_r_
-    // (R often passes integer-valued data as doubles, e.g., 10 instead of 10L)
-    if (dims_i_.count(name) > 0) return true;
-    return dims_r_.count(name) > 0;
+    return vals_i_.count(name) > 0;
   }
 
   std::vector<int> vals_i(const std::string& name) const override {
-    if (dims_i_.count(name) > 0) {
-      SEXP ee = list_[name.c_str()];
-      return Rcpp::as<std::vector<int>>(ee);
-    } else if (dims_r_.count(name) > 0) {
-      // Convert numeric (double) values to int
-      SEXP ee = list_[name.c_str()];
-      Rcpp::NumericVector nv = Rcpp::as<Rcpp::NumericVector>(ee);
-      std::vector<int> out(nv.size());
-      for (R_xlen_t j = 0; j < nv.size(); ++j)
-        out[j] = static_cast<int>(nv[j]);
-      return out;
+    const auto it = vals_i_.find(name);
+    if (it != vals_i_.end()) {
+      return it->second;
     }
     return std::vector<int>();
   }
 
   std::vector<size_t> dims_i(const std::string& name) const override {
-    if (dims_i_.count(name) > 0) {
-      return dims_i_.find(name)->second;
-    } else if (dims_r_.count(name) > 0) {
-      return dims_r_.find(name)->second;
+    const auto it = dims_.find(name);
+    if (it != dims_.end()) {
+      return it->second;
     }
     return empty_vec_ui_;
   }
 
   void names_r(std::vector<std::string>& names) const override {
     names.resize(0);
-    for (auto it = dims_r_.begin(); it != dims_r_.end(); ++it)
+    for (auto it = vals_r_.begin(); it != vals_r_.end(); ++it)
       names.push_back(it->first);
   }
 
   void names_i(std::vector<std::string>& names) const override {
     names.resize(0);
-    for (auto it = dims_i_.begin(); it != dims_i_.end(); ++it)
+    for (auto it = vals_i_.begin(); it != vals_i_.end(); ++it)
       names.push_back(it->first);
   }
 

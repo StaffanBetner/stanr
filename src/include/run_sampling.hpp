@@ -2,6 +2,9 @@
 #define NEWSTAN_RUN_SAMPLING_HPP
 
 #include <Rcpp.h>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <stan/io/array_var_context.hpp>
 #include <stan/services/sample/fixed_param.hpp>
@@ -37,6 +40,7 @@ namespace newstan {
     std::string engine    = get_string(args, "engine", "nuts");
     std::string metric    = get_string(args, "metric", "diag_e");
     bool adapt_engaged    = get_bool(args, "adapt_engaged", true);
+    bool verbose          = get_bool(args, "verbose", true);
 
     unsigned int seed           = Rcpp::as<unsigned int>(args["seed"]);
     unsigned int chain_id       = Rcpp::as<unsigned int>(args["chain_id"]);
@@ -59,20 +63,80 @@ namespace newstan {
     double t0         = get_double(args, "t0", 10.0);
 
     // Adaptation window parameters (for diag_e and dense_e metrics)
-    unsigned int init_buffer = get_uint(args, "init_buffer", 75);
-    unsigned int term_buffer = get_uint(args, "term_buffer", 50);
-    unsigned int window      = get_uint(args, "window", 25);
+    int init_buffer_arg = get_int(args, "init_buffer", 75);
+    int term_buffer_arg = get_int(args, "term_buffer", 50);
+    int window_arg      = get_int(args, "window", 25);
+
+    newstan::r_logger logger(verbose);
+    auto config_error = [&logger](const std::string& message) {
+      logger.error(message);
+      logger.flush();
+      return Rcpp::List::create(
+          Rcpp::_["samples"] = Rcpp::DataFrame::create(),
+          Rcpp::_["return_code"] = static_cast<int>(stan::services::error_codes::CONFIG),
+          Rcpp::_["method"] = "sampling");
+    };
+
+    if (num_chains < 1) {
+      return config_error("chains must be at least 1.");
+    }
+    if (num_warmup < 0 || num_samples < 0) {
+      return config_error("num_warmup and num_samples must be non-negative.");
+    }
+    if (num_thin < 1) {
+      return config_error("thin must be at least 1.");
+    }
+    if (refresh < 0) {
+      return config_error("refresh must be non-negative.");
+    }
+    if (!std::isfinite(init_radius) || init_radius < 0) {
+      return config_error("init_radius must be finite and non-negative.");
+    }
+    if (!std::isfinite(stepsize) || stepsize <= 0
+        || !std::isfinite(stepsize_jitter) || stepsize_jitter < 0
+        || stepsize_jitter > 1) {
+      return config_error("stepsize must be positive and stepsize_jitter must be in [0, 1].");
+    }
+    if (max_depth < 1 || !std::isfinite(int_time) || int_time <= 0) {
+      return config_error("max_depth must be at least 1 and int_time must be positive.");
+    }
+    if (!std::isfinite(delta) || delta <= 0 || delta >= 1
+        || !std::isfinite(gamma) || gamma <= 0
+        || !std::isfinite(kappa) || kappa <= 0 || kappa > 1
+        || !std::isfinite(t0) || t0 <= 0) {
+      return config_error("Invalid adaptation parameters.");
+    }
+    if (init_buffer_arg < 0 || term_buffer_arg < 0 || window_arg < 0) {
+      return config_error("Adaptation window parameters must be non-negative.");
+    }
+    if (algorithm != "hmc" && algorithm != "fixed_param") {
+      return config_error("Unknown sampling algorithm: " + algorithm);
+    }
+    if (algorithm == "hmc" && engine != "nuts" && engine != "static") {
+      return config_error("Unknown HMC engine: " + engine);
+    }
+    if (metric != "unit_e" && metric != "diag_e" && metric != "dense_e") {
+      return config_error("Unknown metric: " + metric);
+    }
+
+    const auto expected_rows_64 =
+        static_cast<int64_t>(num_samples) / num_thin
+        + (save_warmup ? static_cast<int64_t>(num_warmup) / num_thin : 0);
+    if (expected_rows_64 > std::numeric_limits<int>::max()) {
+      return config_error("Requested number of saved draws is too large.");
+    }
+    int expected_rows = static_cast<int>(expected_rows_64);
+    unsigned int init_buffer = static_cast<unsigned int>(init_buffer_arg);
+    unsigned int term_buffer = static_cast<unsigned int>(term_buffer_arg);
+    unsigned int window = static_cast<unsigned int>(window_arg);
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
-
-    // Compute expected rows per chain for preallocation
-    int expected_rows = ((save_warmup ? num_warmup : 0) + num_samples) / num_thin;
 
     // ── Build per-chain contexts and writers ────────────────────────
     std::vector<std::shared_ptr<newstan::r_data_context>> init_ctxs(num_chains);
     std::vector<newstan::r_sample_writer> init_writers;
     std::vector<newstan::r_sample_writer> sample_writers;
-    std::vector<newstan::r_diagnostic_writer> diag_writers;
+    std::vector<newstan::r_discard_writer> diag_writers;
     std::vector<stan::callbacks::json_writer<std::ostringstream>> metric_writers;
 
     init_writers.reserve(num_chains);
@@ -84,7 +148,7 @@ namespace newstan {
       init_ctxs[i] = std::make_shared<newstan::r_data_context>(init_list);
       init_writers.emplace_back(1);
       sample_writers.emplace_back(expected_rows);
-      diag_writers.emplace_back(expected_rows);
+      diag_writers.emplace_back();
       metric_writers.emplace_back(std::make_unique<std::ostringstream>());
     }
 
@@ -99,6 +163,9 @@ namespace newstan {
 
     if (metric_supplied) {
       Rcpp::List inv_metric_list = Rcpp::as<Rcpp::List>(args["inv_metric"]);
+      if (inv_metric_list.size() != 1 && inv_metric_list.size() != num_chains) {
+        return config_error("inv_metric must contain one metric or one metric per chain.");
+      }
       size_t num_params = model.num_params_r();
 
       // Determine if user provided one metric (recycled) or one per chain
@@ -129,8 +196,10 @@ namespace newstan {
       }
     }
 
-    newstan::r_interrupt interrupt;
-    newstan::r_logger logger;
+    // Multi-chain Stan services call this callback from TBB workers, where
+    // Rcpp interrupt polling is unsafe. Single-chain services run on R's
+    // thread and can safely poll for Ctrl-C.
+    newstan::r_interrupt interrupt(num_chains == 1);
 
     int return_code = stan::services::error_codes::CONFIG;
 

@@ -162,7 +162,7 @@ sampling <- function(
     init_buffer = as.integer(init_buffer),
     term_buffer = as.integer(term_buffer),
     window = as.integer(window),
-    init = if (is.list(init)) init else list(),
+    init = normalize_init(init),
     inv_metric = inv_metric,
     inv_metric_na = inv_metric_na,
     verbose = as.logical(verbose)

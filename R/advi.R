@@ -65,7 +65,7 @@ advi <- function(
     output_samples = as.integer(output_samples),
     verbose = as.logical(verbose),
     data = data,
-    init = if (is.list(init)) init else list()
+    init = normalize_init(init)
   )
 
   dat_ptr <- .Call(`r_data_context`, data)
@@ -75,7 +75,12 @@ advi <- function(
     result <- .Call(`newstan_run`, mod_ptr, args)
   )
 
+  if (result$return_code != 0) {
+    return(list(draws = NULL, return_code = result$return_code, args = args))
+  }
+
   list(
+    draws = posterior::as_draws_df(result$draws),
     return_code = result$return_code,
     args = args
   )

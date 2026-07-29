@@ -40,7 +40,7 @@ gradient_check <- function(
     init_radius = as.double(init_radius),
     verbose = as.logical(verbose),
     data = data,
-    init = if (is.list(init)) init else list()
+    init = normalize_init(init)
   )
 
   dat_ptr <- .Call(`r_data_context`, data)
@@ -50,7 +50,7 @@ gradient_check <- function(
     result <- .Call(`newstan_run`, mod_ptr, args)
   )
 
-  n_failed <- as.integer(result$return_code)
+  n_failed <- as.integer(result$num_failed)
 
   if (n_failed == 0L) {
     message("[newstan] All gradient tests passed.")

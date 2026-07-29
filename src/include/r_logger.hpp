@@ -4,6 +4,7 @@
 #include <Rcpp.h>
 #include <stan/callbacks/logger.hpp>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -33,13 +34,17 @@ class r_logger : public stan::callbacks::logger {
 
   std::vector<entry> buffer_;
   std::mutex mutex_;
+  bool verbose_;
 
   void push(level lv, const std::string& msg) {
+    if (!verbose_ && (lv == level::debug || lv == level::info)) return;
     std::lock_guard<std::mutex> lock(mutex_);
     buffer_.push_back({lv, msg});
   }
 
  public:
+  explicit r_logger(bool verbose = true) : verbose_(verbose) {}
+
   // ── debug ──────────────────────────────────────────────────────
   void debug(const std::string& message) override { push(level::debug, message); }
 
@@ -82,11 +87,19 @@ class r_logger : public stan::callbacks::logger {
    * to stdout and error/fatal to stderr, then clears the buffer.
    */
   void flush() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& e : buffer_) {
+    std::vector<entry> entries;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      entries.swap(buffer_);
+    }
+    for (const auto& e : entries) {
       switch (e.lv) {
         case level::debug:
+          Rcpp::Rcout << e.msg << std::endl;
+          break;
         case level::info:
+          Rcpp::Rcout << e.msg << std::endl;
+          break;
         case level::warn:
           Rcpp::Rcout << e.msg << std::endl;
           break;
@@ -96,7 +109,6 @@ class r_logger : public stan::callbacks::logger {
           break;
       }
     }
-    buffer_.clear();
   }
 };
 

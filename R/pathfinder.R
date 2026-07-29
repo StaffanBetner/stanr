@@ -56,7 +56,7 @@ pathfinder <- function(
     num_multi_draws = as.integer(num_multi_draws),
     verbose = as.logical(verbose),
     data = data,
-    init = if (is.list(init)) init else list()
+    init = normalize_init(init)
   )
 
   dat_ptr <- .Call(`r_data_context`, data)

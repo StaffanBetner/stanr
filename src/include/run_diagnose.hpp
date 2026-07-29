@@ -2,11 +2,11 @@
 #define NEWSTAN_RUN_DIAGNOSE_HPP
 
 #include <Rcpp.h>
-#include <stan/callbacks/stream_logger.hpp>
 #include <stan/services/diagnose/diagnose.hpp>
 #include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
+#include "r_logger.hpp"
 #include "r_data_context.hpp"
 
 namespace newstan {
@@ -25,8 +25,7 @@ namespace newstan {
 
     newstan::r_data_context init_ctx(init_list);
     newstan::r_sample_writer sample_writer;
-    stan::callbacks::stream_logger logger(Rcpp::Rcout, Rcpp::Rcout, Rcpp::Rcout,
-                                          Rcpp::Rcerr, Rcpp::Rcerr);
+    newstan::r_logger logger(verbose);
     newstan::r_interrupt interrupt;
 
     // diagnose returns number of failed parameters (not error code)
@@ -36,6 +35,7 @@ namespace newstan {
         interrupt, logger,
         /*init_writer=*/sample_writer, sample_writer);
 
+    logger.flush();
     return Rcpp::List::create(
       Rcpp::_["num_failed"] = n_failed,
       Rcpp::_["return_code"] = n_failed == 0 ? 0 : 1,

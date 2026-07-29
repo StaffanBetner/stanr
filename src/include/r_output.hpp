@@ -148,6 +148,21 @@ class r_sample_writer : public stan::callbacks::writer {
 // Uses Eigen::MatrixXd for cache-friendly storage during parallel sampling.
 // ===================================================================
 
+// The Stan sampler writes diagnostics to a separate callback even though the
+// sample callback already receives the sampler columns.  Sampling currently
+// exposes one combined sample data frame, so retaining a second matrix only
+// duplicates memory and work.
+class r_discard_writer : public stan::callbacks::writer {
+ public:
+  void operator()(const std::vector<std::string>&) override {}
+  void operator()(const std::vector<double>&) override {}
+  void operator()() override {}
+  void operator()(const std::string&) override {}
+  void operator()(const Eigen::MatrixXd&) override {}
+  void operator()(const Eigen::Matrix<double, -1, 1>&) override {}
+  void operator()(const Eigen::Matrix<double, 1, -1>&) override {}
+};
+
 class r_diagnostic_writer : public stan::callbacks::writer {
  private:
   std::vector<std::string> colnames_;

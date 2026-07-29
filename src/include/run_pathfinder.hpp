@@ -2,7 +2,6 @@
 #define NEWSTAN_RUN_PATHFINDER
 
 #include <Rcpp.h>
-#include <stan/callbacks/stream_logger.hpp>
 #include <stan/services/pathfinder/single.hpp>
 #include <stan/services/pathfinder/multi.hpp>
 #include <stan/callbacks/json_writer.hpp>
@@ -11,6 +10,7 @@
 #include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
+#include "r_logger.hpp"
 #include "r_data_context.hpp"
 
 namespace newstan {
@@ -32,9 +32,10 @@ namespace newstan {
                         ? Rcpp::as<Rcpp::List>(args["init"])
                         : data_list;
 
-    stan::callbacks::stream_logger logger(Rcpp::Rcout, Rcpp::Rcout, Rcpp::Rcout,
-                                          Rcpp::Rcerr, Rcpp::Rcerr);
-    newstan::r_interrupt interrupt;
+    newstan::r_logger logger(verbose);
+    // Multi-path Pathfinder executes callbacks from TBB workers; polling R
+    // there is unsafe. Single-path execution remains on the R thread.
+    newstan::r_interrupt interrupt(num_paths <= 1);
 
     int return_code;
 
@@ -56,6 +57,7 @@ namespace newstan {
           metric_writer,
           true);  // calculate_lp
 
+      logger.flush();
       return Rcpp::List::create(
         Rcpp::_["return_code"] = return_code,
         Rcpp::_["method"] = "pathfinder",
@@ -118,6 +120,7 @@ namespace newstan {
           true,   // calculate_lp
           true);  // psis_resample
 
+      logger.flush();
       return Rcpp::List::create(
         Rcpp::_["return_code"] = return_code,
         Rcpp::_["method"] = "pathfinder",

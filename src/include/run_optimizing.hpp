@@ -2,12 +2,12 @@
 #define NEWSTAN_RUN_OPTIMIZING_HPP
 
 #include <Rcpp.h>
-#include <stan/callbacks/stream_logger.hpp>
 #include <stan/services/optimize/bfgs.hpp>
 #include <stan/services/optimize/lbfgs.hpp>
 #include <stan/services/optimize/newton.hpp>
 #include "get_arg.hpp"
 #include "r_output.hpp"
+#include "r_logger.hpp"
 #include "r_interrupt.hpp"
 #include "r_data_context.hpp"
 
@@ -30,8 +30,7 @@ namespace newstan {
 
     newstan::r_data_context init_ctx(init_list);
     newstan::r_sample_writer sample_writer;
-    stan::callbacks::stream_logger logger(Rcpp::Rcout, Rcpp::Rcout, Rcpp::Rcout,
-                                          Rcpp::Rcerr, Rcpp::Rcerr);
+    newstan::r_logger logger(verbose);
     newstan::r_interrupt interrupt;
 
     int return_code = stan::services::error_codes::CONFIG;
@@ -97,6 +96,7 @@ namespace newstan {
       }
     }
 
+    logger.flush();
     return Rcpp::List::create(
       Rcpp::_["par"] = mat,
       Rcpp::_["value"] = lp_val,
