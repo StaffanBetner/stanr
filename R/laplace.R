@@ -13,12 +13,14 @@
 #' @return An S3 object of class `"newstan_laplace"` with draws from the approximation.
 #'
 #' @export
-laplace <- function(object,
-                    fit,
-                    draws = 2000,
-                    seed = NA,
-                    verbose = FALSE,
-                    ...) {
+laplace <- function(
+  object,
+  fit,
+  draws = 2000,
+  seed = NA,
+  verbose = FALSE,
+  ...
+) {
   if (!inherits(object, "newstan_fit")) {
     stop("'object' must be a newstan_fit object.")
   }
@@ -26,7 +28,9 @@ laplace <- function(object,
     stop("'fit' must be a newstan_optim result from optimizing().")
   }
 
-  if (is.na(seed)) seed <- as.integer(runif(1, 1, 2^31 - 1))
+  if (is.na(seed)) {
+    seed <- as.integer(runif(1, 1, 2^31 - 1))
+  }
 
   # TODO: Implement Laplace approximation
   # This requires the mode from optimization and Hessian computation

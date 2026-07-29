@@ -110,20 +110,33 @@ class r_data_context : public stan::io::var_context {
   }
 
   bool contains_i(const std::string& name) const override {
-    return dims_i_.count(name) > 0;
+    // Check dims_i_ first, then fall back to dims_r_
+    // (R often passes integer-valued data as doubles, e.g., 10 instead of 10L)
+    if (dims_i_.count(name) > 0) return true;
+    return dims_r_.count(name) > 0;
   }
 
   std::vector<int> vals_i(const std::string& name) const override {
-    if (contains_i(name)) {
+    if (dims_i_.count(name) > 0) {
       SEXP ee = list_[name.c_str()];
       return Rcpp::as<std::vector<int>>(ee);
+    } else if (dims_r_.count(name) > 0) {
+      // Convert numeric (double) values to int
+      SEXP ee = list_[name.c_str()];
+      Rcpp::NumericVector nv = Rcpp::as<Rcpp::NumericVector>(ee);
+      std::vector<int> out(nv.size());
+      for (R_xlen_t j = 0; j < nv.size(); ++j)
+        out[j] = static_cast<int>(nv[j]);
+      return out;
     }
     return std::vector<int>();
   }
 
   std::vector<size_t> dims_i(const std::string& name) const override {
-    if (contains_i(name)) {
+    if (dims_i_.count(name) > 0) {
       return dims_i_.find(name)->second;
+    } else if (dims_r_.count(name) > 0) {
+      return dims_r_.find(name)->second;
     }
     return empty_vec_ui_;
   }

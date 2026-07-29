@@ -1,30 +1,32 @@
-test_that("stan_model() accepts file and code inputs", {
-  skip_if_not(requireNamespace("digest", quietly = TRUE))
-  skip_if_not(requireNamespace("jsonlite", quietly = TRUE))
-
-  # Test that stan_model() validates inputs
-  expect_error(stan_model(), "Either 'file' or 'code' must be provided")
-  expect_error(stan_model(file = "/nonexistent.stan"), "File not found")
+test_that("stan_model compiles from file", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(file = path)
+  expect_true(is.environment(mod))
+  expect_true(exists("new_model", envir = mod))
 })
 
-test_that("stan_model() returns a newstan_fit object", {
-  skip_if_not(requireNamespace("digest", quietly = TRUE))
-  skip_if_not(requireNamespace("jsonlite", quietly = TRUE))
-
-  # This test will fail until QuickJSR is integrated, but checks the interface
-  model_file <- system.file("test-models", "bernoulli.stan", package = "newstan")
-
-  # If the file exists in the package, try loading it
-  if (model_file != "") {
-    # The compilation will fail without QuickJSR, so we just check the interface
-    expect_error(
-      stan_model(file = model_file),
-      NA  # Will pass once QuickJSR is integrated
-    )
-  }
+test_that("stan_model compiles from code", {
+  code <- '
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+  '
+  mod <- stan_model(code = code)
+  expect_true(is.environment(mod))
+  expect_true(exists("new_model", envir = mod))
 })
 
-test_that("stan_model() validates arguments", {
-  expect_error(stan_model(file = NULL, code = NULL), "Either 'file' or 'code'")
-  expect_error(stan_model(file = "x.stan", code = "model {}"), "either 'file' or 'code'")
+test_that("stan_model errors when neither file nor code given", {
+  expect_snapshot(stan_model(), error = TRUE)
+})
+
+test_that("stan_model errors when both file and code given", {
+  path <- test_path("test-models/bernoulli.stan")
+  expect_snapshot(
+    stan_model(file = path, code = "parameters { real x; }"),
+    error = TRUE
+  )
+})
+
+test_that("stan_model errors on missing file", {
+  expect_snapshot(stan_model(file = "nonexistent.stan"), error = TRUE)
 })

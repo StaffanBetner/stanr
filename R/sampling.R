@@ -1,70 +1,75 @@
-#' Run MCMC sampling on a fitted Stan model
+#' Run MCMC sampling on a Stan model
 #'
-#' @param object A `newstan_fit` object returned by [stan_model()]
-#' @param iter_warmup Number of warmup iterations (default: 1000)
-#' @param iter_sampling Number of post-warmup samples (default: 1000)
-#' @param thin Thinning interval (default: 1)
-#' @param save_warmup Save warmup samples (default: FALSE)
-#' @param chains Number of parallel chains (default: 1). Chains are run in parallel
-#'   via TBB `parallel_for` inside the Stan services.
-#' @param chain_id Starting chain ID for RNG advancement (default: 1)
-#' @param seed Random seed (NA = random)
-#' @param init Initial values (numeric vector, or `"random"`)
-#' @param init_radius Radius for random initialization (default: 2)
-#' @param algorithm Sampler algorithm: `"NUTS"`, `"NUTS_FIXED"`, `"HMC"`, or `"Fixed_param"`
-#'   (default: `"NUTS"`)
-#' @param metric Euclidean metric: `"unit_e"`, `"diag_e"`, or `"dense_e"` (default: `"diag_e"`)
-#' @param stepsize Initial stepsize (NA = adapt)
-#' @param stepsize_jitter Uniform jitter for stepsize (default: 0)
-#' @param max_depth Maximum tree depth for NUTS (default: 10)
-#' @param delta Target acceptance rate (default: 0.8)
-#' @param gamma Adaptation gamma (default: 0.05)
-#' @param kappa Adaptation kappa (default: 0.75)
-#' @param t0 Adaptation t0 (default: 10)
-#' @param init_buffer Warmup buffer width (default: 75)
-#' @param term_buffer Warmup terminal buffer (default: 25)
-#' @param window Adaptation window size (default: 25)
-#' @param refresh Output refresh frequency (iterations between log messages, default: 100)
-#' @param verbose Print progress messages (default: TRUE)
-#' @param ... Additional arguments (currently unused)
+#' @param stanmod A model environment returned by [stan_model()].
+#' @param data Named list of data variables to pass to the model.
+#' @param iter_warmup Number of warmup iterations (default: 1000).
+#' @param iter_sampling Number of post-warmup samples (default: 1000).
+#' @param thin Thinning interval (default: 1).
+#' @param save_warmup Save warmup samples (default: FALSE).
+#' @param chains Number of parallel chains (default: 1). Chains are run in
+#'   parallel via TBB `parallel_for` inside the Stan services.
+#' @param chain_id Starting chain ID for RNG advancement (default: 1).
+#' @param seed Random seed (NA = random).
+#' @param init Initial values (numeric vector, or `"random"`).
+#' @param init_radius Radius for random initialization (default: 2).
+#' @param algorithm Sampler algorithm: `"NUTS"`, `"NUTS_FIXED"`, `"HMC"`, or
+#'   `"Fixed_param"` (default: `"NUTS"`).
+#' @param metric Euclidean metric: `"unit_e"`, `"diag_e"`, or `"dense_e"`
+#'   (default: `"diag_e"`).
+#' @param stepsize Initial stepsize (NA = adapt).
+#' @param stepsize_jitter Uniform jitter for stepsize (default: 0).
+#' @param max_depth Maximum tree depth for NUTS (default: 10).
+#' @param delta Target acceptance rate (default: 0.8).
+#' @param gamma Adaptation gamma (default: 0.05).
+#' @param kappa Adaptation kappa (default: 0.75).
+#' @param t0 Adaptation t0 (default: 10).
+#' @param init_buffer Warmup buffer width (default: 75).
+#' @param term_buffer Warmup terminal buffer (default: 50).
+#' @param window Adaptation window size (default: 25).
+#' @param refresh Output refresh frequency (iterations between log messages,
+#'   default: 100).
+#' @param verbose Print progress messages (default: TRUE).
+#' @param ... Additional arguments (currently unused).
 #'
-#' @return An S3 object of class `"newstan_sampler"` containing:
-#'   - `samples`: a data.frame with parameter draws, sampler diagnostics, and a `chain` column
-#'   - `return_code`: integer status code
-#'   - `args`: named list of sampling arguments
+#' @return A list containing:
+#'   - `draws`: a `posterior::as_draws_df` object with parameter draws.
+#'   - `diagnostics`: a `posterior::as_draws_df` object with sampler diagnostics.
+#'   - `return_code`: integer status code.
+#'   - `args`: named list of sampling arguments.
 #'
 #' @export
-sampling <- function(stanmod,
-                     data,
-                     iter_warmup = 1000,
-                     iter_sampling = 1000,
-                     thin = 1,
-                     save_warmup = FALSE,
-                     chains = 1,
-                     chain_id = 1,
-                     seed = NA,
-                     init = 0,
-                     init_radius = 2,
-                     algorithm = "NUTS",
-                     metric = "diag_e",
-                     stepsize = 1,
-                     stepsize_jitter = 0,
-                     max_depth = 10,
-                     delta = 0.8,
-                     gamma = 0.05,
-                     kappa = 0.75,
-                     t0 = 10,
-                     init_buffer = 75,
-                     term_buffer = 50,
-                     window = 25,
-                     refresh = 100,
-                     verbose = TRUE,
-                     ...) {
+sampling <- function(
+  stanmod,
+  data,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1,
+  save_warmup = FALSE,
+  chains = 1,
+  chain_id = 1,
+  seed = NA,
+  init = 0,
+  init_radius = 2,
+  algorithm = "NUTS",
+  metric = "diag_e",
+  stepsize = 1,
+  stepsize_jitter = 0,
+  max_depth = 10,
+  delta = 0.8,
+  gamma = 0.05,
+  kappa = 0.75,
+  t0 = 10,
+  init_buffer = 75,
+  term_buffer = 50,
+  window = 25,
+  refresh = 100,
+  verbose = TRUE,
+  ...
+) {
   # Handle seed
   if (is.na(seed)) {
     seed <- as.integer(runif(1, 1, 2^31 - 1))
   }
-
 
   # Build args list for .Call
   args <- list(
@@ -90,8 +95,8 @@ sampling <- function(stanmod,
     init_buffer = as.integer(init_buffer),
     term_buffer = as.integer(term_buffer),
     window = as.integer(window),
-    init = list(theta = 0.5),
-    verbose = TRUE
+    init = if (is.list(init)) init else list(),
+    verbose = as.logical(verbose)
   )
 
   dat_ptr <- .Call(`r_data_context`, data)
@@ -104,10 +109,31 @@ sampling <- function(stanmod,
   # Build result object
   draw_names <- colnames(result$samples)
   draws <- posterior::as_draws_df(result$samples)
-  diagnostic_vars <- c("accept_stat__", "stepsize__", "treedepth__", "n_leapfrog__", "divergent__", "energy__")
-  par_vars <- draw_names[!(draw_names %in% diagnostic_vars) & draw_names != ".chain"]
+  diagnostic_vars <- c(
+    "accept_stat__",
+    "stepsize__",
+    "treedepth__",
+    "n_leapfrog__",
+    "divergent__",
+    "energy__"
+  )
+  par_vars <- draw_names[
+    !(draw_names %in% diagnostic_vars) & draw_names != ".chain"
+  ]
+  if (algorithm == "Fixed_param") {
+    diagnostics <- posterior::draws_df("stepsize__" = NA,
+                                       "treedepth__" = NA,
+                                       "n_leapfrog__" = NA,
+                                       "divergent__" = NA,
+                                       "energy__" = NA)
+  } else {
+    diagnostics <- posterior::subset_draws(draws, variable = diagnostic_vars)
+  }
+
   list(
     draws = posterior::subset_draws(draws, par_vars),
-    diagnostics = posterior::subset_draws(draws, diagnostic_vars)
+    diagnostics = diagnostics,
+    return_code = result$return_code,
+    args = args
   )
 }

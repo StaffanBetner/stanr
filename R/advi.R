@@ -1,46 +1,52 @@
-#' Run ADVI (Automatic Differentiable Variational Inference)
+#' Run ADVI (Automatic Differentiation Variational Inference)
 #'
-#' @param object A `newstan_fit` object
-#' @param algorithm Variational family: `"fullrank"` or `"meanfield"` (default: `"fullrank"`)
-#' @param iter Maximum iterations (default: 10000)
-#' @param grad_samples MC samples for gradient estimate (default: 1)
-#' @param elbo_samples MC samples for ELBO estimate (default: 100)
-#' @param tol_rel_obj Convergence tolerance (default: 0.01)
-#' @param eta Stepping parameter (default: 1.0)
-#' @param adapt_engaged Enable eta adaptation (default: TRUE)
-#' @param adapt_iter Adaptation iterations (default: 50)
-#' @param eval_elbo Evaluate ELBO every Nth iteration (default: 100)
-#' @param output_samples Posterior samples to draw (default: 1000)
-#' @param seed Random seed
-#' @param init Initial values
-#' @param init_radius Initialization radius (default: 2)
-#' @param verbose Print progress (default: TRUE)
-#' @param ... Unused
+#' @param stanmod A model environment returned by [stan_model()].
+#' @param data Named list of data variables to pass to the model.
+#' @param algorithm Variational family: `"fullrank"` or `"meanfield"`
+#'   (default: `"fullrank"`).
+#' @param iter Maximum iterations (default: 10000).
+#' @param grad_samples MC samples for gradient estimate (default: 1).
+#' @param elbo_samples MC samples for ELBO estimate (default: 100).
+#' @param tol_rel_obj Convergence tolerance (default: 0.01).
+#' @param eta Stepping parameter (default: 1.0).
+#' @param adapt_engaged Enable eta adaptation (default: TRUE).
+#' @param adapt_iter Adaptation iterations (default: 50).
+#' @param eval_elbo Evaluate ELBO every Nth iteration (default: 100).
+#' @param output_samples Posterior samples to draw (default: 1000).
+#' @param seed Random seed (NA = random).
+#' @param init Initial values (numeric vector, or `"random"`).
+#' @param init_radius Initialization radius (default: 2).
+#' @param verbose Print progress (default: TRUE).
+#' @param ... Unused.
 #'
-#' @return An S3 object of class `"newstan_advi"` with variational approximation results.
+#' @return A list containing:
+#'   - `draws`: a `posterior::as_draws_df` object with variational draws.
+#'   - `return_code`: integer status code.
+#'   - `args`: named list of ADVI arguments.
 #'
 #' @export
-advi <- function(object,
-                 algorithm = "fullrank",
-                 iter = 10000,
-                 grad_samples = 1,
-                 elbo_samples = 100,
-                 tol_rel_obj = 0.01,
-                 eta = 1.0,
-                 adapt_engaged = TRUE,
-                 adapt_iter = 50,
-                 eval_elbo = 100,
-                 output_samples = 1000,
-                 seed = NA,
-                 init = 0,
-                 init_radius = 2,
-                 verbose = TRUE,
-                 ...) {
-  if (!inherits(object, "newstan_fit")) {
-    stop("'object' must be a newstan_fit object.")
+advi <- function(
+  stanmod,
+  data,
+  algorithm = "fullrank",
+  iter = 10000,
+  grad_samples = 1,
+  elbo_samples = 100,
+  tol_rel_obj = 0.01,
+  eta = 1.0,
+  adapt_engaged = TRUE,
+  adapt_iter = 50,
+  eval_elbo = 100,
+  output_samples = 1000,
+  seed = NA,
+  init = 0,
+  init_radius = 2,
+  verbose = TRUE,
+  ...
+) {
+  if (is.na(seed)) {
+    seed <- as.integer(runif(1, 1, 2^31 - 1))
   }
-
-  if (is.na(seed)) seed <- as.integer(runif(1, 1, 2^31 - 1))
 
   args <- list(
     method = "advi",
@@ -58,26 +64,19 @@ advi <- function(object,
     eval_elbo = as.integer(eval_elbo),
     output_samples = as.integer(output_samples),
     verbose = as.logical(verbose),
-    data = .prepare_data(object$data),
-    init = .prepare_init(init, object)
+    data = data,
+    init = if (is.list(init)) init else list()
   )
 
-  dll_handle <- object$dll
-  result <- .Call(dll_handle[["newstan_run"]], object$dll_ptr, args)
-
-  structure(
-    list(
-      return_code = result$return_code,
-      method = "advi",
-      algorithm = algorithm,
-      args = args
-    ),
-    class = "newstan_advi"
+  dat_ptr <- .Call(`r_data_context`, data)
+  mod_ptr <- stanmod$new_model(dat_ptr, seed)
+  withr::with_envvar(
+    c(STAN_NUM_THREADS = 4),
+    result <- .Call(`newstan_run`, mod_ptr, args)
   )
-}
 
-#' @export
-print.newstan_advi <- function(x, ...) {
-  cat(sprintf("newstan ADVI: %s, return code %d\n", x$algorithm, x$return_code))
-  invisible(x)
+  list(
+    return_code = result$return_code,
+    args = args
+  )
 }

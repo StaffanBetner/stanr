@@ -14,8 +14,10 @@ compile_model <- function(cache_dir, cpp_code, model_name) {
   writeLines(cpp_code, cpp_file)
 
   # Header paths
-  newstan_stan <- file.path(system.file("", package = "newstan"),
-                            "inst/include/newstan/stan")
+  newstan_stan <- file.path(
+    system.file("", package = "newstan"),
+    "inst/include/newstan/stan"
+  )
   eigen_include <- system.file("include", package = "RcppEigen")
   boost_include <- system.file("include", package = "BH")
   tbb_include <- system.file("include", package = "RcppParallel")
@@ -23,11 +25,21 @@ compile_model <- function(cache_dir, cpp_code, model_name) {
 
   # Build compilation command
   inc_flags <- paste0(
-    "-I'", newstan_stan, "' ",
-    "-I'", eigen_include, "' ",
-    "-I'", boost_include, "' ",
-    "-I'", tbb_include, "' ",
-    "-I'", r_include, "' "
+    "-I'",
+    newstan_stan,
+    "' ",
+    "-I'",
+    eigen_include,
+    "' ",
+    "-I'",
+    boost_include,
+    "' ",
+    "-I'",
+    tbb_include,
+    "' ",
+    "-I'",
+    r_include,
+    "' "
   )
 
   def_flags <- paste0(
@@ -38,7 +50,10 @@ compile_model <- function(cache_dir, cpp_code, model_name) {
   so_file <- file.path(cache_dir, paste0(model_name, ".so"))
   cmd <- sprintf(
     "g++ -shared -fPIC -O2 %s%s-o '%s' '%s' 2>&1",
-    inc_flags, def_flags, so_file, cpp_file
+    inc_flags,
+    def_flags,
+    so_file,
+    cpp_file
   )
 
   # Compile and capture output

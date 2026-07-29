@@ -10,8 +10,13 @@
 #' @return An S3 object of class `"newstan_fit"` wrapping a compiled Stan model.
 #'
 #' @export
-stan_model <- function(file = NULL, code = NULL, model_name = NULL,
-                       verbose = FALSE) {
+stan_model <- function(
+  file = NULL,
+  code = NULL,
+  model_name = NULL,
+  verbose = FALSE,
+  force_recompile = FALSE
+) {
   # Validate inputs
   if (is.null(file) && is.null(code)) {
     stop("Either 'file' or 'code' must be provided.")
@@ -37,8 +42,9 @@ stan_model <- function(file = NULL, code = NULL, model_name = NULL,
     }
   }
 
-
-  if (verbose) message("[newstan] Compiling '", model_name, "'...")
+  if (verbose) {
+    message("[newstan] Compiling '", model_name, "'...")
+  }
 
   # Step 1: Stan -> C++ via stanc.js (QuickJSR)
   cpp_code <- stanc_process(code)
@@ -69,7 +75,12 @@ stan_model <- function(file = NULL, code = NULL, model_name = NULL,
       USE_CXX17 = 1,
       PKG_CPPFLAGS = cppflags
     ),
-    Rcpp::sourceCpp(code = paste0(cpp_code, fun_base, sep = "\n"), env = env, rebuild = TRUE, verbose = TRUE)
+    Rcpp::sourceCpp(
+      code = paste0(cpp_code, fun_base, sep = "\n"),
+      env = env,
+      rebuild = force_recompile,
+      verbose = FALSE
+    )
   )
 
   env
