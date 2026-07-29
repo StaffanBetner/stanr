@@ -11,15 +11,15 @@ Description:
     for external dependencies.
 License: MIT + file LICENSE
 Depends:
-    R (>= 4.0),
-    BH,
-    RcppEigen
+    R (>= 4.0)
 Imports:
     Rcpp (>= 1.0.0),
     RcppParallel,
     QuickJSR,
     posterior,
-    withr
+    withr,
+    BH,
+    RcppEigen
 LinkingTo:
     Rcpp,
     RcppEigen,
