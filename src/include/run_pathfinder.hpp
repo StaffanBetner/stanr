@@ -42,7 +42,7 @@ namespace newstan {
     if (num_paths <= 1) {
       // Single pathfinder
       newstan::r_data_context init_ctx(init_list);
-      newstan::r_sample_writer sample_writer;
+      newstan::r_sample_writer sample_writer(num_draws);
       stan::callbacks::json_writer<std::ostringstream> metric_writer(
           std::make_unique<std::ostringstream>());
 
@@ -76,8 +76,10 @@ namespace newstan {
         init_ctx_ptrs.push_back(std::move(ctx));
       }
 
-      // Per-path parameter writers (stan::callbacks::writer)
-      std::vector<newstan::r_sample_writer> single_param_writers(num_paths);
+      // The package returns only the PSIS-resampled draws.  Base writers are
+      // intentional no-ops: reporting them as valid would make Stan retain
+      // every per-path candidate draw even though none is exposed to R.
+      std::vector<stan::callbacks::writer> single_param_writers(num_paths);
       // Per-path diagnostic writers need structured_writer interface
       std::vector<stan::callbacks::json_writer<std::ostringstream>> single_diag_writers;
       single_diag_writers.reserve(num_paths);
@@ -86,13 +88,13 @@ namespace newstan {
       }
 
       // Final combined parameter writer
-      newstan::r_sample_writer param_writer;
+      newstan::r_sample_writer param_writer(num_multi_draws);
       // Final diagnostic writer (structured_writer)
       stan::callbacks::json_writer<std::ostringstream> diag_writer(
           std::make_unique<std::ostringstream>());
 
       // Init writers (one per path, for writing initial values)
-      std::vector<newstan::r_sample_writer> init_writers(num_paths);
+      std::vector<stan::callbacks::writer> init_writers(num_paths);
 
       return_code = stan::services::pathfinder::pathfinder_lbfgs_multi(
           model,

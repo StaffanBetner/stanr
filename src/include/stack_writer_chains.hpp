@@ -25,27 +25,17 @@ namespace newstan {
       return Rcpp::DataFrame::create();
     }
 
-    // Pre-allocate combined matrix with Eigen
-    Eigen::MatrixXd combined(total_rows, n_cols);
-
-    // Vertical concatenation using Eigen block assignment (vectorized memcpy)
-    int offset = 0;
-    for (int i = 0; i < num_chains; ++i) {
-      Eigen::MatrixXd const& mat = writers[i].to_matrix();
-      int n = writers[i].n_rows();
-      if (n > 0) {
-        combined.block(offset, 0, n, n_cols) = mat;
-        offset += n;
-      }
-    }
-
-    // Build R data.frame from combined matrix columns
+    // Build the final R columns directly.  Avoiding an intermediate combined
+    // Eigen matrix saves a full-draw-set allocation and copy.
     Rcpp::List df_list(n_cols + 1);
     for (int j = 0; j < n_cols; ++j) {
-      Rcpp::NumericVector col(total_rows);
-      std::memcpy(col.begin(), combined.col(j).data(),
-                  static_cast<size_t>(total_rows) * sizeof(double));
-      df_list[j] = col;
+      df_list[j] = Rcpp::NumericVector(total_rows);
+    }
+
+    int offset = 0;
+    for (int i = 0; i < num_chains; ++i) {
+      writers[i].copy_to_r_columns(df_list, offset);
+      offset += writers[i].n_rows();
     }
 
     // Append chain ID as the last column

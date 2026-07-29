@@ -29,7 +29,9 @@ namespace newstan {
                         : data_list;
 
     newstan::r_data_context init_ctx(init_list);
-    newstan::r_sample_writer sample_writer;
+    // With saved iterations Stan writes the initial point plus at most iter
+    // updates; otherwise it writes only the final point.
+    newstan::r_sample_writer sample_writer(save_iterations ? iter + 1 : 1);
     newstan::r_logger logger(verbose);
     newstan::r_interrupt interrupt;
 

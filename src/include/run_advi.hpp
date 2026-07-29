@@ -35,7 +35,9 @@ namespace newstan {
                         : data_list;
 
     newstan::r_data_context init_ctx(init_list);
-    newstan::r_sample_writer sample_writer;
+    // Stan writes the posterior mean followed by output_samples draws.
+    newstan::r_sample_writer sample_writer(output_samples + 1);
+    newstan::r_discard_writer diagnostic_writer;
     newstan::r_logger logger(verbose);
     newstan::r_interrupt interrupt;
 
@@ -48,7 +50,7 @@ namespace newstan {
           adapt_engaged, adapt_iter, eval_elbo, output_samples,
           interrupt, logger,
           /*init_writer=*/sample_writer, sample_writer,
-          /*diagnostic_writer=*/sample_writer);
+          diagnostic_writer);
     } else if (algorithm == "meanfield") {
       return_code = stan::services::experimental::advi::meanfield(
           model, init_ctx, seed, chain_id, init_radius,
@@ -56,7 +58,7 @@ namespace newstan {
           adapt_engaged, adapt_iter, eval_elbo, output_samples,
           interrupt, logger,
           /*init_writer=*/sample_writer, sample_writer,
-          /*diagnostic_writer=*/sample_writer);
+          diagnostic_writer);
     }
 
     logger.flush();

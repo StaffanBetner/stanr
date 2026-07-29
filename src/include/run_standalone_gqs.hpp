@@ -18,7 +18,7 @@ namespace newstan {
     Eigen::Map<Eigen::MatrixXd> draws =
         Rcpp::as<Eigen::Map<Eigen::MatrixXd>>(args["draws"]);
 
-    newstan::r_sample_writer sample_writer;
+    newstan::r_sample_writer sample_writer(static_cast<int>(draws.rows()));
     newstan::r_logger logger(verbose);
     newstan::r_interrupt interrupt;
 

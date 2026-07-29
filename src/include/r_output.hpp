@@ -7,6 +7,7 @@
 #include <stan/callbacks/writer.hpp>
 #include <stan/callbacks/structured_writer.hpp>
 #include <Eigen/Dense>
+#include <cstring>
 #include <vector>
 #include <string>
 
@@ -132,6 +133,20 @@ class r_sample_writer : public stan::callbacks::writer {
   Eigen::MatrixXd to_matrix() const {
     if (n_rows_ == 0) return Eigen::MatrixXd(0, n_cols_);
     return values_.topLeftCorner(n_rows_, n_cols_);
+  }
+
+  /**
+   * Copy the stored columns into preallocated R vectors.  This is intended for
+   * assembling multi-chain output on R's main thread without first creating a
+   * combined Eigen matrix.
+   */
+  void copy_to_r_columns(Rcpp::List& columns, int row_offset) const {
+    if (n_rows_ == 0) return;
+    for (int j = 0; j < n_cols_; ++j) {
+      Rcpp::NumericVector column = columns[j];
+      std::memcpy(column.begin() + row_offset, values_.col(j).data(),
+                  static_cast<size_t>(n_rows_) * sizeof(double));
+    }
   }
 
   const std::vector<std::string>& colnames() const { return colnames_; }
