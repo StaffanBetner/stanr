@@ -3,7 +3,7 @@
 #' @param stanmod A model environment returned by [stan_model()].
 #' @param data Named list of data variables to pass to the model.
 #' @param algorithm Variational family: `"fullrank"` or `"meanfield"`
-#'   (default: `"fullrank"`).
+#'   (default: `"meanfield"`).
 #' @param iter Maximum iterations (default: 10000).
 #' @param grad_samples MC samples for gradient estimate (default: 1).
 #' @param elbo_samples MC samples for ELBO estimate (default: 100).
@@ -14,9 +14,11 @@
 #' @param eval_elbo Evaluate ELBO every Nth iteration (default: 100).
 #' @param output_samples Posterior samples to draw (default: 1000).
 #' @param seed Random seed (NA = random).
-#' @param init Initial values (numeric vector, or `"random"`).
-#' @param init_radius Initialization radius (default: 2).
+#' @param id Chain ID for RNG advancement (default: 1).
+#' @param init Initialization radius, or named constrained initial values
+#'   (default: 2).
 #' @param verbose Print progress (default: TRUE).
+#' @param num_threads Number of threads, or `-1` for all available threads.
 #' @param ... Unused.
 #'
 #' @return A list containing:
@@ -25,10 +27,10 @@
 #'   - `args`: named list of ADVI arguments.
 #'
 #' @export
-advi <- function(
+variational <- function(
   stanmod,
   data,
-  algorithm = "fullrank",
+  algorithm = "meanfield",
   iter = 10000,
   grad_samples = 1,
   elbo_samples = 100,
@@ -39,9 +41,10 @@ advi <- function(
   eval_elbo = 100,
   output_samples = 1000,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  id = 1,
+  init = 2,
   verbose = TRUE,
+  num_threads = -1,
   ...
 ) {
   if (is.na(seed)) {
@@ -49,11 +52,11 @@ advi <- function(
   }
 
   args <- list(
-    method = "advi",
+    method = "variational",
     algorithm = algorithm,
     seed = as.integer(seed),
-    chain_id = 1L,
-    init_radius = as.double(init_radius),
+    id = as.integer(id),
+    init_radius = init_radius(init),
     iter = as.integer(iter),
     grad_samples = as.integer(grad_samples),
     elbo_samples = as.integer(elbo_samples),
@@ -70,8 +73,9 @@ advi <- function(
 
   dat_ptr <- .Call(`r_data_context`, data)
   mod_ptr <- stanmod$new_model(dat_ptr, seed)
+
   withr::with_envvar(
-    c(STAN_NUM_THREADS = 4),
+    c(STAN_NUM_THREADS = num_threads),
     result <- .Call(`newstan_run`, mod_ptr, args)
   )
 

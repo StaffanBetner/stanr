@@ -2,27 +2,49 @@
 % Please edit documentation in R/laplace.R
 \name{laplace}
 \alias{laplace}
-\title{Laplace approximation sampling}
+\title{Draw from a Laplace approximation}
 \usage{
-laplace(object, fit, draws = 2000, seed = NA, verbose = FALSE, ...)
+laplace(
+  stanmod,
+  data,
+  mode,
+  jacobian = TRUE,
+  draws = 1000,
+  calculate_lp = TRUE,
+  seed = NA,
+  refresh = 100,
+  verbose = TRUE,
+  num_threads = -1,
+  ...
+)
 }
 \arguments{
-\item{object}{A \code{newstan_fit} object}
+\item{stanmod}{A model environment returned by \code{\link[=stan_model]{stan_model()}}.}
 
-\item{fit}{An \code{newstan_optim} result providing the mode (from \code{\link[=optimizing]{optimizing()}})}
+\item{data}{Named list of data variables to pass to the model.}
 
-\item{draws}{Number of draws from the Laplace approximation (default: 2000)}
+\item{mode}{A named numeric vector of constrained parameter values, or an
+\code{optimizing()} result.}
 
-\item{seed}{Random seed}
+\item{jacobian}{Include the change-of-variables adjustment (default: TRUE).}
 
-\item{verbose}{Print progress (default: FALSE)}
+\item{draws}{Number of draws from the approximation (default: 1000).}
 
-\item{...}{Unused}
+\item{calculate_lp}{Calculate the log probability at each draw (default: TRUE).}
+
+\item{seed}{Random seed (NA = random).}
+
+\item{refresh}{Output refresh frequency (default: 100).}
+
+\item{verbose}{Print progress (default: TRUE).}
+
+\item{num_threads}{Number of threads, or \code{-1} for all available threads.}
+
+\item{...}{Unused.}
 }
 \value{
-An S3 object of class \code{"newstan_laplace"} with draws from the approximation.
+A list containing Laplace draws, a return code, and the arguments.
 }
 \description{
-Approximates the posterior via Laplace approximation (Gaussian centered at the mode)
-and draws from it.
+Draw from a Laplace approximation
 }

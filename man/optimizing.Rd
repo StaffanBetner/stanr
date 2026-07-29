@@ -7,7 +7,7 @@
 optimizing(
   stanmod,
   data,
-  algorithm = "bfgs",
+  algorithm = "lbfgs",
   iter = 2000,
   init_alpha = 0.001,
   tol_obj = 1e-12,
@@ -17,11 +17,12 @@ optimizing(
   tol_param = 1e-08,
   history_size = 5,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  id = 1,
+  init = 2,
   save_iterations = FALSE,
   refresh = 100,
   verbose = TRUE,
+  num_threads = -1,
   ...
 )
 }
@@ -31,7 +32,7 @@ optimizing(
 \item{data}{Named list of data variables to pass to the model.}
 
 \item{algorithm}{Optimization algorithm: \code{"newton"}, \code{"bfgs"}, or \code{"lbfgs"}
-(default: \code{"bfgs"}).}
+(default: \code{"lbfgs"}).}
 
 \item{iter}{Maximum iterations (default: 2000).}
 
@@ -51,15 +52,18 @@ optimizing(
 
 \item{seed}{Random seed (NA = random).}
 
-\item{init}{Initial values (numeric vector, or \code{"random"}).}
+\item{id}{Chain ID for RNG advancement (default: 1).}
 
-\item{init_radius}{Initialization radius (default: 2).}
+\item{init}{Initialization radius, or named constrained initial values
+(default: 2).}
 
 \item{save_iterations}{Save all iterations (default: FALSE).}
 
 \item{refresh}{Output refresh frequency (default: 100).}
 
 \item{verbose}{Print progress (default: TRUE).}
+
+\item{num_threads}{Number of threads, or \code{-1} for all available threads.}
 
 \item{...}{Unused.}
 }

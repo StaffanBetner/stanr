@@ -7,23 +7,22 @@
 sampling(
   stanmod,
   data,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
+  num_warmup = 1000,
+  num_samples = 1000,
   thin = 1,
   save_warmup = FALSE,
-  chains = 1,
-  chain_id = 1,
+  num_chains = 1,
+  id = 1,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  init = 2,
   algorithm = "hmc",
   engine = "nuts",
   metric = "diag_e",
-  inv_metric = NULL,
+  metric_file = NULL,
   stepsize = 1,
   stepsize_jitter = 0,
   max_depth = 10,
-  int_time = 10,
+  int_time = 2 * pi,
   delta = 0.8,
   gamma = 0.05,
   kappa = 0.75,
@@ -34,6 +33,7 @@ sampling(
   adapt_engaged = TRUE,
   refresh = 100,
   verbose = TRUE,
+  num_threads = -1,
   ...
 )
 }
@@ -42,24 +42,23 @@ sampling(
 
 \item{data}{Named list of data variables to pass to the model.}
 
-\item{iter_warmup}{Number of warmup iterations (default: 1000).}
+\item{num_warmup}{Number of warmup iterations (default: 1000).}
 
-\item{iter_sampling}{Number of post-warmup samples (default: 1000).}
+\item{num_samples}{Number of post-warmup samples (default: 1000).}
 
 \item{thin}{Thinning interval (default: 1).}
 
 \item{save_warmup}{Save warmup samples (default: FALSE).}
 
-\item{chains}{Number of parallel chains (default: 1). Chains are run in
+\item{num_chains}{Number of parallel chains (default: 1). Chains are run in
 parallel via TBB \code{parallel_for} inside the Stan services.}
 
-\item{chain_id}{Starting chain ID for RNG advancement (default: 1).}
+\item{id}{Starting chain ID for RNG advancement (default: 1).}
 
 \item{seed}{Random seed (NA = random).}
 
-\item{init}{Initial values (numeric vector, or \code{"random"}).}
-
-\item{init_radius}{Radius for random initialization (default: 2).}
+\item{init}{Initialization radius, or named constrained initial values
+(default: 2).}
 
 \item{algorithm}{Sampler algorithm: \code{"hmc"} or \code{"fixed_param"} (default: \code{"hmc"}).}
 
@@ -69,7 +68,7 @@ used when \code{algorithm = "hmc"}.}
 \item{metric}{Euclidean metric: \code{"unit_e"}, \code{"diag_e"}, or \code{"dense_e"}
 (default: \code{"diag_e"}).}
 
-\item{inv_metric}{Precomputed inverse metric. For \code{"diag_e"}, a numeric vector
+\item{metric_file}{Precomputed inverse metric. For \code{"diag_e"}, a numeric vector
 of length equal to the number of unconstrained parameters. For \code{"dense_e"},
 a square matrix. Can be a single metric (recycled across chains) or a list
 of metrics (one per chain). Corresponds to CmdStan's \code{metric_file} argument.
@@ -82,7 +81,7 @@ Default: \code{NULL} (identity metric).}
 \item{max_depth}{Maximum tree depth for NUTS (default: 10). Not used
 for static HMC.}
 
-\item{int_time}{Integration time for static HMC (default: 10). Not used
+\item{int_time}{Integration time for static HMC (default: \code{2 * pi}). Not used
 for NUTS.}
 
 \item{delta}{Target acceptance rate (default: 0.8).}
@@ -106,6 +105,8 @@ for NUTS.}
 default: 100).}
 
 \item{verbose}{Print progress messages (default: TRUE).}
+
+\item{num_threads}{Number of threads, or \code{-1} for all available threads.}
 
 \item{...}{Additional arguments (currently unused).}
 }

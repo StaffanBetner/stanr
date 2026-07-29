@@ -7,10 +7,11 @@
 generated_quantities(
   stanmod,
   data,
-  draws,
+  fitted_params,
   seed = NA,
-  chain_id = 1,
+  id = 1,
   verbose = FALSE,
+  num_threads = -1,
   ...
 )
 }
@@ -20,14 +21,16 @@ a Stan model with a generated quantities block.}
 
 \item{data}{Named list of data variables to pass to the model.}
 
-\item{draws}{An object containing posterior draws of constrained parameters
+\item{fitted_params}{An object containing posterior draws of constrained parameters
 (e.g., the \code{draws} element from a \code{\link[=sampling]{sampling()}} result).}
 
 \item{seed}{Random seed (NA = random).}
 
-\item{chain_id}{Chain ID for RNG advancement (default: 1).}
+\item{id}{Chain ID for RNG advancement (default: 1).}
 
 \item{verbose}{Print progress (default: FALSE).}
+
+\item{num_threads}{Number of threads, or \code{-1} for all available threads.}
 
 \item{...}{Unused.}
 }

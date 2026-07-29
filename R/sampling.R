@@ -2,22 +2,22 @@
 #'
 #' @param stanmod A model environment returned by [stan_model()].
 #' @param data Named list of data variables to pass to the model.
-#' @param iter_warmup Number of warmup iterations (default: 1000).
-#' @param iter_sampling Number of post-warmup samples (default: 1000).
+#' @param num_warmup Number of warmup iterations (default: 1000).
+#' @param num_samples Number of post-warmup samples (default: 1000).
 #' @param thin Thinning interval (default: 1).
 #' @param save_warmup Save warmup samples (default: FALSE).
-#' @param chains Number of parallel chains (default: 1). Chains are run in
+#' @param num_chains Number of parallel chains (default: 1). Chains are run in
 #'   parallel via TBB `parallel_for` inside the Stan services.
-#' @param chain_id Starting chain ID for RNG advancement (default: 1).
+#' @param id Starting chain ID for RNG advancement (default: 1).
 #' @param seed Random seed (NA = random).
-#' @param init Initial values (numeric vector, or `"random"`).
-#' @param init_radius Radius for random initialization (default: 2).
+#' @param init Initialization radius, or named constrained initial values
+#'   (default: 2).
 #' @param algorithm Sampler algorithm: `"hmc"` or `"fixed_param"` (default: `"hmc"`).
 #' @param engine HMC engine: `"nuts"` or `"static"` (default: `"nuts"`). Only
 #'   used when `algorithm = "hmc"`.
 #' @param metric Euclidean metric: `"unit_e"`, `"diag_e"`, or `"dense_e"`
 #'   (default: `"diag_e"`).
-#' @param inv_metric Precomputed inverse metric. For `"diag_e"`, a numeric vector
+#' @param metric_file Precomputed inverse metric. For `"diag_e"`, a numeric vector
 #'   of length equal to the number of unconstrained parameters. For `"dense_e"`,
 #'   a square matrix. Can be a single metric (recycled across chains) or a list
 #'   of metrics (one per chain). Corresponds to CmdStan's `metric_file` argument.
@@ -26,7 +26,7 @@
 #' @param stepsize_jitter Uniform jitter for stepsize (default: 0).
 #' @param max_depth Maximum tree depth for NUTS (default: 10). Not used
 #'   for static HMC.
-#' @param int_time Integration time for static HMC (default: 10). Not used
+#' @param int_time Integration time for static HMC (default: `2 * pi`). Not used
 #'   for NUTS.
 #' @param delta Target acceptance rate (default: 0.8).
 #' @param gamma Adaptation gamma (default: 0.05).
@@ -40,6 +40,7 @@
 #' @param refresh Output refresh frequency (iterations between log messages,
 #'   default: 100).
 #' @param verbose Print progress messages (default: TRUE).
+#' @param num_threads Number of threads, or `-1` for all available threads.
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return A list containing:
@@ -52,23 +53,22 @@
 sampling <- function(
   stanmod,
   data,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
+  num_warmup = 1000,
+  num_samples = 1000,
   thin = 1,
   save_warmup = FALSE,
-  chains = 1,
-  chain_id = 1,
+  num_chains = 1,
+  id = 1,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  init = 2,
   algorithm = "hmc",
   engine = "nuts",
   metric = "diag_e",
-  inv_metric = NULL,
+  metric_file = NULL,
   stepsize = 1,
   stepsize_jitter = 0,
   max_depth = 10,
-  int_time = 10,
+  int_time = 2 * pi,
   delta = 0.8,
   gamma = 0.05,
   kappa = 0.75,
@@ -79,6 +79,7 @@ sampling <- function(
   adapt_engaged = TRUE,
   refresh = 100,
   verbose = TRUE,
+  num_threads = -1,
   ...
 ) {
   # Handle seed
@@ -105,30 +106,22 @@ sampling <- function(
   }
 
   # Warn if inv_metric provided with unit_e
-  if (!is.null(inv_metric) && metric == "unit_e") {
-    warning("inv_metric is ignored when metric = 'unit_e'", call. = FALSE)
+  if (!is.null(metric_file) && metric == "unit_e") {
+    warning("metric_file is ignored when metric = 'unit_e'", call. = FALSE)
   }
 
-  # Static HMC only supports a single chain
-  if (algorithm == "hmc" && engine == "static" && chains > 1) {
-    stop(
-      "Static HMC only supports a single chain. Set chains = 1.",
-      call. = FALSE
-    )
-  }
-
-  # Prepare inv_metric for C++: wrap in list if needed
-  inv_metric_na <- is.null(inv_metric)
+  # Prepare metric_file for C++: wrap in list if needed
+  inv_metric_na <- is.null(metric_file)
   if (!inv_metric_na) {
     # If not already a list, wrap as single metric recycled across chains
-    if (!is.list(inv_metric)) {
-      inv_metric <- list(inv_metric)
+    if (!is.list(metric_file)) {
+      metric_file <- list(metric_file)
     }
     # Validate length if per-chain
-    if (length(inv_metric) > 1 && length(inv_metric) != chains) {
+    if (length(metric_file) > 1 && length(metric_file) != num_chains) {
       stop(
-        "inv_metric must be a single metric or a list of length ",
-        chains,
+        "metric_file must be a single metric or a list of length ",
+        num_chains,
         " (one per chain)",
         call. = FALSE
       )
@@ -137,17 +130,17 @@ sampling <- function(
 
   # Build args list for .Call
   args <- list(
-    method = "sampling",
+    method = "sample",
     algorithm = algorithm,
     engine = if (algorithm == "hmc") engine else "nuts",
     metric = metric,
     adapt_engaged = as.logical(adapt_engaged),
     seed = as.integer(seed),
-    chain_id = as.integer(chain_id),
-    chains = as.integer(chains),
-    init_radius = as.double(init_radius),
-    num_warmup = as.integer(iter_warmup),
-    num_samples = as.integer(iter_sampling),
+    id = as.integer(id),
+    num_chains = as.integer(num_chains),
+    init_radius = init_radius(init),
+    num_warmup = as.integer(num_warmup),
+    num_samples = as.integer(num_samples),
     thin = as.integer(thin),
     save_warmup = as.logical(save_warmup),
     refresh = as.integer(refresh),
@@ -163,15 +156,16 @@ sampling <- function(
     term_buffer = as.integer(term_buffer),
     window = as.integer(window),
     init = normalize_init(init),
-    inv_metric = inv_metric,
+    inv_metric = metric_file,
     inv_metric_na = inv_metric_na,
     verbose = as.logical(verbose)
   )
 
   dat_ptr <- .Call(`r_data_context`, data)
   mod_ptr <- stanmod$new_model(dat_ptr, seed)
+
   withr::with_envvar(
-    c(STAN_NUM_THREADS = 4),
+    c(STAN_NUM_THREADS = num_threads),
     result <- .Call(`newstan_run`, mod_ptr, args)
   )
 

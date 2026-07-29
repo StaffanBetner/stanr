@@ -7,9 +7,11 @@
 #' @param epsilon Finite difference step size (default: 1e-6).
 #' @param error Error threshold for comparison (default: 1e-6).
 #' @param seed Random seed (NA = random).
-#' @param init Initial values (numeric vector, or `"random"`).
-#' @param init_radius Initialization radius (default: 2).
+#' @param id Chain ID for RNG advancement (default: 1).
+#' @param init Initialization radius, or named constrained initial values
+#'   (default: 2).
 #' @param verbose Print progress (default: TRUE).
+#' @param num_threads Number of threads, or `-1` for all available threads.
 #' @param ... Unused.
 #'
 #' @return An integer: number of parameters that failed the gradient test
@@ -22,9 +24,10 @@ gradient_check <- function(
   epsilon = 1e-6,
   error = 1e-6,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  id = 1,
+  init = 2,
   verbose = TRUE,
+  num_threads = -1,
   ...
 ) {
   if (is.na(seed)) {
@@ -36,8 +39,8 @@ gradient_check <- function(
     epsilon = as.double(epsilon),
     error = as.double(error),
     seed = as.integer(seed),
-    chain_id = 1L,
-    init_radius = as.double(init_radius),
+    id = as.integer(id),
+    init_radius = init_radius(init),
     verbose = as.logical(verbose),
     data = data,
     init = normalize_init(init)
@@ -45,8 +48,9 @@ gradient_check <- function(
 
   dat_ptr <- .Call(`r_data_context`, data)
   mod_ptr <- stanmod$new_model(dat_ptr, seed)
+
   withr::with_envvar(
-    c(STAN_NUM_THREADS = 4),
+    c(STAN_NUM_THREADS = num_threads),
     result <- .Call(`newstan_run`, mod_ptr, args)
   )
 

@@ -6,8 +6,9 @@ test_that("pathfinder single path returns expected structure", {
   result <- pathfinder(
     mod,
     data,
-    iter = 100,
+    max_lbfgs_iters = 100,
     num_draws = 50,
+    num_paths = 1,
     seed = 42,
     verbose = FALSE
   )
@@ -25,8 +26,9 @@ test_that("pathfinder single path returns draws_df", {
   result <- pathfinder(
     mod,
     data,
-    iter = 100,
+    max_lbfgs_iters = 100,
     num_draws = 50,
+    num_paths = 1,
     seed = 42,
     verbose = FALSE
   )
@@ -45,10 +47,10 @@ test_that("pathfinder multi-path returns expected structure", {
   result <- pathfinder(
     mod,
     data,
-    iter = 100,
+    max_lbfgs_iters = 100,
     num_draws = 50,
     num_paths = 4,
-    num_multi_draws = 100,
+    num_psis_draws = 100,
     seed = 42,
     verbose = FALSE
   )
@@ -71,7 +73,7 @@ test_that("pathfinder multi-path with num_paths = 1 uses single pathfinder", {
   result <- pathfinder(
     mod,
     data,
-    iter = 100,
+    max_lbfgs_iters = 100,
     num_draws = 50,
     num_paths = 1,
     seed = 42,

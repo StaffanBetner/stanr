@@ -1,0 +1,42 @@
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: main
+
+name: R-CMD-check-special
+
+jobs:
+  sanitizers-and-valgrind:
+    runs-on: ubuntu-latest
+    name: ${{ matrix.config.name }}
+    container:
+      image: ghcr.io/r-hub/containers/${{ matrix.config.name }}:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { name: "clang-asan" }
+          - { name: "clang-ubsan" }
+          - { name: "gcc-asan" }
+          - { name: "valgrind" }
+          - { name: "rchk" }
+
+    env:
+      MAKEFLAGS: -j4
+    steps:
+      - uses: r-hub/actions/checkout@main
+        with:
+          submodules: true
+      - uses: r-hub/actions/platform-info@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          job-config: ${{ toJson(matrix.config) }}
+      - uses: r-hub/actions/setup-deps@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          job-config: ${{ toJson(matrix.config) }}
+      - uses: r-hub/actions/run-check@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          job-config: ${{ toJson(matrix.config) }}

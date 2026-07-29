@@ -7,9 +7,9 @@ test_that("generated_quantities returns expected structure", {
   samp <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     seed = 42,
     verbose = FALSE
   )
@@ -39,9 +39,9 @@ test_that("generated_quantities produces log_lik column", {
   samp <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     seed = 42,
     verbose = FALSE
   )

@@ -13,10 +13,10 @@
 namespace newstan {
   template <class Model>
   Rcpp::List run_advi(Model& model, Rcpp::List args) {
-    std::string algorithm = get_string(args, "algorithm", "fullrank");
+    std::string algorithm = get_string(args, "algorithm", "meanfield");
 
     unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["chain_id"]);
+    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
     double init_radius    = Rcpp::as<double>(args["init_radius"]);
     int iter              = get_int(args, "iter", 10000);
     int grad_samples      = get_int(args, "grad_samples", 1);
@@ -65,7 +65,7 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["draws"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "advi",
+      Rcpp::_["method"] = "variational",
       Rcpp::_["algorithm"] = algorithm
     );
   }

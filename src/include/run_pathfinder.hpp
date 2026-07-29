@@ -17,14 +17,24 @@ namespace newstan {
   template <class Model>
   Rcpp::List run_pathfinder(Model& model, Rcpp::List args) {
     unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["chain_id"]);
+    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
     double init_radius    = Rcpp::as<double>(args["init_radius"]);
-    int iter              = get_int(args, "iter", 500);
+    int max_lbfgs_iters   = get_int(args, "max_lbfgs_iters", 1000);
     int history_size      = get_int(args, "history_size", 5);
-    int num_elbo_draws    = get_int(args, "num_elbo_draws", 64);
-    int num_draws         = get_int(args, "num_draws", 300);
-    int num_paths         = get_int(args, "num_paths", 1);
-    int num_multi_draws   = get_int(args, "num_multi_draws", 1000);
+    int num_elbo_draws    = get_int(args, "num_elbo_draws", 25);
+    int num_draws         = get_int(args, "num_draws", 1000);
+    int num_paths         = get_int(args, "num_paths", 4);
+    int num_psis_draws    = get_int(args, "num_psis_draws", 1000);
+    double init_alpha     = get_double(args, "init_alpha", 0.001);
+    double tol_obj        = get_double(args, "tol_obj", 1e-12);
+    double tol_rel_obj    = get_double(args, "tol_rel_obj", 1e4);
+    double tol_grad       = get_double(args, "tol_grad", 1e-8);
+    double tol_rel_grad   = get_double(args, "tol_rel_grad", 1e7);
+    double tol_param      = get_double(args, "tol_param", 1e-8);
+    bool save_single_paths = get_bool(args, "save_single_paths", false);
+    bool psis_resample    = get_bool(args, "psis_resample", true);
+    bool calculate_lp     = get_bool(args, "calculate_lp", true);
+    int refresh           = get_int(args, "refresh", 100);
     bool verbose          = Rcpp::as<bool>(args["verbose"]);
 
     Rcpp::List data_list  = Rcpp::as<Rcpp::List>(args["data"]);
@@ -48,14 +58,14 @@ namespace newstan {
 
       return_code = stan::services::pathfinder::pathfinder_lbfgs_single<false, false>(
           model, init_ctx, seed, chain_id, init_radius,
-          history_size, 0.001,  // init_alpha, default
-          1e-12, 10000.0, 1e-8, 1e7, 1e-8,  // tolerances
-          iter, num_elbo_draws, num_draws, false,
-          get_int(args, "refresh", 100),
+          history_size, init_alpha,
+          tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
+          max_lbfgs_iters, num_elbo_draws, num_draws, save_single_paths,
+          refresh,
           interrupt, logger,
           sample_writer, sample_writer,
           metric_writer,
-          true);  // calculate_lp
+          calculate_lp);
 
       logger.flush();
       return Rcpp::List::create(
@@ -88,7 +98,7 @@ namespace newstan {
       }
 
       // Final combined parameter writer
-      newstan::r_sample_writer param_writer(num_multi_draws);
+      newstan::r_sample_writer param_writer(num_psis_draws);
       // Final diagnostic writer (structured_writer)
       stan::callbacks::json_writer<std::ostringstream> diag_writer(
           std::make_unique<std::ostringstream>());
@@ -103,15 +113,15 @@ namespace newstan {
           chain_id,
           init_radius,
           history_size,
-          0.001,  // init_alpha
-          1e-12, 10000.0, 1e-8, 1e7, 1e-8,  // tolerances
-          iter,
+          init_alpha,
+          tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
+          max_lbfgs_iters,
           num_elbo_draws,
           num_draws,
-          num_multi_draws,
+          num_psis_draws,
           num_paths,
-          false,  // save_iterations
-          get_int(args, "refresh", 100),
+          save_single_paths,
+          refresh,
           interrupt,
           logger,
           init_writers,
@@ -119,8 +129,8 @@ namespace newstan {
           single_diag_writers,
           param_writer,
           diag_writer,
-          true,   // calculate_lp
-          true);  // psis_resample
+          calculate_lp,
+          psis_resample);
 
       logger.flush();
       return Rcpp::List::create(

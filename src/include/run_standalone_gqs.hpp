@@ -11,7 +11,7 @@ namespace newstan {
   template <class Model>
   Rcpp::List run_standalone_gqs(Model& model, Rcpp::List args) {
     unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["chain_id"]);
+    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
     bool verbose          = Rcpp::as<bool>(args["verbose"]);
 
     // draws: Eigen::MatrixXd (rows=samples, columns=parameters)
@@ -30,7 +30,7 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["samples"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "standalone_gqs"
+      Rcpp::_["method"] = "generate_quantities"
     );
   }
 }

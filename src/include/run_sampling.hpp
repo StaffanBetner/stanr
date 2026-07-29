@@ -43,8 +43,8 @@ namespace newstan {
     bool verbose          = get_bool(args, "verbose", true);
 
     unsigned int seed           = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id       = Rcpp::as<unsigned int>(args["chain_id"]);
-    int num_chains              = Rcpp::as<int>(args["chains"]);
+    unsigned int chain_id       = Rcpp::as<unsigned int>(args["id"]);
+    int num_chains              = Rcpp::as<int>(args["num_chains"]);
     double init_radius          = Rcpp::as<double>(args["init_radius"]);
     int num_warmup              = Rcpp::as<int>(args["num_warmup"]);
     int num_samples             = Rcpp::as<int>(args["num_samples"]);
@@ -74,7 +74,7 @@ namespace newstan {
       return Rcpp::List::create(
           Rcpp::_["samples"] = Rcpp::DataFrame::create(),
           Rcpp::_["return_code"] = static_cast<int>(stan::services::error_codes::CONFIG),
-          Rcpp::_["method"] = "sampling");
+          Rcpp::_["method"] = "sample");
     };
 
     if (num_chains < 1) {
@@ -521,7 +521,7 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["samples"] = combined,
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "sampling",
+      Rcpp::_["method"] = "sample",
       Rcpp::_["algorithm"] = algorithm,
       Rcpp::_["engine"] = engine,
       Rcpp::_["metric"] = metric

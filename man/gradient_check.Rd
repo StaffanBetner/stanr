@@ -10,9 +10,10 @@ gradient_check(
   epsilon = 1e-06,
   error = 1e-06,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  id = 1,
+  init = 2,
   verbose = TRUE,
+  num_threads = -1,
   ...
 )
 }
@@ -27,11 +28,14 @@ gradient_check(
 
 \item{seed}{Random seed (NA = random).}
 
-\item{init}{Initial values (numeric vector, or \code{"random"}).}
+\item{id}{Chain ID for RNG advancement (default: 1).}
 
-\item{init_radius}{Initialization radius (default: 2).}
+\item{init}{Initialization radius, or named constrained initial values
+(default: 2).}
 
 \item{verbose}{Print progress (default: TRUE).}
+
+\item{num_threads}{Number of threads, or \code{-1} for all available threads.}
 
 \item{...}{Unused.}
 }

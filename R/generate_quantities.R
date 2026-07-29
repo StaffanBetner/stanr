@@ -5,11 +5,12 @@
 #' @param stanmod A model environment returned by [stan_model()], compiled from
 #'   a Stan model with a generated quantities block.
 #' @param data Named list of data variables to pass to the model.
-#' @param draws An object containing posterior draws of constrained parameters
+#' @param fitted_params An object containing posterior draws of constrained parameters
 #'   (e.g., the `draws` element from a [sampling()] result).
 #' @param seed Random seed (NA = random).
-#' @param chain_id Chain ID for RNG advancement (default: 1).
+#' @param id Chain ID for RNG advancement (default: 1).
 #' @param verbose Print progress (default: FALSE).
+#' @param num_threads Number of threads, or `-1` for all available threads.
 #' @param ... Unused.
 #'
 #' @return A list containing:
@@ -21,10 +22,11 @@
 generated_quantities <- function(
   stanmod,
   data,
-  draws,
+  fitted_params,
   seed = NA,
-  chain_id = 1,
+  id = 1,
   verbose = FALSE,
+  num_threads = -1,
   ...
 ) {
   if (is.na(seed)) {
@@ -36,21 +38,25 @@ generated_quantities <- function(
   pars <- .Call(`constrained_par_names`, mod_ptr)
 
   # Convert draws to matrix (rows=samples, columns=parameters)
-  draws_matrix <- if (inherits(draws, "draws")) {
-    posterior::as_draws_matrix(posterior::subset_draws(draws, variable = pars))
+  draws_matrix <- if (inherits(fitted_params, "draws")) {
+    posterior::as_draws_matrix(posterior::subset_draws(fitted_params, variable = pars))
   } else {
-    as.matrix(draws)
+    as.matrix(fitted_params)
   }
 
   args <- list(
-    method = "standalone_gqs",
+    method = "generate_quantities",
     seed = as.integer(seed),
-    chain_id = as.integer(chain_id),
+    id = as.integer(id),
     verbose = as.logical(verbose),
     draws = draws_matrix
   )
 
-  result <- .Call(`newstan_run`, mod_ptr, args)
+  withr::with_envvar(
+    c(STAN_NUM_THREADS = num_threads),
+    result <- .Call(`newstan_run`, mod_ptr, args)
+  )
+
   gqs_draws <- posterior::as_draws_df(as.data.frame(result$samples))
 
   list(

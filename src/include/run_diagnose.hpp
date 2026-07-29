@@ -13,7 +13,7 @@ namespace newstan {
   template <class Model>
   Rcpp::List run_diagnose(Model& model, Rcpp::List args) {
     unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["chain_id"]);
+    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
     double init_radius    = Rcpp::as<double>(args["init_radius"]);
     double epsilon        = get_double(args, "epsilon", 1e-6);
     double error_thresh   = get_double(args, "error", 1e-6);

@@ -3,7 +3,7 @@
 #' @param stanmod A model environment returned by [stan_model()].
 #' @param data Named list of data variables to pass to the model.
 #' @param algorithm Optimization algorithm: `"newton"`, `"bfgs"`, or `"lbfgs"`
-#'   (default: `"bfgs"`).
+#'   (default: `"lbfgs"`).
 #' @param iter Maximum iterations (default: 2000).
 #' @param init_alpha Initial step size (default: 0.001).
 #' @param tol_obj Tolerance on absolute objective changes (default: 1e-12).
@@ -13,11 +13,13 @@
 #' @param tol_param Tolerance on parameter changes (default: 1e-8).
 #' @param history_size L-BFGS history size (default: 5).
 #' @param seed Random seed (NA = random).
-#' @param init Initial values (numeric vector, or `"random"`).
-#' @param init_radius Initialization radius (default: 2).
+#' @param id Chain ID for RNG advancement (default: 1).
+#' @param init Initialization radius, or named constrained initial values
+#'   (default: 2).
 #' @param save_iterations Save all iterations (default: FALSE).
 #' @param refresh Output refresh frequency (default: 100).
 #' @param verbose Print progress (default: TRUE).
+#' @param num_threads Number of threads, or `-1` for all available threads.
 #' @param ... Unused.
 #'
 #' @return A list containing:
@@ -30,7 +32,7 @@
 optimizing <- function(
   stanmod,
   data,
-  algorithm = "bfgs",
+  algorithm = "lbfgs",
   iter = 2000,
   init_alpha = 0.001,
   tol_obj = 1e-12,
@@ -40,11 +42,12 @@ optimizing <- function(
   tol_param = 1e-8,
   history_size = 5,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  id = 1,
+  init = 2,
   save_iterations = FALSE,
   refresh = 100,
   verbose = TRUE,
+  num_threads = -1,
   ...
 ) {
   if (is.na(seed)) {
@@ -52,11 +55,11 @@ optimizing <- function(
   }
 
   args <- list(
-    method = "optimizing",
+    method = "optimize",
     algorithm = algorithm,
     seed = as.integer(seed),
-    chain_id = 1L,
-    init_radius = as.double(init_radius),
+    id = as.integer(id),
+    init_radius = init_radius(init),
     iter = as.integer(iter),
     init_alpha = as.double(init_alpha),
     tol_obj = as.double(tol_obj),
@@ -74,8 +77,9 @@ optimizing <- function(
 
   dat_ptr <- .Call(`r_data_context`, data)
   mod_ptr <- stanmod$new_model(dat_ptr, seed)
+
   withr::with_envvar(
-    c(STAN_NUM_THREADS = 4),
+    c(STAN_NUM_THREADS = num_threads),
     result <- .Call(`newstan_run`, mod_ptr, args)
   )
 

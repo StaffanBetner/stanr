@@ -14,10 +14,10 @@
 namespace newstan {
   template <class Model>
   Rcpp::List run_optimizing(Model& model, Rcpp::List args) {
-    std::string algorithm = get_string(args, "algorithm", "bfgs");
+    std::string algorithm = get_string(args, "algorithm", "lbfgs");
 
     unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["chain_id"]);
+    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
     double init_radius    = Rcpp::as<double>(args["init_radius"]);
     int iter              = get_int(args, "iter", 2000);
     bool save_iterations  = Rcpp::as<bool>(args["save_iterations"]);
@@ -103,7 +103,7 @@ namespace newstan {
       Rcpp::_["par"] = mat,
       Rcpp::_["value"] = lp_val,
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "optimizing",
+      Rcpp::_["method"] = "optimize",
       Rcpp::_["algorithm"] = algorithm
     );
   }

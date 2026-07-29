@@ -6,9 +6,9 @@ test_that("sampling returns expected structure", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 100,
-    iter_sampling = 100,
-    chains = 1,
+    num_warmup = 100,
+    num_samples = 100,
+    num_chains = 1,
     seed = 42,
     verbose = FALSE
   )
@@ -28,9 +28,9 @@ test_that("sampling with multiple chains works", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 2,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 2,
     seed = 42,
     verbose = FALSE
   )
@@ -47,9 +47,9 @@ test_that("sampling with fixed_param algorithm works", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 10,
-    iter_sampling = 20,
-    chains = 1,
+    num_warmup = 10,
+    num_samples = 20,
+    num_chains = 1,
     algorithm = "fixed_param",
     seed = 42,
     verbose = FALSE
@@ -66,9 +66,9 @@ test_that("sampling with adapt_engaged = FALSE works", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "nuts",
     adapt_engaged = FALSE,
@@ -90,13 +90,13 @@ test_that("sampling with inv_metric (diag_e) works", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "nuts",
     metric = "diag_e",
-    inv_metric = c(1.0),
+    metric_file = c(1.0),
     seed = 42,
     verbose = FALSE
   )
@@ -113,10 +113,10 @@ test_that("sampling with save_warmup increases draws", {
   result_no_warmup <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
+    num_warmup = 50,
+    num_samples = 50,
     save_warmup = FALSE,
-    chains = 1,
+    num_chains = 1,
     seed = 42,
     verbose = FALSE
   )
@@ -124,10 +124,10 @@ test_that("sampling with save_warmup increases draws", {
   result_warmup <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
+    num_warmup = 50,
+    num_samples = 50,
     save_warmup = TRUE,
-    chains = 1,
+    num_chains = 1,
     seed = 42,
     verbose = FALSE
   )
@@ -143,9 +143,9 @@ test_that("sampling with static HMC engine works (unit_e, adapt)", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "static",
     metric = "unit_e",
@@ -168,9 +168,9 @@ test_that("sampling with static HMC engine works (unit_e, no adapt)", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "static",
     metric = "unit_e",
@@ -193,9 +193,9 @@ test_that("sampling with static HMC engine works (diag_e, adapt)", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "static",
     metric = "diag_e",
@@ -218,9 +218,9 @@ test_that("sampling with static HMC engine works (diag_e, no adapt)", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "static",
     metric = "diag_e",
@@ -245,9 +245,9 @@ test_that("sampling with static HMC engine works (dense_e, adapt)", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "static",
     metric = "dense_e",
@@ -270,9 +270,9 @@ test_that("sampling with static HMC engine works (dense_e, no adapt)", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "static",
     metric = "dense_e",
@@ -296,13 +296,13 @@ test_that("sampling with static HMC + inv_metric (diag_e) works", {
   result <- sampling(
     mod,
     data,
-    iter_warmup = 50,
-    iter_sampling = 50,
-    chains = 1,
+    num_warmup = 50,
+    num_samples = 50,
+    num_chains = 1,
     algorithm = "hmc",
     engine = "static",
     metric = "diag_e",
-    inv_metric = c(1.0),
+    metric_file = c(1.0),
     adapt_engaged = TRUE,
     stepsize = 1,
     int_time = 10,
@@ -314,23 +314,21 @@ test_that("sampling with static HMC + inv_metric (diag_e) works", {
   expect_true(nrow(result$draws) > 0)
 })
 
-test_that("static HMC with multiple chains throws error", {
+test_that("static HMC with multiple chains returns a configuration error", {
   path <- test_path("test-models/bernoulli.stan")
   mod <- stan_model(file = path)
   data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 
-  expect_error(
-    sampling(
+  result <- sampling(
       mod,
       data,
-      iter_warmup = 50,
-      iter_sampling = 50,
-      chains = 2,
+      num_warmup = 50,
+      num_samples = 50,
+      num_chains = 2,
       algorithm = "hmc",
       engine = "static",
       seed = 42,
       verbose = FALSE
-    ),
-    "Static HMC only supports a single chain"
-  )
+    )
+  expect_false(result$return_code == 0L)
 })

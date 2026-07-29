@@ -13,32 +13,36 @@
 #include "include/run_diagnose.hpp"
 #include "include/run_optimizing.hpp"
 #include "include/run_pathfinder.hpp"
+#include "include/run_laplace.hpp"
 #include "include/run_sampling.hpp"
 #include "include/run_standalone_gqs.hpp"
 
 extern "C" SEXP newstan_run(SEXP model_ptr, SEXP args) {
   BEGIN_RCPP
-  stan::math::init_threadpool_tbb();
+  int num_threads = newstan::get_int(args, "num_threads", 0);
+  stan::math::init_threadpool_tbb(num_threads);
 
   auto model = Rcpp::XPtr<stan::model::model_base>(model_ptr);
 
   // Extract method from args
-  std::string method = newstan::get_string(args, "method", "sampling");
+  std::string method = newstan::get_string(args, "method", "sample");
 
   int return_code = stan::services::error_codes::CONFIG;
 
-  if (method == "sampling") {
+  if (method == "sample") {
     return Rcpp::wrap(newstan::run_sampling(*model, args));
-  } else if (method == "optimizing") {
+  } else if (method == "optimize") {
     return Rcpp::wrap(newstan::run_optimizing(*model, args));
   } else if (method == "diagnose") {
     return Rcpp::wrap(newstan::run_diagnose(*model, args));
-  } else if (method == "advi") {
+  } else if (method == "variational") {
     return Rcpp::wrap(newstan::run_advi(*model, args));
-  } else if (method == "standalone_gqs") {
+  } else if (method == "generate_quantities") {
     return Rcpp::wrap(newstan::run_standalone_gqs(*model, args));
   } else if (method == "pathfinder") {
     return Rcpp::wrap(newstan::run_pathfinder(*model, args));
+  } else if (method == "laplace") {
+    return Rcpp::wrap(newstan::run_laplace(*model, args));
   } else {
     std::ostringstream msg;
     msg << "Unknown method: " << method;

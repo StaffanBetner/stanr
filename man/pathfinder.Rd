@@ -7,16 +7,27 @@
 pathfinder(
   stanmod,
   data,
-  iter = 500,
+  max_lbfgs_iters = 1000,
   history_size = 5,
-  num_elbo_draws = 64,
-  num_draws = 300,
-  num_paths = 1,
-  num_multi_draws = 1000,
+  num_elbo_draws = 25,
+  num_draws = 1000,
+  num_paths = 4,
+  num_psis_draws = 1000,
   seed = NA,
-  init = 0,
-  init_radius = 2,
+  id = 1,
+  init = 2,
+  init_alpha = 0.001,
+  tol_obj = 1e-12,
+  tol_rel_obj = 10000,
+  tol_grad = 1e-08,
+  tol_rel_grad = 1e+07,
+  tol_param = 1e-08,
+  save_single_paths = FALSE,
+  psis_resample = TRUE,
+  calculate_lp = TRUE,
+  refresh = 100,
   verbose = TRUE,
+  num_threads = -1,
   ...
 )
 }
@@ -25,27 +36,50 @@ pathfinder(
 
 \item{data}{Named list of data variables to pass to the model.}
 
-\item{iter}{Maximum L-BFGS iterations (default: 500).}
+\item{max_lbfgs_iters}{Maximum L-BFGS iterations (default: 1000).}
 
 \item{history_size}{L-BFGS history size (default: 5).}
 
-\item{num_elbo_draws}{MC draws for ELBO evaluation (default: 64).}
+\item{num_elbo_draws}{MC draws for ELBO evaluation (default: 25).}
 
-\item{num_draws}{Approximate posterior draws per path (default: 300).}
+\item{num_draws}{Approximate posterior draws per path (default: 1000).}
 
-\item{num_paths}{Number of single pathfinders to run (default: 1).
+\item{num_paths}{Number of single pathfinders to run (default: 4).
 When \code{num_paths > 1}, runs multi-path pathfinder with PSIS resampling.}
 
-\item{num_multi_draws}{Number of draws to return from PSIS resampling
+\item{num_psis_draws}{Number of draws to return from PSIS resampling
 (default: 1000). Only used when \code{num_paths > 1}.}
 
 \item{seed}{Random seed (NA = random).}
 
-\item{init}{Initial values (numeric vector, or \code{"random"}).}
+\item{id}{Chain ID for RNG advancement (default: 1).}
 
-\item{init_radius}{Initialization radius (default: 2).}
+\item{init}{Initialization radius, or named constrained initial values
+(default: 2).}
+
+\item{init_alpha}{Initial line-search step size (default: 0.001).}
+
+\item{tol_obj}{Tolerance on absolute objective changes (default: 1e-12).}
+
+\item{tol_rel_obj}{Tolerance on relative objective changes (default: 1e4).}
+
+\item{tol_grad}{Tolerance on gradient norm (default: 1e-8).}
+
+\item{tol_rel_grad}{Tolerance on relative gradient norm (default: 1e7).}
+
+\item{tol_param}{Tolerance on parameter changes (default: 1e-8).}
+
+\item{save_single_paths}{Save individual path draws (default: FALSE).}
+
+\item{psis_resample}{Use PSIS resampling for multiple paths (default: TRUE).}
+
+\item{calculate_lp}{Calculate log probabilities (default: TRUE).}
+
+\item{refresh}{Output refresh frequency (default: 100).}
 
 \item{verbose}{Print progress (default: TRUE).}
+
+\item{num_threads}{Number of threads, or \code{-1} for all available threads.}
 
 \item{...}{Unused.}
 }
