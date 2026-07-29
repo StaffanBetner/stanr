@@ -6,6 +6,9 @@
 #include <stan/services/error_codes.hpp>
 #include <stan/model/model_base.hpp>
 
+#include "Rcpp/XPtr.h"
+#include "Rcpp/exceptions.h"
+#include "Rcpp/internal/wrap.h"
 #include "include/run_advi.hpp"
 #include "include/run_diagnose.hpp"
 #include "include/run_optimizing.hpp"
@@ -55,5 +58,20 @@ extern "C" SEXP r_data_context(SEXP data_list) {
   BEGIN_RCPP
   Rcpp::XPtr<stan::io::var_context> m(new newstan::r_data_context(Rcpp::List(data_list)));
   return Rcpp::wrap(m);
+  END_RCPP
+}
+
+extern "C" SEXP constrained_par_names(SEXP model_ptr) {
+  BEGIN_RCPP
+  auto model = Rcpp::XPtr<stan::model::model_base>(model_ptr);
+  std::vector<std::string> param_names;
+  model->constrained_param_names(param_names, false, false);
+  if (param_names.size() < 1) {
+    std::stringstream msg;
+    msg << "Model " << model->model_name()
+        << " has no parameters, nothing to estimate." << std::endl;
+    Rcpp::stop(msg.str());
+  }
+  return Rcpp::wrap(param_names);
   END_RCPP
 }

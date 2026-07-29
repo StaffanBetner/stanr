@@ -31,41 +31,23 @@ generated_quantities <- function(
     seed <- as.integer(runif(1, 1, 2^31 - 1))
   }
 
+  dat_ptr <- .Call(`r_data_context`, data)
+  mod_ptr <- stanmod$new_model(dat_ptr, seed)
+  pars <- .Call(`constrained_par_names`, mod_ptr)
+
   # Convert draws to matrix (rows=samples, columns=parameters)
   draws_matrix <- if (inherits(draws, "draws")) {
-    posterior::as_draws_matrix(draws)
+    posterior::as_draws_matrix(posterior::subset_draws(draws, variable = pars))
   } else {
     as.matrix(draws)
   }
-
-  dat_ptr <- .Call(`r_data_context`, data)
-  mod_ptr <- stanmod$new_model(dat_ptr, seed)
-
-  # Get constrained parameter names and exclude lp__
-  constrained_names <- .Call(`r_param_names`, mod_ptr)
-  constrained_names <- constrained_names[constrained_names != "lp__"]
-
-  # Extract constrained parameter values and unconstrain them
-  par_cols <- intersect(colnames(draws_matrix), constrained_names)
-  draws_constrained <- draws_matrix[, par_cols, drop = FALSE]
-  n_draws <- nrow(draws_constrained)
-  n_unconstrained <- length(.Call(
-    `r_unconstrain`,
-    mod_ptr,
-    draws_constrained[1, , drop = FALSE]
-  ))
-  draws_unconstrained <- matrix(
-    .Call(`r_unconstrain`, mod_ptr, as.numeric(t(draws_constrained))),
-    nrow = n_draws,
-    ncol = n_unconstrained
-  )
 
   args <- list(
     method = "standalone_gqs",
     seed = as.integer(seed),
     chain_id = as.integer(chain_id),
     verbose = as.logical(verbose),
-    draws = draws_unconstrained
+    draws = draws_matrix
   )
 
   result <- .Call(`newstan_run`, mod_ptr, args)

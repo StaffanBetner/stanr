@@ -19,8 +19,8 @@ namespace newstan {
         Rcpp::as<Eigen::Map<Eigen::MatrixXd>>(args["draws"]);
 
     newstan::r_sample_writer sample_writer;
-    stan::callbacks::stream_logger logger(Rcpp::Rcout, Rcpp::Rcout, Rcpp::Rcout,
-                                          Rcpp::Rcerr, Rcpp::Rcerr);
+    stan::callbacks::stream_logger logger(std::cout, std::cout, std::cout,
+                                          std::cerr, std::cerr);
     newstan::r_interrupt interrupt;
 
     int return_code = stan::services::standalone_generate(

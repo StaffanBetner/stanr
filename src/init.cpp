@@ -5,10 +5,12 @@
 extern "C"  {
   SEXP newstan_run(SEXP model_ptr, SEXP args);
   SEXP r_data_context(SEXP data_list);
+  SEXP constrained_par_names(SEXP model_ptr);
 
   static const R_CallMethodDef CallEntries[] = {
     {"newstan_run", (DL_FUNC) &newstan_run, 2},
     {"r_data_context", (DL_FUNC) &r_data_context, 1},
+    {"constrained_par_names", (DL_FUNC) &constrained_par_names, 1},
     {NULL, NULL, 0}
   };
 

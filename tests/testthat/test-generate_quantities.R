@@ -1,5 +1,3 @@
-skip()
-
 test_that("generated_quantities returns expected structure", {
   path <- test_path("test-models/bernoulli_gqs.stan")
   mod <- stan_model(file = path)
