@@ -120,7 +120,7 @@ class model_bridge_model
 
   void transform_inits(const stan::io::var_context& context,
                        Eigen::VectorXd& params_r,
-                       std::ostream* msgs = nullptr) const {
+                       std::ostream* msgs = nullptr) const override {
     model_.transform_inits(context, params_r, msgs);
   }
 
@@ -134,7 +134,7 @@ class model_bridge_model
   void write_array(stan::rng_t& rng, Eigen::VectorXd& params_r,
                    Eigen::VectorXd& vars, bool include_tparams = true,
                    bool include_gqs = true,
-                   std::ostream* msgs = nullptr) const {
+                   std::ostream* msgs = nullptr) const override {
     model_.write_array(rng, params_r, vars, include_tparams, include_gqs,
                        msgs);
   }
@@ -142,20 +142,20 @@ class model_bridge_model
   void write_array(stan::rng_t& rng, std::vector<double>& params_r,
                    std::vector<int>& params_i, std::vector<double>& vars,
                    bool include_tparams = true, bool include_gqs = true,
-                   std::ostream* msgs = nullptr) const {
+                   std::ostream* msgs = nullptr) const override {
     model_.write_array(rng, params_r, params_i, vars, include_tparams,
                        include_gqs, msgs);
   }
 
   void unconstrain_array(const Eigen::VectorXd& params_r_constrained,
                          Eigen::VectorXd& params_r,
-                         std::ostream* msgs = nullptr) const {
+                         std::ostream* msgs = nullptr) const override {
     model_.unconstrain_array(params_r_constrained, params_r, msgs);
   }
 
   void unconstrain_array(const std::vector<double>& params_r_constrained,
                          std::vector<double>& params_r,
-                         std::ostream* msgs = nullptr) const {
+                         std::ostream* msgs = nullptr) const override {
     model_.unconstrain_array(params_r_constrained, params_r, msgs);
   }
 };
