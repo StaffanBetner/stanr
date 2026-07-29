@@ -3,8 +3,7 @@
 #' @param file Path to a `.stan` file (or `NULL` if `code` is provided)
 #' @param code Stan model code as a string (alternative to `file`)
 #' @param model_name Override model name (default: basename of `file` without `.stan`)
-#' @param data Named list of data variables
-#' @param init Initial values for parameters (numeric vector, function, or `"random"`)
+#' @param force_recompile Whether to always recompile, even if a cached model is found
 #' @param verbose Print compilation progress
 #'
 #' @return An S3 object of class `"newstan_fit"` wrapping a compiled Stan model.

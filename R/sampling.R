@@ -84,7 +84,7 @@ sampling <- function(
 ) {
   # Handle seed
   if (is.na(seed)) {
-    seed <- as.integer(runif(1, 1, 2^31 - 1))
+    seed <- as.integer(stats::runif(1, 1, 2^31 - 1))
   }
 
   # Validate algorithm

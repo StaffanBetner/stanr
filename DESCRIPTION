@@ -9,9 +9,11 @@ Description:
     A modern, simpler R interface for Stan. Bundles all required Stan headers internally,
     depending only on BH (Boost), RcppEigen (Eigen), and RcppParallel (TBB)
     for external dependencies.
-License: GPL-3
+License: MIT + file LICENSE
 Depends:
-    R (>= 4.0)
+    R (>= 4.0),
+    BH,
+    RcppEigen
 Imports:
     Rcpp (>= 1.0.0),
     RcppParallel,
@@ -32,3 +34,6 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Config/build/compilation-database: true
 Config/roxygen2/version: 8.0.0
+NeedsCompilation: yes
+UseLTO: true
+SystemRequirements: GNU make

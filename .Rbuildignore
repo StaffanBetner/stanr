@@ -1,0 +1,13 @@
+^StanEstimators\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^README\.Rmd$
+.vscode
+^\.github$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^compile_commands\.json$
+^\.cache$
+^\.clang-tidy$
+^\.devcontainer

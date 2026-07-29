@@ -35,8 +35,6 @@ jobs:
           - {os: ubuntu-latest,   r: 'release'}
           - {os: ubuntu-latest,   r: 'oldrel'}
           - {os: ubuntu-latest,   r: '4.1'}
-          #- {os: ubuntu-latest,   r: '4.0'}
-          - {os: ubuntu-latest,   r: '3.6'}
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -44,7 +42,7 @@ jobs:
       MAKEFLAGS: -j4
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
 

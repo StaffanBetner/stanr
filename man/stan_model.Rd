@@ -21,9 +21,7 @@ stan_model(
 
 \item{verbose}{Print compilation progress}
 
-\item{data}{Named list of data variables}
-
-\item{init}{Initial values for parameters (numeric vector, function, or \code{"random"})}
+\item{force_recompile}{Whether to always recompile, even if a cached model is found}
 }
 \value{
 An S3 object of class \code{"newstan_fit"} wrapping a compiled Stan model.
