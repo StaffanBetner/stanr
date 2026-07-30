@@ -122,7 +122,7 @@ class r_data_context : public stan::io::var_context {
   }
 
   bool contains_r(const std::string& name) const override {
-    return values_.contains(name);
+    return values_.find(name) != values_.end();
   }
   std::vector<double> vals_r(const std::string& name) const override {
     const auto it = values_.find(name);
