@@ -3,7 +3,6 @@
 
 #include <Rcpp.h>
 #include <memory>
-#include <stan/io/array_var_context.hpp>
 #include <stan/io/var_context.hpp>
 #include <stan/services/sample/fixed_param.hpp>
 #include <stan/services/sample/hmc_nuts_dense_e.hpp>
@@ -24,6 +23,7 @@
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
 #include <newstan/r_data_context.hpp>
+#include <newstan/r_metric_context.hpp>
 #include "stack_writer_chains.hpp"
 
 namespace newstan {
@@ -46,18 +46,19 @@ namespace newstan {
     for (int i = 0; i < num_chains; ++i) {
       SEXP metric_value = inv_metric_list[per_chain ? i : 0];
       std::vector<double> values;
-      std::vector<std::vector<size_t>> dimensions;
+      std::vector<size_t> dimensions;
       if (metric == "diag_e") {
         Rcpp::NumericVector vector = Rcpp::as<Rcpp::NumericVector>(metric_value);
         values.assign(vector.begin(), vector.end());
-        dimensions = {{num_params}};
+        dimensions = {num_params};
       } else {
         Rcpp::NumericMatrix matrix = Rcpp::as<Rcpp::NumericMatrix>(metric_value);
         values.assign(matrix.begin(), matrix.end());
-        dimensions = {{num_params, num_params}};
+        dimensions = {num_params, num_params};
       }
-      contexts.emplace_back(std::make_shared<stan::io::array_var_context>(
-          std::vector<std::string>{"inv_metric"}, values, dimensions));
+      contexts.emplace_back(
+          std::make_shared<newstan::r_metric_context>(std::move(values),
+                                                       std::move(dimensions)));
     }
     return contexts;
   }
@@ -97,7 +98,11 @@ namespace newstan {
 
     newstan::r_logger logger(verbose);
 
-    const int expected_rows = num_samples / num_thin + (save_warmup ? num_warmup / num_thin : 0);
+    const auto saved_rows = [num_thin](int iterations) {
+      return iterations / num_thin + (iterations % num_thin != 0);
+    };
+    const int expected_rows = saved_rows(num_samples)
+        + (save_warmup ? saved_rows(num_warmup) : 0);
     const unsigned int init_buffer = static_cast<unsigned int>(init_buffer_arg);
     const unsigned int term_buffer = static_cast<unsigned int>(term_buffer_arg);
     const unsigned int window = static_cast<unsigned int>(window_arg);
@@ -105,7 +110,9 @@ namespace newstan {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     // ── Build per-chain contexts and writers ────────────────────────
-    std::vector<std::shared_ptr<newstan::r_data_context>> init_ctxs(num_chains);
+    const auto init_ctx = std::make_shared<newstan::r_data_context>(init_list);
+    std::vector<std::shared_ptr<newstan::r_data_context>> init_ctxs(
+        num_chains, init_ctx);
     std::vector<newstan::r_sample_writer> init_writers;
     std::vector<newstan::r_sample_writer> sample_writers;
     std::vector<newstan::r_discard_writer> diag_writers;
@@ -117,7 +124,6 @@ namespace newstan {
     metric_writers.reserve(num_chains);
 
     for (int i = 0; i < num_chains; ++i) {
-      init_ctxs[i] = std::make_shared<newstan::r_data_context>(init_list);
       init_writers.emplace_back(1);
       sample_writers.emplace_back(expected_rows);
       diag_writers.emplace_back();

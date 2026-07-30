@@ -8,8 +8,10 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace newstan {
@@ -18,10 +20,15 @@ namespace newstan {
 // construction, so Stan worker threads never access the R API.
 class r_data_context : public stan::io::var_context {
  private:
-  std::map<std::string, std::vector<double>> vals_r_;
-  std::map<std::string, std::vector<int>> vals_i_;
-  std::map<std::string, std::vector<size_t>> dims_;
-  std::vector<size_t> empty_vec_ui_;
+  struct value_entry {
+    std::vector<double> reals;
+    std::optional<std::vector<int>> ints;
+    std::vector<size_t> dims;
+  };
+
+  // Keep all data associated with a variable in one node.  This stores its
+  // name once instead of once per real, integer, and dimension map.
+  std::map<std::string, value_entry> values_;
 
  public:
   explicit r_data_context(Rcpp::List list) {
@@ -68,9 +75,8 @@ class r_data_context : public stan::io::var_context {
           ints[j] = input[j];
           reals[j] = static_cast<double>(input[j]);
         }
-        vals_i_.emplace(name, std::move(ints));
-        vals_r_.emplace(name, std::move(reals));
-        dims_.emplace(name, std::move(dims));
+        values_.emplace(name, value_entry{std::move(reals), std::move(ints),
+                                          std::move(dims)});
       } else if (Rf_isNumeric(value)) {
         Rcpp::NumericVector input(value);
         std::vector<double> reals(input.begin(), input.end());
@@ -87,45 +93,55 @@ class r_data_context : public stan::io::var_context {
           }
           ints.push_back(static_cast<int>(element));
         }
-        vals_r_.emplace(name, std::move(reals));
-        if (is_integer_valued) vals_i_.emplace(name, std::move(ints));
-        dims_.emplace(name, std::move(dims));
+        values_.emplace(name,
+                        value_entry{std::move(reals),
+                                    is_integer_valued
+                                        ? std::optional<std::vector<int>>(
+                                              std::move(ints))
+                                        : std::nullopt,
+                                    std::move(dims)});
       }
     }
   }
 
   bool contains_r(const std::string& name) const override {
-    return vals_r_.count(name) > 0;
+    return values_.contains(name);
   }
   std::vector<double> vals_r(const std::string& name) const override {
-    const auto it = vals_r_.find(name);
-    return it == vals_r_.end() ? std::vector<double>() : it->second;
+    const auto it = values_.find(name);
+    return it == values_.end() ? std::vector<double>() : it->second.reals;
   }
   std::vector<std::complex<double>> vals_c(const std::string&) const override {
     return {};
   }
   std::vector<size_t> dims_r(const std::string& name) const override {
-    const auto it = dims_.find(name);
-    return it == dims_.end() ? empty_vec_ui_ : it->second;
+    const auto it = values_.find(name);
+    return it == values_.end() ? std::vector<size_t>() : it->second.dims;
   }
   bool contains_i(const std::string& name) const override {
-    return vals_i_.count(name) > 0;
+    const auto it = values_.find(name);
+    return it != values_.end() && it->second.ints.has_value();
   }
   std::vector<int> vals_i(const std::string& name) const override {
-    const auto it = vals_i_.find(name);
-    return it == vals_i_.end() ? std::vector<int>() : it->second;
+    const auto it = values_.find(name);
+    return it == values_.end() || !it->second.ints ? std::vector<int>()
+                                                   : *it->second.ints;
   }
   std::vector<size_t> dims_i(const std::string& name) const override {
-    const auto it = dims_.find(name);
-    return it == dims_.end() ? empty_vec_ui_ : it->second;
+    const auto it = values_.find(name);
+    return it == values_.end() ? std::vector<size_t>() : it->second.dims;
   }
   void names_r(std::vector<std::string>& names) const override {
     names.clear();
-    for (const auto& entry : vals_r_) names.push_back(entry.first);
+    names.reserve(values_.size());
+    for (const auto& entry : values_) names.push_back(entry.first);
   }
   void names_i(std::vector<std::string>& names) const override {
     names.clear();
-    for (const auto& entry : vals_i_) names.push_back(entry.first);
+    names.reserve(values_.size());
+    for (const auto& entry : values_) {
+      if (entry.second.ints) names.push_back(entry.first);
+    }
   }
   void validate_dims(const std::string& stage, const std::string& name,
                      const std::string& base_type,

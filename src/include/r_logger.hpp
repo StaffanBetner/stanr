@@ -6,6 +6,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace newstan {
@@ -36,10 +37,10 @@ class r_logger : public stan::callbacks::logger {
   std::mutex mutex_;
   bool verbose_;
 
-  void push(level lv, const std::string& msg) {
+  void push(level lv, std::string msg) {
     if (!verbose_ && (lv == level::debug || lv == level::info)) return;
     std::lock_guard<std::mutex> lock(mutex_);
-    buffer_.push_back({lv, msg});
+    buffer_.push_back({lv, std::move(msg)});
   }
 
  public:

@@ -71,16 +71,9 @@ namespace newstan {
       );
     } else {
       // Multi-path pathfinder — delegates to pathfinder_lbfgs_multi
-      // Create one init context per path (all share same init data)
-      std::vector<stan::io::var_context*> init_ctxs;
-      init_ctxs.reserve(num_paths);
-      std::vector<std::unique_ptr<newstan::r_data_context>> init_ctx_ptrs;
-      init_ctx_ptrs.reserve(num_paths);
-      for (int i = 0; i < num_paths; ++i) {
-        auto ctx = std::make_unique<newstan::r_data_context>(init_list);
-        init_ctxs.push_back(ctx.get());
-        init_ctx_ptrs.push_back(std::move(ctx));
-      }
+      // The immutable context is safe to share across all paths.
+      const auto init_ctx = std::make_unique<newstan::r_data_context>(init_list);
+      std::vector<stan::io::var_context*> init_ctxs(num_paths, init_ctx.get());
 
       // The package returns only the PSIS-resampled draws.  Base writers are
       // intentional no-ops: reporting them as valid would make Stan retain

@@ -100,9 +100,10 @@ sampling <- function(
   if (thin < 1) {
     stop("thin must be at least 1.", call. = FALSE)
   }
-  num_saved_draws <- num_samples %/% thin
+  num_saved_draws <- num_samples %/% thin + as.integer(num_samples %% thin != 0)
   if (save_warmup) {
-    num_saved_draws <- num_saved_draws + num_warmup %/% thin
+    num_saved_draws <- num_saved_draws + num_warmup %/% thin +
+      as.integer(num_warmup %% thin != 0)
   }
   if (num_saved_draws > .Machine$integer.max) {
     stop("Requested number of saved draws is too large.", call. = FALSE)
