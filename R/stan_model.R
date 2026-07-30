@@ -59,18 +59,8 @@ stan_model <- function(
 
   env <- new.env()
   runtime_archive <- system.file(
-    "lib", "libnewstan_runner.a", package = "newstan", mustWork = FALSE
+    "lib", "libnewstan_runner.a", package = "newstan", mustWork = TRUE
   )
-  if (!nzchar(runtime_archive)) {
-    # pkgload::load_all() loads a copied DLL from its temporary installation,
-    # while find.package() still points to the development source tree.
-    runtime_archive <- file.path(
-      find.package("newstan"), "libs", "libnewstan_runner.a"
-    )
-  }
-  if (!file.exists(runtime_archive)) {
-    stop("newstan runner archive is missing; reinstall newstan.", call. = FALSE)
-  }
 
   tbb_libs <- utils::capture.output(RcppParallel::RcppParallelLibs())
   if (.Platform$OS.type == "windows" && utils::packageVersion("RcppParallel") >= '6.0.0') {

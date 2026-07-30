@@ -5,12 +5,6 @@ test_that("stan_model compiles from file", {
   expect_true(exists("new_model", envir = mod))
 })
 
-test_that("the installed runner archive is available to sourceCpp", {
-  expect_true(file.exists(system.file(
-    "libs", "libnewstan_runner.a", package = "newstan"
-  )))
-})
-
 test_that("stan_model compiles from code", {
   code <- '
     parameters { real theta; }
