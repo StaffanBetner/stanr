@@ -6,10 +6,8 @@
 #include <stan/io/var_context.hpp>
 
 #include <cmath>
-#include <complex>
 #include <limits>
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 

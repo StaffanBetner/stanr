@@ -10,3 +10,5 @@ compile_commands.json
 .cache
 libs
 lib
+inst/include
+src/sundials
