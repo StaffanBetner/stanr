@@ -3,7 +3,6 @@
 
 #include <Rcpp.h>
 #include <stan/services/diagnose/diagnose.hpp>
-#include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
@@ -12,16 +11,14 @@
 namespace newstan {
   template <class Model>
   Rcpp::List run_diagnose(Model& model, Rcpp::List args) {
-    unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    double init_radius    = Rcpp::as<double>(args["init_radius"]);
-    double epsilon        = get_double(args, "epsilon", 1e-6);
-    double error_thresh   = get_double(args, "error", 1e-6);
-    bool verbose          = Rcpp::as<bool>(args["verbose"]);
+    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
+    const double init_radius = Rcpp::as<double>(args["init_radius"]);
+    const double epsilon = Rcpp::as<double>(args["epsilon"]);
+    const double error_thresh = Rcpp::as<double>(args["error"]);
+    const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
-    Rcpp::List init_list = args.containsElementNamed("init")
-                        ? Rcpp::as<Rcpp::List>(args["init"])
-                        : Rcpp::as<Rcpp::List>(args["data"]);
+    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
     newstan::r_sample_writer sample_writer;
@@ -33,7 +30,7 @@ namespace newstan {
         model, init_ctx, seed, chain_id, init_radius,
         epsilon, error_thresh,
         interrupt, logger,
-        /*init_writer=*/sample_writer, sample_writer);
+        sample_writer, sample_writer);
 
     logger.flush();
     return Rcpp::List::create(

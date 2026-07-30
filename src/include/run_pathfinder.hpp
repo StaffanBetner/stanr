@@ -7,7 +7,6 @@
 #include <stan/callbacks/json_writer.hpp>
 #include <sstream>
 #include <vector>
-#include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
@@ -16,31 +15,29 @@
 namespace newstan {
   template <class Model>
   Rcpp::List run_pathfinder(Model& model, Rcpp::List args) {
-    unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    double init_radius    = Rcpp::as<double>(args["init_radius"]);
-    int max_lbfgs_iters   = get_int(args, "max_lbfgs_iters", 1000);
-    int history_size      = get_int(args, "history_size", 5);
-    int num_elbo_draws    = get_int(args, "num_elbo_draws", 25);
-    int num_draws         = get_int(args, "num_draws", 1000);
-    int num_paths         = get_int(args, "num_paths", 4);
-    int num_psis_draws    = get_int(args, "num_psis_draws", 1000);
-    double init_alpha     = get_double(args, "init_alpha", 0.001);
-    double tol_obj        = get_double(args, "tol_obj", 1e-12);
-    double tol_rel_obj    = get_double(args, "tol_rel_obj", 1e4);
-    double tol_grad       = get_double(args, "tol_grad", 1e-8);
-    double tol_rel_grad   = get_double(args, "tol_rel_grad", 1e7);
-    double tol_param      = get_double(args, "tol_param", 1e-8);
-    bool save_single_paths = get_bool(args, "save_single_paths", false);
-    bool psis_resample    = get_bool(args, "psis_resample", true);
-    bool calculate_lp     = get_bool(args, "calculate_lp", true);
-    int refresh           = get_int(args, "refresh", 100);
-    bool verbose          = Rcpp::as<bool>(args["verbose"]);
+    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
+    const double init_radius = Rcpp::as<double>(args["init_radius"]);
+    const int max_lbfgs_iters = Rcpp::as<int>(args["max_lbfgs_iters"]);
+    const int history_size = Rcpp::as<int>(args["history_size"]);
+    const int num_elbo_draws = Rcpp::as<int>(args["num_elbo_draws"]);
+    const int num_draws = Rcpp::as<int>(args["num_draws"]);
+    const int num_paths = Rcpp::as<int>(args["num_paths"]);
+    const int num_psis_draws = Rcpp::as<int>(args["num_psis_draws"]);
+    const double init_alpha = Rcpp::as<double>(args["init_alpha"]);
+    const double tol_obj = Rcpp::as<double>(args["tol_obj"]);
+    const double tol_rel_obj = Rcpp::as<double>(args["tol_rel_obj"]);
+    const double tol_grad = Rcpp::as<double>(args["tol_grad"]);
+    const double tol_rel_grad = Rcpp::as<double>(args["tol_rel_grad"]);
+    const double tol_param = Rcpp::as<double>(args["tol_param"]);
+    const bool save_single_paths = Rcpp::as<bool>(args["save_single_paths"]);
+    const bool psis_resample = Rcpp::as<bool>(args["psis_resample"]);
+    const bool calculate_lp = Rcpp::as<bool>(args["calculate_lp"]);
+    const int refresh = Rcpp::as<int>(args["refresh"]);
+    const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
-    Rcpp::List data_list  = Rcpp::as<Rcpp::List>(args["data"]);
-    Rcpp::List init_list  = args.containsElementNamed("init")
-                        ? Rcpp::as<Rcpp::List>(args["init"])
-                        : data_list;
+    Rcpp::List data_list = Rcpp::as<Rcpp::List>(args["data"]);
+    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_logger logger(verbose);
     // Multi-path Pathfinder executes callbacks from TBB workers; polling R

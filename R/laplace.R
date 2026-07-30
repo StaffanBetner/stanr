@@ -55,7 +55,8 @@ laplace <- function(
     calculate_lp = as.logical(calculate_lp),
     seed = as.integer(seed),
     refresh = as.integer(refresh),
-    verbose = as.logical(verbose)
+    verbose = as.logical(verbose),
+    num_threads = as.integer(num_threads)
   )
 
   withr::with_envvar(

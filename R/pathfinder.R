@@ -88,6 +88,7 @@ pathfinder <- function(
     calculate_lp = as.logical(calculate_lp),
     refresh = as.integer(refresh),
     verbose = as.logical(verbose),
+    num_threads = as.integer(num_threads),
     data = data,
     init = normalize_init(init)
   )

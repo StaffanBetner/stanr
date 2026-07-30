@@ -87,22 +87,66 @@ sampling <- function(
     seed <- as.integer(stats::runif(1, 1, 2^31 - 1))
   }
 
-  # Validate algorithm
+  init_radius_value <- init_radius(init)
+
+  # Validate configuration
+  if (num_chains < 1) {
+    stop("chains must be at least 1.", call. = FALSE)
+  }
+  if (num_warmup < 0 || num_samples < 0) {
+    stop("num_warmup and num_samples must be non-negative.", call. = FALSE)
+  }
+  if (thin < 1) {
+    stop("thin must be at least 1.", call. = FALSE)
+  }
+  num_saved_draws <- num_samples %/% thin
+  if (save_warmup) {
+    num_saved_draws <- num_saved_draws + num_warmup %/% thin
+  }
+  if (num_saved_draws > .Machine$integer.max) {
+    stop("Requested number of saved draws is too large.", call. = FALSE)
+  }
+  if (refresh < 0) {
+    stop("refresh must be non-negative.", call. = FALSE)
+  }
+  if (!is.finite(init_radius_value) || init_radius_value < 0) {
+    stop("init_radius must be finite and non-negative.", call. = FALSE)
+  }
+  if (!is.finite(stepsize) || stepsize <= 0 ||
+      !is.finite(stepsize_jitter) || stepsize_jitter < 0 ||
+      stepsize_jitter > 1) {
+    stop("stepsize must be positive and stepsize_jitter must be in [0, 1].",
+         call. = FALSE)
+  }
+  if (max_depth < 1 || !is.finite(int_time) || int_time <= 0) {
+    stop("max_depth must be at least 1 and int_time must be positive.",
+         call. = FALSE)
+  }
+  if (!is.finite(delta) || delta <= 0 || delta >= 1 ||
+      !is.finite(gamma) || gamma <= 0 ||
+      !is.finite(kappa) || kappa <= 0 || kappa > 1 ||
+      !is.finite(t0) || t0 <= 0) {
+    stop("Invalid adaptation parameters.", call. = FALSE)
+  }
+  if (init_buffer < 0 || term_buffer < 0 || window < 0) {
+    stop("Adaptation window parameters must be non-negative.", call. = FALSE)
+  }
   if (!algorithm %in% c("hmc", "fixed_param")) {
-    stop("algorithm must be 'hmc' or 'fixed_param'", call. = FALSE)
+    stop("Unknown sampling algorithm: ", algorithm, call. = FALSE)
   }
-
-  # Validate engine (only relevant for HMC)
   if (algorithm == "hmc" && !engine %in% c("nuts", "static")) {
-    stop(
-      "engine must be 'nuts' or 'static' when algorithm is 'hmc'",
-      call. = FALSE
-    )
+    stop("Unknown HMC engine: ", engine, call. = FALSE)
   }
-
-  # Validate metric
   if (!metric %in% c("unit_e", "diag_e", "dense_e")) {
-    stop("metric must be 'unit_e', 'diag_e', or 'dense_e'", call. = FALSE)
+    stop("Unknown metric: ", metric, call. = FALSE)
+  }
+  if (algorithm == "hmc" && adapt_engaged && num_warmup == 0) {
+    stop("num_warmup must be > 0 when adapt_engaged is TRUE.",
+         call. = FALSE)
+  }
+  if (algorithm == "hmc" && engine == "static" && num_chains > 1) {
+    stop("Static HMC only supports a single chain. Set chains = 1.",
+         call. = FALSE)
   }
 
   # Warn if inv_metric provided with unit_e
@@ -126,6 +170,16 @@ sampling <- function(
         call. = FALSE
       )
     }
+    if (algorithm == "hmc" && engine == "nuts" && !adapt_engaged &&
+        metric %in% c("diag_e", "dense_e") && num_chains > 1) {
+      stop(
+        "inv_metric with non-adaptive ",
+        metric,
+        " is only supported for a single chain. ",
+        "Set adapt_engaged = TRUE for multi-chain with custom metric.",
+        call. = FALSE
+      )
+    }
   }
 
   # Build args list for .Call
@@ -138,7 +192,7 @@ sampling <- function(
     seed = as.integer(seed),
     id = as.integer(id),
     num_chains = as.integer(num_chains),
-    init_radius = init_radius(init),
+    init_radius = init_radius_value,
     num_warmup = as.integer(num_warmup),
     num_samples = as.integer(num_samples),
     thin = as.integer(thin),
@@ -158,7 +212,8 @@ sampling <- function(
     init = normalize_init(init),
     inv_metric = metric_file,
     inv_metric_na = inv_metric_na,
-    verbose = as.logical(verbose)
+    verbose = as.logical(verbose),
+    num_threads = as.integer(num_threads)
   )
 
   model_instance <- new_model_instance(stanmod, data, seed)

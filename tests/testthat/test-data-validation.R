@@ -43,22 +43,33 @@ test_that("NA integer data is rejected before Stan services run", {
   )
 })
 
-test_that("invalid sampling counts return a configuration failure", {
+test_that("invalid sampling counts throw a configuration error", {
   path <- test_path("test-models/bernoulli.stan")
   mod <- stan_model(file = path)
   data <- list(N = 4L, y = c(1L, 0L, 1L, 0L))
 
-  zero_chains <- sampling(
-    mod, data, num_chains = 0, num_warmup = 5, num_samples = 5,
-    seed = 42, verbose = FALSE
+  expect_error(
+    sampling(
+      mod, data, num_chains = 0, num_warmup = 5, num_samples = 5,
+      seed = 42, verbose = FALSE
+    ),
+    "chains must be at least 1"
   )
-  zero_thin <- sampling(
-    mod, data, thin = 0, num_warmup = 5, num_samples = 5,
-    seed = 42, verbose = FALSE
+  expect_error(
+    sampling(
+      mod, data, thin = 0, num_warmup = 5, num_samples = 5,
+      seed = 42, verbose = FALSE
+    ),
+    "thin must be at least 1"
   )
-
-  expect_false(zero_chains$return_code == 0L)
-  expect_false(zero_thin$return_code == 0L)
+  expect_error(
+    sampling(
+      NULL, list(), num_warmup = .Machine$integer.max,
+      num_samples = .Machine$integer.max, save_warmup = TRUE,
+      seed = 42, verbose = FALSE
+    ),
+    "Requested number of saved draws is too large"
+  )
 })
 
 test_that("numeric initialization radius is accepted", {

@@ -10,19 +10,19 @@
 namespace newstan {
   template <class Model>
   Rcpp::List run_standalone_gqs(Model& model, Rcpp::List args) {
-    unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    bool verbose          = Rcpp::as<bool>(args["verbose"]);
+    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
+    const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
     // draws: Eigen::MatrixXd (rows=samples, columns=parameters)
-    Eigen::Map<Eigen::MatrixXd> draws =
+    const Eigen::Map<Eigen::MatrixXd> draws =
         Rcpp::as<Eigen::Map<Eigen::MatrixXd>>(args["draws"]);
 
     newstan::r_sample_writer sample_writer(static_cast<int>(draws.rows()));
     newstan::r_logger logger(verbose);
     newstan::r_interrupt interrupt;
 
-    int return_code = stan::services::standalone_generate(
+    const int return_code = stan::services::standalone_generate(
         model, draws, seed,
         interrupt, logger, sample_writer);
 

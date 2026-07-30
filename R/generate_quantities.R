@@ -48,6 +48,7 @@ generated_quantities <- function(
     seed = as.integer(seed),
     id = as.integer(id),
     verbose = as.logical(verbose),
+    num_threads = as.integer(num_threads),
     draws = draws_matrix
   )
 

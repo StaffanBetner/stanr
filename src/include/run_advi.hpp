@@ -4,7 +4,6 @@
 #include <Rcpp.h>
 #include <stan/services/experimental/advi/fullrank.hpp>
 #include <stan/services/experimental/advi/meanfield.hpp>
-#include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include <newstan/r_data_context.hpp>
@@ -13,26 +12,24 @@
 namespace newstan {
   template <class Model>
   Rcpp::List run_advi(Model& model, Rcpp::List args) {
-    std::string algorithm = get_string(args, "algorithm", "meanfield");
+    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
 
-    unsigned int seed     = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    double init_radius    = Rcpp::as<double>(args["init_radius"]);
-    int iter              = get_int(args, "iter", 10000);
-    int grad_samples      = get_int(args, "grad_samples", 1);
-    int elbo_samples      = get_int(args, "elbo_samples", 100);
-    double tol_rel_obj    = get_double(args, "tol_rel_obj", 0.01);
-    double eta            = get_double(args, "eta", 1.0);
-    bool adapt_engaged    = Rcpp::as<bool>(args["adapt_engaged"]);
-    int adapt_iter        = get_int(args, "adapt_iter", 50);
-    int eval_elbo         = get_int(args, "eval_elbo", 100);
-    int output_samples    = get_int(args, "output_samples", 1000);
-    bool verbose          = Rcpp::as<bool>(args["verbose"]);
+    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
+    const double init_radius = Rcpp::as<double>(args["init_radius"]);
+    const int iter = Rcpp::as<int>(args["iter"]);
+    const int grad_samples = Rcpp::as<int>(args["grad_samples"]);
+    const int elbo_samples = Rcpp::as<int>(args["elbo_samples"]);
+    const double tol_rel_obj = Rcpp::as<double>(args["tol_rel_obj"]);
+    const double eta = Rcpp::as<double>(args["eta"]);
+    const bool adapt_engaged = Rcpp::as<bool>(args["adapt_engaged"]);
+    const int adapt_iter = Rcpp::as<int>(args["adapt_iter"]);
+    const int eval_elbo = Rcpp::as<int>(args["eval_elbo"]);
+    const int output_samples = Rcpp::as<int>(args["output_samples"]);
+    const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
-    Rcpp::List data_list  = Rcpp::as<Rcpp::List>(args["data"]);
-    Rcpp::List init_list  = args.containsElementNamed("init")
-                        ? Rcpp::as<Rcpp::List>(args["init"])
-                        : data_list;
+    Rcpp::List data_list = Rcpp::as<Rcpp::List>(args["data"]);
+    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
     // Stan writes the posterior mean followed by output_samples draws.
@@ -49,7 +46,7 @@ namespace newstan {
           grad_samples, elbo_samples, iter, tol_rel_obj, eta,
           adapt_engaged, adapt_iter, eval_elbo, output_samples,
           interrupt, logger,
-          /*init_writer=*/sample_writer, sample_writer,
+          sample_writer, sample_writer,
           diagnostic_writer);
     } else if (algorithm == "meanfield") {
       return_code = stan::services::experimental::advi::meanfield(
@@ -57,7 +54,7 @@ namespace newstan {
           grad_samples, elbo_samples, iter, tol_rel_obj, eta,
           adapt_engaged, adapt_iter, eval_elbo, output_samples,
           interrupt, logger,
-          /*init_writer=*/sample_writer, sample_writer,
+          sample_writer, sample_writer,
           diagnostic_writer);
     }
 

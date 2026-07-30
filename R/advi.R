@@ -67,6 +67,7 @@ variational <- function(
     eval_elbo = as.integer(eval_elbo),
     output_samples = as.integer(output_samples),
     verbose = as.logical(verbose),
+    num_threads = as.integer(num_threads),
     data = data,
     init = normalize_init(init)
   )

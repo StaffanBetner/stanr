@@ -314,12 +314,13 @@ test_that("sampling with static HMC + inv_metric (diag_e) works", {
   expect_true(nrow(result$draws) > 0)
 })
 
-test_that("static HMC with multiple chains returns a configuration error", {
+test_that("static HMC with multiple chains throws a configuration error", {
   path <- test_path("test-models/bernoulli.stan")
   mod <- stan_model(file = path)
   data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 
-  result <- sampling(
+  expect_error(
+    sampling(
       mod,
       data,
       num_warmup = 50,
@@ -329,6 +330,7 @@ test_that("static HMC with multiple chains returns a configuration error", {
       engine = "static",
       seed = 42,
       verbose = FALSE
-    )
-  expect_false(result$return_code == 0L)
+    ),
+    "Static HMC only supports a single chain"
+  )
 })

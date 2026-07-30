@@ -3,6 +3,10 @@
 #' @param file Path to a `.stan` file (or `NULL` if `code` is provided)
 #' @param code Stan model code as a string (alternative to `file`)
 #' @param model_name Override model name (default: basename of `file` without `.stan`)
+#' @param include_directories Directories searched, in order, to resolve Stan
+#'   `#include` directives.
+#' @param external_cpp `NULL` or paths to C++ files prepended to the generated
+#'   C++ before the model is compiled. See [stanc()].
 #' @param force_recompile Whether to always recompile, even if a cached model is found
 #' @param verbose Print compilation progress
 #'
@@ -13,6 +17,8 @@ stan_model <- function(
   file = NULL,
   code = NULL,
   model_name = NULL,
+  include_directories = character(),
+  external_cpp = NULL,
   verbose = FALSE,
   force_recompile = FALSE
 ) {
@@ -46,7 +52,11 @@ stan_model <- function(
   }
 
   # Step 1: Stan -> C++ via stanc.js (QuickJSR)
-  cpp_code <- stanc_process(code)
+  cpp_code <- stanc(
+    code,
+    include_directories = include_directories,
+    external_cpp = external_cpp
+  )
   model_hash <- digest::digest(cpp_code, algo = "xxhash64")
 
   cpp_file <- file.path(tempdir(), paste0("stan_", model_hash, ".cpp"))

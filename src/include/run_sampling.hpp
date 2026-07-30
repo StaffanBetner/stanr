@@ -2,9 +2,6 @@
 #define NEWSTAN_RUN_SAMPLING_HPP
 
 #include <Rcpp.h>
-#include <cmath>
-#include <cstdint>
-#include <limits>
 #include <memory>
 #include <stan/io/array_var_context.hpp>
 #include <stan/services/sample/fixed_param.hpp>
@@ -22,7 +19,6 @@
 #include <stan/services/sample/hmc_static_dense_e_adapt.hpp>
 #include <stan/callbacks/json_writer.hpp>
 #include <sstream>
-#include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
@@ -33,102 +29,43 @@ namespace newstan {
 
   template <class Model>
   Rcpp::List run_sampling(Model& model, Rcpp::List args) {
-    // ── Algorithm & engine (CmdStan-style) ─────────────────────────
-    // algorithm: "hmc" or "fixed_param"
-    // engine: "nuts" or "static" (only for hmc)
-    std::string algorithm = get_string(args, "algorithm", "hmc");
-    std::string engine    = get_string(args, "engine", "nuts");
-    std::string metric    = get_string(args, "metric", "diag_e");
-    bool adapt_engaged    = get_bool(args, "adapt_engaged", true);
-    bool verbose          = get_bool(args, "verbose", true);
+    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
+    const std::string engine = Rcpp::as<std::string>(args["engine"]);
+    const std::string metric = Rcpp::as<std::string>(args["metric"]);
+    const bool adapt_engaged = Rcpp::as<bool>(args["adapt_engaged"]);
+    const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
-    unsigned int seed           = Rcpp::as<unsigned int>(args["seed"]);
-    unsigned int chain_id       = Rcpp::as<unsigned int>(args["id"]);
-    int num_chains              = Rcpp::as<int>(args["num_chains"]);
-    double init_radius          = Rcpp::as<double>(args["init_radius"]);
-    int num_warmup              = Rcpp::as<int>(args["num_warmup"]);
-    int num_samples             = Rcpp::as<int>(args["num_samples"]);
-    int num_thin                = get_int(args, "thin", 1);
-    bool save_warmup            = Rcpp::as<bool>(args["save_warmup"]);
-    int refresh                 = get_int(args, "refresh", 100);
-    double stepsize             = get_double(args, "stepsize", 1.0);
-    double stepsize_jitter      = get_double(args, "stepsize_jitter", 0.0);
-    int max_depth               = get_int(args, "max_depth", 10);
-    double int_time             = get_double(args, "int_time", 10.0);
+    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
+    const int num_chains = Rcpp::as<int>(args["num_chains"]);
+    const double init_radius = Rcpp::as<double>(args["init_radius"]);
+    const int num_warmup = Rcpp::as<int>(args["num_warmup"]);
+    const int num_samples = Rcpp::as<int>(args["num_samples"]);
+    const int num_thin = Rcpp::as<int>(args["thin"]);
+    const bool save_warmup = Rcpp::as<bool>(args["save_warmup"]);
+    const int refresh = Rcpp::as<int>(args["refresh"]);
+    const double stepsize = Rcpp::as<double>(args["stepsize"]);
+    const double stepsize_jitter = Rcpp::as<double>(args["stepsize_jitter"]);
+    const int max_depth = Rcpp::as<int>(args["max_depth"]);
+    const double int_time = Rcpp::as<double>(args["int_time"]);
 
     // Adaptation parameters
-    double delta      = get_double(args, "delta", 0.8);
-    double gamma      = get_double(args, "gamma", 0.05);
-    double kappa      = get_double(args, "kappa", 0.75);
-    double t0         = get_double(args, "t0", 10.0);
+    const double delta = Rcpp::as<double>(args["delta"]);
+    const double gamma = Rcpp::as<double>(args["gamma"]);
+    const double kappa = Rcpp::as<double>(args["kappa"]);
+    const double t0 = Rcpp::as<double>(args["t0"]);
 
     // Adaptation window parameters (for diag_e and dense_e metrics)
-    int init_buffer_arg = get_int(args, "init_buffer", 75);
-    int term_buffer_arg = get_int(args, "term_buffer", 50);
-    int window_arg      = get_int(args, "window", 25);
+    const int init_buffer_arg = Rcpp::as<int>(args["init_buffer"]);
+    const int term_buffer_arg = Rcpp::as<int>(args["term_buffer"]);
+    const int window_arg = Rcpp::as<int>(args["window"]);
 
     newstan::r_logger logger(verbose);
-    auto config_error = [&logger](const std::string& message) {
-      logger.error(message);
-      logger.flush();
-      return Rcpp::List::create(
-          Rcpp::_["samples"] = Rcpp::DataFrame::create(),
-          Rcpp::_["return_code"] = static_cast<int>(stan::services::error_codes::CONFIG),
-          Rcpp::_["method"] = "sample");
-    };
 
-    if (num_chains < 1) {
-      return config_error("chains must be at least 1.");
-    }
-    if (num_warmup < 0 || num_samples < 0) {
-      return config_error("num_warmup and num_samples must be non-negative.");
-    }
-    if (num_thin < 1) {
-      return config_error("thin must be at least 1.");
-    }
-    if (refresh < 0) {
-      return config_error("refresh must be non-negative.");
-    }
-    if (!std::isfinite(init_radius) || init_radius < 0) {
-      return config_error("init_radius must be finite and non-negative.");
-    }
-    if (!std::isfinite(stepsize) || stepsize <= 0
-        || !std::isfinite(stepsize_jitter) || stepsize_jitter < 0
-        || stepsize_jitter > 1) {
-      return config_error("stepsize must be positive and stepsize_jitter must be in [0, 1].");
-    }
-    if (max_depth < 1 || !std::isfinite(int_time) || int_time <= 0) {
-      return config_error("max_depth must be at least 1 and int_time must be positive.");
-    }
-    if (!std::isfinite(delta) || delta <= 0 || delta >= 1
-        || !std::isfinite(gamma) || gamma <= 0
-        || !std::isfinite(kappa) || kappa <= 0 || kappa > 1
-        || !std::isfinite(t0) || t0 <= 0) {
-      return config_error("Invalid adaptation parameters.");
-    }
-    if (init_buffer_arg < 0 || term_buffer_arg < 0 || window_arg < 0) {
-      return config_error("Adaptation window parameters must be non-negative.");
-    }
-    if (algorithm != "hmc" && algorithm != "fixed_param") {
-      return config_error("Unknown sampling algorithm: " + algorithm);
-    }
-    if (algorithm == "hmc" && engine != "nuts" && engine != "static") {
-      return config_error("Unknown HMC engine: " + engine);
-    }
-    if (metric != "unit_e" && metric != "diag_e" && metric != "dense_e") {
-      return config_error("Unknown metric: " + metric);
-    }
-
-    const auto expected_rows_64 =
-        static_cast<int64_t>(num_samples) / num_thin
-        + (save_warmup ? static_cast<int64_t>(num_warmup) / num_thin : 0);
-    if (expected_rows_64 > std::numeric_limits<int>::max()) {
-      return config_error("Requested number of saved draws is too large.");
-    }
-    int expected_rows = static_cast<int>(expected_rows_64);
-    unsigned int init_buffer = static_cast<unsigned int>(init_buffer_arg);
-    unsigned int term_buffer = static_cast<unsigned int>(term_buffer_arg);
-    unsigned int window = static_cast<unsigned int>(window_arg);
+    const int expected_rows = num_samples / num_thin + (save_warmup ? num_warmup / num_thin : 0);
+    const unsigned int init_buffer = static_cast<unsigned int>(init_buffer_arg);
+    const unsigned int term_buffer = static_cast<unsigned int>(term_buffer_arg);
+    const unsigned int window = static_cast<unsigned int>(window_arg);
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
@@ -157,19 +94,16 @@ namespace newstan {
     //   - Single vector/matrix: same metric for all chains
     //   - List of vectors/matrices: one metric per chain
     // Stored as shared_ptr<var_context> (same pattern as CmdStan)
-    bool metric_supplied = args.containsElementNamed("inv_metric") &&
+    const bool metric_supplied = args.containsElementNamed("inv_metric") &&
                            !Rcpp::as<bool>(args["inv_metric_na"]);
     std::vector<std::shared_ptr<stan::io::var_context>> metric_ctxs;
 
     if (metric_supplied) {
       Rcpp::List inv_metric_list = Rcpp::as<Rcpp::List>(args["inv_metric"]);
-      if (inv_metric_list.size() != 1 && inv_metric_list.size() != num_chains) {
-        return config_error("inv_metric must contain one metric or one metric per chain.");
-      }
-      size_t num_params = model.num_params_r();
+      const size_t num_params = model.num_params_r();
 
       // Determine if user provided one metric (recycled) or one per chain
-      bool per_chain = inv_metric_list.length() == static_cast<R_xlen_t>(num_chains);
+      const bool per_chain = inv_metric_list.length() == static_cast<R_xlen_t>(num_chains);
 
       metric_ctxs.reserve(num_chains);
       for (int i = 0; i < num_chains; ++i) {

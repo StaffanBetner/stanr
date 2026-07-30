@@ -17,11 +17,11 @@
 namespace newstan {
 
 Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
-  int num_threads = newstan::get_int(args, "num_threads", 0);
+  int num_threads = Rcpp::as<int>(args["num_threads"]);
   stan::math::init_threadpool_tbb(num_threads);
 
   // Extract method from args
-  std::string method = newstan::get_string(args, "method", "sample");
+  std::string method = Rcpp::as<std::string>(args["method"]);
 
   int return_code = stan::services::error_codes::CONFIG;
 

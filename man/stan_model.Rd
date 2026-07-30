@@ -8,6 +8,8 @@ stan_model(
   file = NULL,
   code = NULL,
   model_name = NULL,
+  include_directories = character(),
+  external_cpp = NULL,
   verbose = FALSE,
   force_recompile = FALSE
 )
@@ -18,6 +20,12 @@ stan_model(
 \item{code}{Stan model code as a string (alternative to \code{file})}
 
 \item{model_name}{Override model name (default: basename of \code{file} without \code{.stan})}
+
+\item{include_directories}{Directories searched, in order, to resolve Stan
+\verb{#include} directives.}
+
+\item{external_cpp}{\code{NULL} or paths to C++ files prepended to the generated
+C++ before the model is compiled. See \code{\link[=stanc]{stanc()}}.}
 
 \item{verbose}{Print compilation progress}
 

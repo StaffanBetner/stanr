@@ -5,7 +5,6 @@
 #include <stan/services/optimize/laplace_sample.hpp>
 #include <stan/callbacks/json_writer.hpp>
 #include <sstream>
-#include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
@@ -13,13 +12,13 @@
 namespace newstan {
   template <class Model>
   Rcpp::List run_laplace(Model& model, Rcpp::List args) {
-    Eigen::VectorXd mode = Rcpp::as<Eigen::VectorXd>(args["mode"]);
-    int draws = get_int(args, "draws", 1000);
-    bool jacobian = get_bool(args, "jacobian", true);
-    bool calculate_lp = get_bool(args, "calculate_lp", true);
-    unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-    int refresh = get_int(args, "refresh", 100);
-    bool verbose = get_bool(args, "verbose", true);
+    const Eigen::VectorXd mode = Rcpp::as<Eigen::VectorXd>(args["mode"]);
+    const int draws = Rcpp::as<int>(args["draws"]);
+    const bool jacobian = Rcpp::as<bool>(args["jacobian"]);
+    const bool calculate_lp = Rcpp::as<bool>(args["calculate_lp"]);
+    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+    const int refresh = Rcpp::as<int>(args["refresh"]);
+    const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
     newstan::r_sample_writer sample_writer(draws);
     stan::callbacks::json_writer<std::ostringstream> hessian_writer(
