@@ -97,7 +97,9 @@
   # keeps the PCH in the user cache rather than modifying an installed package.
   overlay_header <- file.path(cache_dir, "include", "stan", "model", "model_header.hpp")
   pch <- if (compiler_type == "gcc") {
-    file.path(dirname(overlay_header), "model_header.hpp.gch", "model_header.hpp.gch")
+    # GCC looks for a PCH at <resolved-header>.gch.  The overlay header is
+    # deliberately first on the include path, so keep its PCH alongside it.
+    paste0(overlay_header, ".gch")
   } else {
     file.path(cache_dir, "model_header.hpp.gch")
   }
