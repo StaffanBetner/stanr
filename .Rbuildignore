@@ -1,3 +1,9 @@
+^src/stan/(?!(src$|src/stan))
+^src/math/(?!(stan|lib$|lib/sundials_([^\/]*)$|lib/sundials_([^\/]*)/src|lib/sundials_([^\/]*)/include))
+^src/math/lib/sundials_([^\/]*)/src/sunnonlinsol/fixedpoint/fmod
+^src/sundials
+^inst/include/(?!newstan)
+
 ^StanEstimators\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
@@ -11,5 +17,5 @@
 ^\.cache$
 ^\.clang-tidy$
 ^\.devcontainer
-libs
-lib
+^libs$
+^lib$
