@@ -61,7 +61,7 @@ stan_model <- function(
 
   env <- new.env()
   runtime_archive <- system.file(
-    "lib", "libnewstan_runner.a", package = "newstan", mustWork = TRUE
+    "lib", Sys.getenv("R_ARCH"), "libnewstan_runner.a", package = "newstan", mustWork = TRUE
   )
 
   tbb_libs <- utils::capture.output(RcppParallel::RcppParallelLibs())

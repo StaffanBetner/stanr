@@ -18,8 +18,7 @@ Imports:
     QuickJSR,
     posterior,
     withr,
-    BH,
-    RcppEigen
+    digest
 LinkingTo:
     Rcpp,
     RcppEigen,
@@ -27,8 +26,9 @@ LinkingTo:
     RcppParallel
 Suggests:
     testthat (>= 3.0.0),
-    digest,
-    jsonlite
+    jsonlite,
+    BH,
+    RcppEigen
 Config/testthat/edition: 3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

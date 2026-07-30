@@ -16,7 +16,7 @@ DEV_RUNTIME_ARCHIVE = ../lib/libnewstan_runner.a
 ifeq ($(strip $(R_PACKAGE_DIR)),)
 RUNTIME_ARCHIVE = $(DEV_RUNTIME_ARCHIVE)
 else
-RUNTIME_ARCHIVE = $(R_PACKAGE_DIR)/lib$(R_ARCH)/libnewstan_runner.a
+RUNTIME_ARCHIVE = $(R_PACKAGE_DIR)/lib/$(R_ARCH)/libnewstan_runner.a
 endif
 
 RUNTIME_ARCHIVES = $(RUNTIME_ARCHIVE) $(DEV_RUNTIME_ARCHIVE)
