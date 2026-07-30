@@ -81,8 +81,12 @@ stan_model <- function(
     paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS -O3 -w"
   )
+  base_cppflags <- cppflags
+  pch_enabled <- FALSE
   if (precompiled_headers && length(external_cpp) == 0) {
-    cppflags <- paste(.newstan_pch_flags(cppflags, verbose), cppflags)
+    pch_flags <- .newstan_pch_flags(base_cppflags, verbose)
+    pch_enabled <- nzchar(pch_flags)
+    cppflags <- paste(pch_flags, base_cppflags)
   }
 
   env <- new.env()
@@ -97,18 +101,38 @@ stan_model <- function(
 
   libs <- paste(shQuote(runtime_archive), tbb_libs)
 
-  withr::with_makevars(
-    c(
-      USE_CXX17 = 1,
-      PKG_CPPFLAGS = cppflags,
-      PKG_LIBS = libs
-    ),
-    Rcpp::sourceCpp(
-      file = cpp_file,
-      env = env,
-      rebuild = force_recompile,
-      verbose = verbose
+  compile_model <- function(compilation_cppflags) {
+    withr::with_makevars(
+      c(
+        USE_CXX17 = 1,
+        PKG_CPPFLAGS = compilation_cppflags,
+        PKG_LIBS = libs
+      ),
+      Rcpp::sourceCpp(
+        file = cpp_file,
+        env = env,
+        rebuild = force_recompile,
+        verbose = verbose
+      )
     )
+  }
+
+  tryCatch(
+    compile_model(cppflags),
+    error = function(error) {
+      if (!pch_enabled || !.newstan_is_stale_pch_error(error)) {
+        stop(error)
+      }
+
+      if (verbose) {
+        message("[newstan] Recompiling stale precompiled model header...")
+      }
+      pch_flags <- .newstan_pch_flags(base_cppflags, verbose, rebuild = TRUE)
+      if (!nzchar(pch_flags)) {
+        stop(error)
+      }
+      compile_model(paste(pch_flags, base_cppflags))
+    }
   )
 
   env

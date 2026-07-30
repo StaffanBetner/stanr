@@ -1,6 +1,6 @@
 test_that("sampling returns expected structure", {
   path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(file = path)
+  mod <- stan_model(file = path, precompiled_headers = TRUE)
   data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 
   result <- sampling(

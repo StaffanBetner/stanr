@@ -51,7 +51,7 @@
 #' Return flags that make sourceCpp use a cached Stan PCH.
 #'
 #' @keywords internal
-.newstan_pch_flags <- function(cppflags, verbose = FALSE) {
+.newstan_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
   header <- system.file("include", "stan", "model", "model_header.hpp",
     package = "newstan", mustWork = TRUE)
   dependency_flags <- .newstan_dependency_cppflags()
@@ -104,6 +104,10 @@
     file.path(cache_dir, "model_header.hpp.gch")
   }
 
+  if (rebuild && file.exists(pch)) {
+    unlink(pch)
+  }
+
   if (!file.exists(pch)) {
     if (compiler_type == "gcc" && !file.exists(overlay_header)) {
       dir.create(dirname(overlay_header), recursive = TRUE, showWarnings = FALSE)
@@ -135,4 +139,15 @@
   } else {
     paste0("-I", shQuote(file.path(cache_dir, "include")))
   }
+}
+
+#' Whether a compiler error indicates that the cached PCH is stale.
+#'
+#' @keywords internal
+.newstan_is_stale_pch_error <- function(error) {
+  grepl(
+    "has been modified since the precompiled header",
+    conditionMessage(error),
+    fixed = TRUE
+  )
 }
