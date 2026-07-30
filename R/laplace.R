@@ -67,6 +67,6 @@ laplace <- function(
   structure(list(
     draws = posterior::as_draws_df(result$draws),
     return_code = result$return_code,
-    args = args
+    args = service_args(args)
   ), class = c("StanLaplace", "StanService", "list"))
 }

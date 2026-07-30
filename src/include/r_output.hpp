@@ -7,6 +7,8 @@
 #include <stan/callbacks/writer.hpp>
 #include <stan/callbacks/structured_writer.hpp>
 #include <Eigen/Dense>
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <vector>
 #include <string>
@@ -128,14 +130,6 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   /**
-   * Return a copy of the collected data as an Eigen matrix.
-   */
-  Eigen::MatrixXd to_matrix() const {
-    if (n_rows_ == 0) return Eigen::MatrixXd(0, n_cols_);
-    return values_.topLeftCorner(n_rows_, n_cols_);
-  }
-
-  /**
    * Copy the stored columns into preallocated R vectors.  This is intended for
    * assembling multi-chain output on R's main thread without first creating a
    * combined Eigen matrix.
@@ -176,83 +170,6 @@ class r_discard_writer : public stan::callbacks::writer {
   void operator()(const Eigen::MatrixXd&) override {}
   void operator()(const Eigen::Matrix<double, -1, 1>&) override {}
   void operator()(const Eigen::Matrix<double, 1, -1>&) override {}
-};
-
-class r_diagnostic_writer : public stan::callbacks::writer {
- private:
-  std::vector<std::string> colnames_;
-  Eigen::MatrixXd values_;       // column-major: rows=samples, cols=diagnostics
-  int n_rows_;
-  int n_cols_;
-  bool initialized_;
-  int expected_rows_;
-
- public:
-  explicit r_diagnostic_writer(int expected_rows = 0)
-    : n_rows_(0)
-    , n_cols_(0)
-    , initialized_(false)
-    , expected_rows_(expected_rows) {}
-
-  void operator()(const std::vector<std::string>& names) override {
-    n_cols_ = static_cast<int>(names.size());
-    colnames_ = names;
-    if (expected_rows_ > 0) {
-      values_.resize(expected_rows_, n_cols_);
-    }
-    initialized_ = true;
-  }
-
-  void operator()(const std::vector<double>& state) override {
-    if (!initialized_) return;
-    int n = static_cast<int>(state.size());
-    if (n != n_cols_) return;
-
-    if (n_rows_ >= static_cast<int>(values_.rows())) {
-      int new_rows = std::max(
-        static_cast<int>(std::ceil(1.5 * values_.rows())),
-        n_rows_ + 100
-      );
-      Eigen::MatrixXd new_values(new_rows, n_cols_);
-      if (n_rows_ > 0) {
-        new_values.topLeftCorner(n_rows_, n_cols_) =
-          values_.topLeftCorner(n_rows_, n_cols_);
-      }
-      values_ = std::move(new_values);
-    }
-
-    values_.row(n_rows_) = Eigen::Map<const Eigen::RowVectorXd>(
-      state.data(), static_cast<Eigen::Index>(n));
-    n_rows_++;
-  }
-
-  void operator()() override {}
-
-  void operator()(const std::string& message) override {}
-
-  void operator()(const Eigen::MatrixXd& values) override {}
-
-  Rcpp::NumericMatrix to_r_matrix() const {
-    Rcpp::NumericMatrix r_mat(n_rows_, n_cols_);
-    if (n_rows_ > 0) {
-      Eigen::Map<Eigen::MatrixXd>(r_mat.begin(), n_rows_, n_cols_) =
-        values_.topLeftCorner(n_rows_, n_cols_);
-    }
-    r_mat.attr("dimnames") = Rcpp::List::create(
-      R_NilValue,
-      Rcpp::CharacterVector(colnames_.begin(), colnames_.end())
-    );
-    return r_mat;
-  }
-
-  Eigen::MatrixXd to_matrix() const {
-    if (n_rows_ == 0) return Eigen::MatrixXd(0, n_cols_);
-    return values_.topLeftCorner(n_rows_, n_cols_);
-  }
-
-  const std::vector<std::string>& colnames() const { return colnames_; }
-  int n_rows() const { return n_rows_; }
-  int n_cols() const { return n_cols_; }
 };
 
 }  // namespace newstan

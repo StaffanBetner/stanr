@@ -22,7 +22,6 @@ namespace newstan {
     const bool save_iterations = Rcpp::as<bool>(args["save_iterations"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
-    Rcpp::List data_list = Rcpp::as<Rcpp::List>(args["data"]);
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);

@@ -33,7 +33,8 @@
 #'   - `diagnostics`: a `posterior::as_draws_df` object with pathfinder diagnostics
 #'     (`lp_approx__`, `lp__`, `path__`).
 #'   - `return_code`: integer status code.
-#'   - `args`: named list of Pathfinder arguments.
+#'   - `args`: named list of Pathfinder configuration arguments. Large inputs
+#'     are omitted.
 #'
 #' @export
 pathfinder <- function(
@@ -89,7 +90,6 @@ pathfinder <- function(
     refresh = as.integer(refresh),
     verbose = as.logical(verbose),
     num_threads = as.integer(num_threads),
-    data = data,
     init = normalize_init(init)
   )
 
@@ -106,7 +106,7 @@ pathfinder <- function(
       structure(list(
         draws = NULL,
         return_code = result$return_code,
-        args = args
+        args = service_args(args)
       ), class = c("StanPathfinder", "StanService", "list"))
     )
   }
@@ -133,6 +133,6 @@ pathfinder <- function(
     draws = draws,
     diagnostics = diagnostics,
     return_code = result$return_code,
-    args = args
+    args = service_args(args)
   ), class = c("StanPathfinder", "StanService", "list"))
 }

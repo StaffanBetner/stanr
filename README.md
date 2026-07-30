@@ -9,8 +9,8 @@
 
 `newstan` is an R interface for compiling Stan programs and running Stan
 services directly from R. Results use `posterior` draw objects where
-possible, and every service result includes the arguments passed through
-to the backend.
+possible, and every service result includes its normalized configuration
+arguments (large execution inputs are omitted).
 
 ## Service Return Types
 
@@ -87,8 +87,8 @@ the compiled model.
 ## Sampling
 
 Use `sampling()` for MCMC. The result is a list with posterior draws,
-sampler diagnostics, a Stan return code, and the normalized argument
-list.
+sampler diagnostics, a Stan return code, and the normalized configuration
+argument list.
 
 ``` r
 fit <- sampling(

@@ -43,7 +43,6 @@ gradient_check <- function(
     init_radius = init_radius(init),
     verbose = as.logical(verbose),
     num_threads = as.integer(num_threads),
-    data = data,
     init = normalize_init(init)
   )
 

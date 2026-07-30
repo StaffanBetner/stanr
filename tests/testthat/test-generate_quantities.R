@@ -31,6 +31,7 @@ test_that("generated_quantities returns expected structure", {
   expect_s3_class(result$draws, "draws_df")
   expect_s3_class(summary(result), "draws_summary")
   expect_equal(result$return_code, 0L)
+  expect_false("draws" %in% names(result$args))
 })
 
 test_that("generated_quantities produces log_lik column", {

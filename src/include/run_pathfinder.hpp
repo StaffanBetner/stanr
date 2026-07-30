@@ -36,7 +36,6 @@ namespace newstan {
     const int refresh = Rcpp::as<int>(args["refresh"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
-    Rcpp::List data_list = Rcpp::as<Rcpp::List>(args["data"]);
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_logger logger(verbose);

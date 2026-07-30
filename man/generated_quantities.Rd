@@ -9,7 +9,6 @@ generated_quantities(
   data,
   fitted_params,
   seed = NA,
-  id = 1,
   verbose = FALSE,
   num_threads = -1,
   ...
@@ -26,8 +25,6 @@ a Stan model with a generated quantities block.}
 
 \item{seed}{Random seed (NA = random).}
 
-\item{id}{Chain ID for RNG advancement (default: 1).}
-
 \item{verbose}{Print progress (default: FALSE).}
 
 \item{num_threads}{Number of threads, or \code{-1} for all available threads.}
@@ -39,7 +36,8 @@ A list containing:
 \itemize{
 \item \code{draws}: a \code{posterior::as_draws_df} object with generated quantity draws.
 \item \code{return_code}: integer status code.
-\item \code{args}: named list of generated quantities arguments.
+\item \code{args}: named list of generated quantities configuration arguments.
+Large inputs are omitted.
 }
 }
 \description{

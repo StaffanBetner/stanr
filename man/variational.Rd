@@ -69,7 +69,7 @@ A list containing:
 \itemize{
 \item \code{draws}: a \code{posterior::as_draws_df} object with variational draws.
 \item \code{return_code}: integer status code.
-\item \code{args}: named list of ADVI arguments.
+\item \code{args}: named list of ADVI configuration arguments. Large inputs are omitted.
 }
 }
 \description{

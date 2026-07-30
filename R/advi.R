@@ -24,7 +24,7 @@
 #' @return A list containing:
 #'   - `draws`: a `posterior::as_draws_df` object with variational draws.
 #'   - `return_code`: integer status code.
-#'   - `args`: named list of ADVI arguments.
+#'   - `args`: named list of ADVI configuration arguments. Large inputs are omitted.
 #'
 #' @export
 variational <- function(
@@ -68,7 +68,6 @@ variational <- function(
     output_samples = as.integer(output_samples),
     verbose = as.logical(verbose),
     num_threads = as.integer(num_threads),
-    data = data,
     init = normalize_init(init)
   )
 
@@ -84,7 +83,7 @@ variational <- function(
       structure(list(
         draws = NULL,
         return_code = result$return_code,
-        args = args
+        args = service_args(args)
       ), class = c("StanVariational", "StanService", "list"))
     )
   }
@@ -92,6 +91,6 @@ variational <- function(
   structure(list(
     draws = posterior::as_draws_df(result$draws),
     return_code = result$return_code,
-    args = args
+    args = service_args(args)
   ), class = c("StanVariational", "StanService", "list"))
 }

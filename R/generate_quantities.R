@@ -8,7 +8,6 @@
 #' @param fitted_params An object containing posterior draws of constrained parameters
 #'   (e.g., the `draws` element from a [sampling()] result).
 #' @param seed Random seed (NA = random).
-#' @param id Chain ID for RNG advancement (default: 1).
 #' @param verbose Print progress (default: FALSE).
 #' @param num_threads Number of threads, or `-1` for all available threads.
 #' @param ... Unused.
@@ -16,7 +15,8 @@
 #' @return A list containing:
 #'   - `draws`: a `posterior::as_draws_df` object with generated quantity draws.
 #'   - `return_code`: integer status code.
-#'   - `args`: named list of generated quantities arguments.
+#'   - `args`: named list of generated quantities configuration arguments.
+#'     Large inputs are omitted.
 #'
 #' @export
 generated_quantities <- function(
@@ -24,7 +24,6 @@ generated_quantities <- function(
   data,
   fitted_params,
   seed = NA,
-  id = 1,
   verbose = FALSE,
   num_threads = -1,
   ...
@@ -46,7 +45,6 @@ generated_quantities <- function(
   args <- list(
     method = "generate_quantities",
     seed = as.integer(seed),
-    id = as.integer(id),
     verbose = as.logical(verbose),
     num_threads = as.integer(num_threads),
     draws = draws_matrix
@@ -57,11 +55,11 @@ generated_quantities <- function(
     result <- stanmod$run_model(model_instance$model, args)
   )
 
-  gqs_draws <- posterior::as_draws_df(as.data.frame(result$samples))
+  gqs_draws <- posterior::as_draws_df(result$samples)
 
   structure(list(
     draws = gqs_draws,
     return_code = result$return_code,
-    args = args
+    args = service_args(args)
   ), class = c("StanGeneratedQuantities", "StanService", "list"))
 }

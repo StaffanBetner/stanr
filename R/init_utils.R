@@ -33,3 +33,9 @@ init_radius <- function(init) {
 new_model_instance <- function(stanmod, data, seed) {
   list(model = stanmod$new_model(data, seed))
 }
+
+# Keep service results small: data, initialization values, draws, and metrics can
+# be large and are inputs rather than service configuration.
+service_args <- function(args) {
+  args[setdiff(names(args), c("data", "init", "draws", "inv_metric"))]
+}

@@ -47,7 +47,8 @@
 #'   - `draws`: a `posterior::as_draws_df` object with parameter draws.
 #'   - `diagnostics`: a `posterior::as_draws_df` object with sampler diagnostics.
 #'   - `return_code`: integer status code.
-#'   - `args`: named list of sampling arguments.
+#'   - `args`: named list of sampling configuration arguments. Large inputs are
+#'     omitted.
 #'
 #' @export
 sampling <- function(
@@ -230,7 +231,7 @@ sampling <- function(
         draws = NULL,
         diagnostics = NULL,
         return_code = result$return_code,
-        args = args
+        args = service_args(args)
       ), class = c("StanSample", "StanService", "list"))
     )
   }
@@ -273,6 +274,6 @@ sampling <- function(
     draws = posterior::subset_draws(draws, par_vars),
     diagnostics = diagnostics,
     return_code = result$return_code,
-    args = args
+    args = service_args(args)
   ), class = c("StanSample", "StanService", "list"))
 }

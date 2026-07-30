@@ -26,7 +26,8 @@
 #'   - `par`: named numeric vector of parameter values at the mode.
 #'   - `value`: log probability at the mode.
 #'   - `return_code`: integer status code.
-#'   - `args`: named list of optimization arguments.
+#'   - `args`: named list of optimization configuration arguments. Large inputs
+#'     are omitted.
 #'
 #' @export
 optimizing <- function(
@@ -72,7 +73,6 @@ optimizing <- function(
     refresh = as.integer(refresh),
     verbose = as.logical(verbose),
     num_threads = as.integer(num_threads),
-    data = data,
     init = normalize_init(init)
   )
 
@@ -95,6 +95,6 @@ optimizing <- function(
     par = par_vec,
     value = result$value,
     return_code = result$return_code,
-    args = args
+    args = service_args(args)
   ), class = c("StanOptimize", "StanService", "list"))
 }

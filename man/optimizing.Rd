@@ -73,7 +73,8 @@ A list containing:
 \item \code{par}: named numeric vector of parameter values at the mode.
 \item \code{value}: log probability at the mode.
 \item \code{return_code}: integer status code.
-\item \code{args}: named list of optimization arguments.
+\item \code{args}: named list of optimization configuration arguments. Large inputs
+are omitted.
 }
 }
 \description{

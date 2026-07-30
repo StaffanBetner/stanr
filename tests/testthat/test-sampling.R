@@ -20,6 +20,7 @@ test_that("sampling returns expected structure", {
   expect_s3_class(result$diagnostics, "draws_df")
   expect_s3_class(summary(result), "draws_summary")
   expect_equal(result$return_code, 0L)
+  expect_false(any(c("init", "inv_metric") %in% names(result$args)))
 })
 
 test_that("sampling with multiple chains works", {

@@ -116,7 +116,8 @@ A list containing:
 \item \code{draws}: a \code{posterior::as_draws_df} object with parameter draws.
 \item \code{diagnostics}: a \code{posterior::as_draws_df} object with sampler diagnostics.
 \item \code{return_code}: integer status code.
-\item \code{args}: named list of sampling arguments.
+\item \code{args}: named list of sampling configuration arguments. Large inputs are
+omitted.
 }
 }
 \description{

@@ -11,7 +11,6 @@ namespace newstan {
   template <class Model>
   Rcpp::List run_standalone_gqs(Model& model, Rcpp::List args) {
     const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
 
     // draws: Eigen::MatrixXd (rows=samples, columns=parameters)

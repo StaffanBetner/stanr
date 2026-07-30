@@ -90,7 +90,8 @@ A list containing:
 \item \code{diagnostics}: a \code{posterior::as_draws_df} object with pathfinder diagnostics
 (\code{lp_approx__}, \code{lp__}, \code{path__}).
 \item \code{return_code}: integer status code.
-\item \code{args}: named list of Pathfinder arguments.
+\item \code{args}: named list of Pathfinder configuration arguments. Large inputs
+are omitted.
 }
 }
 \description{
