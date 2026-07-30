@@ -27,10 +27,10 @@ test_that("stan_model errors when both file and code given", {
   )
 })
 
-test_that("stan_model validates the precompile argument", {
+test_that("stan_model validates the precompiled_headers argument", {
   expect_error(
-    stan_model(code = "parameters { real x; }", precompile = NA),
-    "`precompile` must be TRUE or FALSE"
+    stan_model(code = "parameters { real x; }", precompiled_headers = NA),
+    "`precompiled_headers` must be TRUE or FALSE"
   )
 })
 
