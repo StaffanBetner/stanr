@@ -27,6 +27,13 @@ test_that("stan_model errors when both file and code given", {
   )
 })
 
+test_that("stan_model validates the precompile argument", {
+  expect_error(
+    stan_model(code = "parameters { real x; }", precompile = NA),
+    "`precompile` must be TRUE or FALSE"
+  )
+})
+
 test_that("stan_model errors on missing file", {
   expect_snapshot(stan_model(file = "nonexistent.stan"), error = TRUE)
 })

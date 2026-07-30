@@ -11,6 +11,7 @@ stan_model(
   include_directories = character(),
   external_cpp = NULL,
   verbose = FALSE,
+  precompiled_headers = FALSE,
   force_recompile = FALSE
 )
 }
@@ -28,6 +29,11 @@ stan_model(
 C++ before the model is compiled. See \code{\link[=stanc]{stanc()}}.}
 
 \item{verbose}{Print compilation progress}
+
+\item{precompiled_headers}{Whether to use a cached precompiled Stan model header.
+This substantially speeds up repeated model compilations, but the initial
+build is large and is stored in the user's cache directory. It is disabled
+automatically when \code{external_cpp} is supplied.}
 
 \item{force_recompile}{Whether to always recompile, even if a cached model is found}
 }

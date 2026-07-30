@@ -7,6 +7,10 @@
 #'   `#include` directives.
 #' @param external_cpp `NULL` or paths to C++ files prepended to the generated
 #'   C++ before the model is compiled. See [stanc()].
+#' @param precompiled_headers Whether to use a cached precompiled Stan model header.
+#'   This substantially speeds up repeated model compilations, but the initial
+#'   build is large and is stored in the user's cache directory. It is disabled
+#'   automatically when `external_cpp` is supplied.
 #' @param force_recompile Whether to always recompile, even if a cached model is found
 #' @param verbose Print compilation progress
 #'
@@ -19,6 +23,7 @@ stan_model <- function(
   include_directories = character(),
   external_cpp = NULL,
   verbose = FALSE,
+  precompiled_headers = FALSE,
   force_recompile = FALSE
 ) {
   # Validate inputs
@@ -27,6 +32,9 @@ stan_model <- function(
   }
   if (!is.null(file) && !is.null(code)) {
     stop("Provide either 'file' or 'code', not both.")
+  }
+  if (!is.logical(precompiled_headers) || length(precompiled_headers) != 1 || is.na(precompiled_headers)) {
+    stop("`precompiled_headers` must be TRUE or FALSE.", call. = FALSE)
   }
 
   # Read Stan code
@@ -67,6 +75,9 @@ stan_model <- function(
     paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS -O3 -w"
   )
+  if (precompiled_headers && length(external_cpp) == 0) {
+    cppflags <- paste(.newstan_pch_flags(cppflags, verbose), cppflags)
+  }
 
   env <- new.env()
   runtime_archive <- system.file(
