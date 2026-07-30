@@ -12,3 +12,4 @@
 ^\.clang-tidy$
 ^\.devcontainer
 libs
+lib

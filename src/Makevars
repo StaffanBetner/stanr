@@ -1,10 +1,16 @@
 PKG_CPPFLAGS = -I"../inst/include" -D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
 PKG_CPPFLAGS += $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::CxxFlags()" | tail -n 1)
 
-PKG_LIBS += $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::RcppParallelLibs()" | tail -n 1)
+TBB_LIBS = $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::RcppParallelLibs()" | tail -n 1)
+
 ifeq ($(OS),Windows_NT)
-	PKG_LIBS += -ltbb -ltbbmalloc
+    TBB_CHECK = $(shell "${R_HOME}/bin/Rscript" -e "cat(utils::packageVersion('RcppParallel') > '6.0.0')")
+	ifeq ($(TBB_CHECK),TRUE)
+		TBB_LIBS = -ltbb12 -ltbbmalloc
+	endif
 endif
+
+PKG_LIBS += $(TBB_LIBS)
 
 DEV_RUNTIME_ARCHIVE = ../lib/libnewstan_runner.a
 ifeq ($(strip $(R_PACKAGE_DIR)),)

@@ -9,3 +9,4 @@ docs
 compile_commands.json
 .cache
 libs
+lib

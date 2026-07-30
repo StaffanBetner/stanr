@@ -72,16 +72,18 @@ stan_model <- function(
     stop("newstan runner archive is missing; reinstall newstan.", call. = FALSE)
   }
 
-  libs <- paste(shQuote(runtime_archive), capture.output(RcppParallel::RcppParallelLibs()))
-  if (.Platform$OS.type == "windows") {
-    libs <- paste(libs, "-ltbb")
+  tbb_libs <- utils::capture.output(RcppParallel::RcppParallelLibs())
+  if (.Platform$OS.type == "windows" && utils::packageVersion("RcppParallel") >= '6.0.0') {
+    tbb_libs <- "-ltbb12 -ltbbmalloc"
   }
+
+  libs <- paste(shQuote(runtime_archive), tbb_libs)
 
   withr::with_makevars(
     c(
       USE_CXX17 = 1,
       PKG_CPPFLAGS = cppflags,
-      PKG_LIBS = 
+      PKG_LIBS = libs
     ),
     Rcpp::sourceCpp(
       file = system.file("stan_model.cpp", package = "newstan", mustWork = TRUE),
