@@ -14,7 +14,9 @@ test_that("pathfinder single path returns expected structure", {
   )
 
   expect_type(result, "list")
+  expect_s3_class(result, "StanPathfinder")
   expect_named(result, c("draws", "diagnostics", "return_code", "args"))
+  expect_s3_class(summary(result), "draws_summary")
   expect_equal(result$return_code, 0L)
 })
 

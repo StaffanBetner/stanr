@@ -59,9 +59,9 @@ generated_quantities <- function(
 
   gqs_draws <- posterior::as_draws_df(as.data.frame(result$samples))
 
-  list(
+  structure(list(
     draws = gqs_draws,
     return_code = result$return_code,
     args = args
-  )
+  ), class = c("StanGeneratedQuantities", "StanService", "list"))
 }

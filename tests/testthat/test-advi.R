@@ -13,8 +13,10 @@ test_that("advi returns expected structure", {
   )
 
   expect_type(result, "list")
+  expect_s3_class(result, "StanVariational")
   expect_named(result, c("draws", "return_code", "args"))
   expect_s3_class(result$draws, "draws_df")
+  expect_s3_class(summary(result), "draws_summary")
   expect_equal(result$return_code, 0L)
 })
 

@@ -65,5 +65,5 @@ gradient_check <- function(
     ))
   }
 
-  return(n_failed)
+  structure(n_failed, class = c("StanDiagnose", class(n_failed)))
 }

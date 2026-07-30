@@ -91,10 +91,10 @@ optimizing <- function(
     numeric(0)
   }
 
-  list(
+  structure(list(
     par = par_vec,
     value = result$value,
     return_code = result$return_code,
     args = args
-  )
+  ), class = c("StanOptimize", "StanService", "list"))
 }

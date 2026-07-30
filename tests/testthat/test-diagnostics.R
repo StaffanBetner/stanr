@@ -8,6 +8,8 @@ test_that("gradient_check returns integer", {
   )
 
   expect_type(result, "integer")
+  expect_s3_class(result, "StanDiagnose")
+  expect_named(summary(result), c("diagnostic", "value"))
 })
 
 test_that("gradient_check passes for bernoulli model", {
@@ -19,5 +21,5 @@ test_that("gradient_check passes for bernoulli model", {
     gradient_check(mod, data, seed = 42, verbose = FALSE)
   )
 
-  expect_equal(result, 0L)
+  expect_equal(unclass(result), 0L)
 })

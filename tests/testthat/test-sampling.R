@@ -14,9 +14,11 @@ test_that("sampling returns expected structure", {
   )
 
   expect_type(result, "list")
+  expect_s3_class(result, "StanSample")
   expect_named(result, c("draws", "diagnostics", "return_code", "args"))
   expect_s3_class(result$draws, "draws_df")
   expect_s3_class(result$diagnostics, "draws_df")
+  expect_s3_class(summary(result), "draws_summary")
   expect_equal(result$return_code, 0L)
 })
 

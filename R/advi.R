@@ -80,12 +80,18 @@ variational <- function(
   )
 
   if (result$return_code != 0) {
-    return(list(draws = NULL, return_code = result$return_code, args = args))
+    return(
+      structure(list(
+        draws = NULL,
+        return_code = result$return_code,
+        args = args
+      ), class = c("StanVariational", "StanService", "list"))
+    )
   }
 
-  list(
+  structure(list(
     draws = posterior::as_draws_df(result$draws),
     return_code = result$return_code,
     args = args
-  )
+  ), class = c("StanVariational", "StanService", "list"))
 }

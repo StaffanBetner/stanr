@@ -15,5 +15,7 @@ test_that("laplace evaluates model-side gradients in the generated model library
   )
 
   expect_equal(result$return_code, 0L)
+  expect_s3_class(result, "StanLaplace")
+  expect_s3_class(summary(result), "draws_summary")
   expect_equal(nrow(result$draws), 2L)
 })

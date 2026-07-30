@@ -103,11 +103,11 @@ pathfinder <- function(
   # Handle non-zero return codes
   if (result$return_code != 0) {
     return(
-      list(
+      structure(list(
         draws = NULL,
         return_code = result$return_code,
         args = args
-      )
+      ), class = c("StanPathfinder", "StanService", "list"))
     )
   }
 
@@ -129,10 +129,10 @@ pathfinder <- function(
     diagnostics <- NULL
   }
 
-  list(
+  structure(list(
     draws = draws,
     diagnostics = diagnostics,
     return_code = result$return_code,
     args = args
-  )
+  ), class = c("StanPathfinder", "StanService", "list"))
 }

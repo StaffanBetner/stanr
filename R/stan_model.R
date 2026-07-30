@@ -10,8 +10,7 @@
 #' @param force_recompile Whether to always recompile, even if a cached model is found
 #' @param verbose Print compilation progress
 #'
-#' @return An S3 object of class `"newstan_fit"` wrapping a compiled Stan model.
-#'
+#' @return An environment containing a `new_model()` function for instantiating a model
 #' @export
 stan_model <- function(
   file = NULL,

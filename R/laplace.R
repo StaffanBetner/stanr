@@ -64,9 +64,9 @@ laplace <- function(
     result <- stanmod$run_model(model_instance$model, args)
   )
 
-  list(
+  structure(list(
     draws = posterior::as_draws_df(result$draws),
     return_code = result$return_code,
     args = args
-  )
+  ), class = c("StanLaplace", "StanService", "list"))
 }

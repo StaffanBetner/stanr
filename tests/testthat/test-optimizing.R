@@ -6,9 +6,11 @@ test_that("optimizing returns expected structure", {
   result <- optimizing(mod, data, seed = 42, verbose = FALSE)
 
   expect_type(result, "list")
+  expect_s3_class(result, "StanOptimize")
   expect_named(result, c("par", "value", "return_code", "args"))
   expect_type(result$par, "double")
   expect_true(is.numeric(result$value))
+  expect_named(summary(result), c("variable", "estimate"))
   expect_equal(result$return_code, 0L)
 })
 

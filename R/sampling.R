@@ -226,12 +226,12 @@ sampling <- function(
   # Handle non-zero return codes (CONFIG, SOFTWARE errors)
   if (result$return_code != 0) {
     return(
-      list(
+      structure(list(
         draws = NULL,
         diagnostics = NULL,
         return_code = result$return_code,
         args = args
-      )
+      ), class = c("StanSample", "StanService", "list"))
     )
   }
 
@@ -269,10 +269,10 @@ sampling <- function(
     diagnostics <- posterior::subset_draws(draws, variable = diagnostic_vars)
   }
 
-  list(
+  structure(list(
     draws = posterior::subset_draws(draws, par_vars),
     diagnostics = diagnostics,
     return_code = result$return_code,
     args = args
-  )
+  ), class = c("StanSample", "StanService", "list"))
 }
