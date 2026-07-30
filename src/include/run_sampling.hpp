@@ -18,7 +18,15 @@
 #include <stan/services/sample/hmc_static_dense_e.hpp>
 #include <stan/services/sample/hmc_static_dense_e_adapt.hpp>
 #include <stan/callbacks/json_writer.hpp>
+#include <stan/math/rev/core/chainablestack.hpp>
+#include <stan/math/rev/core/init_chainablestack.hpp>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <exception>
+#include <mutex>
 #include <sstream>
+#include <thread>
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
@@ -135,13 +143,29 @@ namespace newstan {
     auto metric_ctxs = make_metric_contexts(model, args, metric, num_chains);
     const bool multi_chain = num_chains > 1;
 
-    // Multi-chain Stan services call this callback from TBB workers, where
-    // Rcpp interrupt polling is unsafe. Single-chain services run on R's
-    // thread and can safely poll for Ctrl-C.
-    newstan::r_interrupt interrupt(num_chains == 1);
+    // Sampling runs in a native coordinator thread.  Ctrl-C is observed by
+    // the R thread below and relayed to all Stan/TBB workers through this
+    // native-only callback.
+    std::atomic<bool> cancel_requested{false};
+    newstan::r_interrupt interrupt(&cancel_requested);
 
     int return_code = stan::services::error_codes::CONFIG;
+    std::atomic<bool> finished{false};
+    std::mutex completion_mutex;
+    std::condition_variable completion_cv;
+    std::exception_ptr worker_error;
 
+    // Everything in this lambda is restricted to C++/Stan state.  In
+    // particular, it must not allocate R objects or call into Rcpp.
+    std::thread worker([&] {
+    // A raw std::thread is outside TBB's scheduler, and the sampling service
+    // initializes chains before it enters parallel_for.  Its AD stack must be
+    // explicit.  Attach an observer for the lifetime of this job as well: it
+    // initializes a separate AD tape in every TBB worker that executes a
+    // chain.
+    stan::math::ChainableStack autodiff_stack;
+    stan::math::ad_tape_observer autodiff_observer;
+    try {
     // ── Validation & dispatch ───────────────────────────────────────
     if (algorithm == "hmc" && adapt_engaged && num_warmup == 0) {
       std::ostringstream msg;
@@ -427,13 +451,48 @@ namespace newstan {
       return_code = stan::services::error_codes::CONFIG;
     }
 
-    // ─── Combine results ────────────────────────────────────────────
+    } catch (...) {
+      worker_error = std::current_exception();
+    }
+    finished.store(true, std::memory_order_release);
+    completion_cv.notify_one();
+    });
+
+    // Keep the original R thread responsive for console output and Ctrl-C.
+    // Rcpp protects this interrupt probe from R's longjmp; on Ctrl-C we first
+    // cancel and join the worker before propagating the interrupt to R.
+    bool interrupted = false;
+    while (!finished.load(std::memory_order_acquire)) {
+      logger.flush();
+      if (!interrupted && user_interrupt_pending()) {
+        interrupted = true;
+        cancel_requested.store(true, std::memory_order_release);
+      }
+
+      std::unique_lock<std::mutex> lock(completion_mutex);
+      completion_cv.wait_for(lock, std::chrono::milliseconds(50), [&] {
+        return finished.load(std::memory_order_acquire);
+      });
+    }
+    worker.join();
+    logger.flush();
+
+    if (worker_error) {
+      try {
+        std::rethrow_exception(worker_error);
+      } catch (const std::exception& e) {
+        Rcpp::stop(e.what());
+      } catch (...) {
+        Rcpp::stop("Unknown exception in sampling worker.");
+      }
+    }
+    if (interrupted) {
+      Rcpp::stop("Sampling interrupted.");
+    }
+
+    // ─── Combine results (R thread only) ────────────────────────────
 
     Rcpp::List combined = stack_writer_chains(sample_writers, num_chains);
-
-    // ─── Flush buffered log messages on the main R thread ───────────
-
-    logger.flush();
 
     return Rcpp::List::create(
       Rcpp::_["samples"] = combined,

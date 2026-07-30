@@ -19,6 +19,7 @@
 ^\.devcontainer
 ^libs$
 ^lib$
+inst/lib
 
 \.gitignore$
 \.prepare

@@ -5,7 +5,15 @@
 #include <stan/services/pathfinder/single.hpp>
 #include <stan/services/pathfinder/multi.hpp>
 #include <stan/callbacks/json_writer.hpp>
+#include <stan/math/rev/core/chainablestack.hpp>
+#include <stan/math/rev/core/init_chainablestack.hpp>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <exception>
+#include <mutex>
 #include <sstream>
+#include <thread>
 #include <vector>
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
@@ -39,8 +47,8 @@ namespace newstan {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_logger logger(verbose);
-    // Multi-path Pathfinder executes callbacks from TBB workers; polling R
-    // there is unsafe. Single-path execution remains on the R thread.
+    // Single-path execution remains on the R thread. Multi-path execution is
+    // moved below into a coordinator thread, so it uses an atomic interrupt.
     newstan::r_interrupt interrupt(num_paths <= 1);
 
     int return_code;
@@ -70,7 +78,8 @@ namespace newstan {
         Rcpp::_["draws"] = sample_writer.to_r_matrix()
       );
     } else {
-      // Multi-path pathfinder — delegates to pathfinder_lbfgs_multi
+      // Multi-path Pathfinder runs in a coordinator std::thread. All data
+      // contexts and writers are C++ owned before that thread is launched.
       // The immutable context is safe to share across all paths.
       const auto init_ctx = std::make_unique<newstan::r_data_context>(init_list);
       std::vector<stan::io::var_context*> init_ctxs(num_paths, init_ctx.get());
@@ -95,33 +104,62 @@ namespace newstan {
       // Init writers (one per path, for writing initial values)
       std::vector<stan::callbacks::writer> init_writers(num_paths);
 
-      return_code = stan::services::pathfinder::pathfinder_lbfgs_multi(
-          model,
-          std::move(init_ctxs),
-          seed,
-          chain_id,
-          init_radius,
-          history_size,
-          init_alpha,
-          tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
-          max_lbfgs_iters,
-          num_elbo_draws,
-          num_draws,
-          num_psis_draws,
-          num_paths,
-          save_single_paths,
-          refresh,
-          interrupt,
-          logger,
-          init_writers,
-          single_param_writers,
-          single_diag_writers,
-          param_writer,
-          diag_writer,
-          calculate_lp,
-          psis_resample);
+      std::atomic<bool> cancel_requested{false};
+      newstan::r_interrupt worker_interrupt(&cancel_requested);
+      std::atomic<bool> finished{false};
+      std::mutex completion_mutex;
+      std::condition_variable completion_cv;
+      std::exception_ptr worker_error;
 
+      std::thread worker([&] {
+        // The coordinator is not a TBB worker, so it needs an AD stack for
+        // Pathfinder's serial setup. The observer installs one per TBB path.
+        stan::math::ChainableStack autodiff_stack;
+        stan::math::ad_tape_observer autodiff_observer;
+        try {
+          return_code = stan::services::pathfinder::pathfinder_lbfgs_multi(
+              model, std::move(init_ctxs), seed, chain_id, init_radius,
+              history_size, init_alpha,
+              tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
+              max_lbfgs_iters, num_elbo_draws, num_draws, num_psis_draws,
+              num_paths, save_single_paths, refresh, worker_interrupt, logger,
+              init_writers, single_param_writers, single_diag_writers,
+              param_writer, diag_writer, calculate_lp, psis_resample);
+        } catch (...) {
+          worker_error = std::current_exception();
+        }
+        finished.store(true, std::memory_order_release);
+        completion_cv.notify_one();
+      });
+
+      bool interrupted = false;
+      while (!finished.load(std::memory_order_acquire)) {
+        // Deliberately uses the package's normal logger flush; callers that
+        // need a non-R console route may configure that separately.
+        logger.flush();
+        if (!interrupted && user_interrupt_pending()) {
+          interrupted = true;
+          cancel_requested.store(true, std::memory_order_release);
+        }
+        std::unique_lock<std::mutex> lock(completion_mutex);
+        completion_cv.wait_for(lock, std::chrono::milliseconds(50), [&] {
+          return finished.load(std::memory_order_acquire);
+        });
+      }
+      worker.join();
       logger.flush();
+
+      if (worker_error) {
+        try {
+          std::rethrow_exception(worker_error);
+        } catch (const std::exception& e) {
+          Rcpp::stop(e.what());
+        } catch (...) {
+          Rcpp::stop("Unknown exception in Pathfinder worker.");
+        }
+      }
+      if (interrupted) Rcpp::stop("Pathfinder interrupted.");
+
       return Rcpp::List::create(
         Rcpp::_["return_code"] = return_code,
         Rcpp::_["method"] = "pathfinder",

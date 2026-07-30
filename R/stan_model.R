@@ -64,11 +64,17 @@ stan_model <- function(
     include_directories = include_directories,
     external_cpp = external_cpp
   )
-  model_hash <- digest::digest(cpp_code, algo = "xxhash64")
+  # The generated wrapper is part of the translation unit.  Include it in the
+  # cache key so changes to the native runner/model bridge cannot reuse a
+  # sourceCpp artifact compiled against an older wrapper.
+  model_support <- readLines(
+    system.file("stan_model.cpp", package = "newstan", mustWork = TRUE)
+  )
+  model_hash <- digest::digest(c(cpp_code, model_support), algo = "xxhash64")
 
   cpp_file <- file.path(tempdir(), paste0("stan_", model_hash, ".cpp"))
   if (!file.exists(cpp_file)) {
-    writeLines(c(cpp_code, readLines(system.file("stan_model.cpp", package = "newstan", mustWork = TRUE))), cpp_file)
+    writeLines(c(cpp_code, model_support), cpp_file)
   }
 
   cppflags <- paste(

@@ -6,11 +6,9 @@ test_that("sampling returns expected structure", {
   result <- sampling(
     mod,
     data,
-    num_warmup = 100,
-    num_samples = 100,
-    num_chains = 1,
-    seed = 42,
-    verbose = FALSE
+    num_warmup = 10000,
+    num_samples = 10000,
+    num_chains = 4
   )
 
   expect_type(result, "list")

@@ -7,10 +7,9 @@ test_that("pathfinder single path returns expected structure", {
     mod,
     data,
     max_lbfgs_iters = 100,
-    num_draws = 50,
-    num_paths = 1,
-    seed = 42,
-    verbose = FALSE
+    num_draws = 1000,
+    num_paths = 4,
+    seed = 42
   )
 
   expect_type(result, "list")

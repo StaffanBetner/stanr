@@ -14,7 +14,11 @@ namespace newstan {
 // [[Rcpp::export]]
 Rcpp::XPtr<stan_model> new_model(Rcpp::List data, unsigned int seed) {
   newstan::r_data_context data_context(data);
-  Rcpp::XPtr<stan_model> m(new stan_model(data_context, seed, &Rcpp::Rcout));
+  // Sampling services may execute this model on a native worker thread.
+  // A generated model keeps this stream pointer, so it cannot point at an R
+  // stream even though construction itself occurs on the R thread.
+  Rcpp::XPtr<stan_model> m(
+      new stan_model(data_context, seed, &newstan::worker_safe_stream()));
   return m;
 }
 

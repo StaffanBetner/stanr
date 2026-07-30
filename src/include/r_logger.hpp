@@ -96,17 +96,17 @@ class r_logger : public stan::callbacks::logger {
     for (const auto& e : entries) {
       switch (e.lv) {
         case level::debug:
-          Rcpp::Rcout << e.msg << std::endl;
+          Rprintf("%s\n", e.msg.c_str());
           break;
         case level::info:
-          Rcpp::Rcout << e.msg << std::endl;
+          Rprintf("%s\n", e.msg.c_str());
           break;
         case level::warn:
-          Rcpp::Rcout << e.msg << std::endl;
+          Rprintf("%s\n", e.msg.c_str());
           break;
         case level::error:
         case level::fatal:
-          Rcpp::Rcerr << e.msg << std::endl;
+          REprintf("%s\n", e.msg.c_str());
           break;
       }
     }

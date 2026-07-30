@@ -9,12 +9,29 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <ostream>
 #include <set>
+#include <streambuf>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace newstan {
+
+// Generated Stan models retain their constructor's ostream pointer and can
+// write through it while evaluating on a native/TBB worker.  This sink has
+// static lifetime and deliberately bypasses R's console API.
+class null_streambuf : public std::streambuf {
+ protected:
+  int_type overflow(int_type ch) override { return traits_type::not_eof(ch); }
+  std::streamsize xsputn(const char*, std::streamsize n) override { return n; }
+};
+
+inline std::ostream& worker_safe_stream() {
+  static null_streambuf buffer;
+  static std::ostream stream(&buffer);
+  return stream;
+}
 
 // R list -> stan::io::var_context adapter. Values are copied during
 // construction, so Stan worker threads never access the R API.
