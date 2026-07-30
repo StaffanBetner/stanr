@@ -1,4 +1,4 @@
-test_that("laplace evaluates model-side gradients through the bridge", {
+test_that("laplace evaluates model-side gradients in the generated model library", {
   path <- test_path("test-models/bernoulli.stan")
   mod <- stan_model(file = path)
   data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))

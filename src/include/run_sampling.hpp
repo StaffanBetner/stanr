@@ -26,7 +26,7 @@
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
-#include "r_data_context.hpp"
+#include <newstan/r_data_context.hpp>
 #include "stack_writer_chains.hpp"
 
 namespace newstan {

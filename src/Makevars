@@ -1,3 +1,18 @@
 PKG_CPPFLAGS = -I"../inst/include" -D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
 PKG_CPPFLAGS += $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::CxxFlags()" | tail -n 1)
 PKG_LIBS += $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::RcppParallelLibs()" | tail -n 1)
+
+DEV_RUNTIME_ARCHIVE = ../libs/libnewstan_runner.a
+ifeq ($(strip $(R_PACKAGE_DIR)),)
+RUNTIME_ARCHIVE = $(DEV_RUNTIME_ARCHIVE)
+else
+RUNTIME_ARCHIVE = $(R_PACKAGE_DIR)/libs$(R_ARCH)/libnewstan_runner.a
+endif
+
+RUNTIME_ARCHIVES = $(RUNTIME_ARCHIVE) $(DEV_RUNTIME_ARCHIVE)
+
+$(SHLIB): $(RUNTIME_ARCHIVES)
+
+$(RUNTIME_ARCHIVES): runner.o
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $<

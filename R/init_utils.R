@@ -27,11 +27,9 @@ init_radius <- function(init) {
   2
 }
 
-# Create the data context, concrete model, and the model-local autodiff bridge
-# together so the bridge's raw model pointer remains valid for the native call.
+# Construct the concrete model in its generated shared library. The wrapper
+# constructs the data context locally, so no R external pointer crosses into
+# the model implementation.
 new_model_instance <- function(stanmod, data, seed) {
-  data_ptr <- .Call(`r_data_context`, data)
-  model_ptr <- stanmod$new_model(data_ptr, seed)
-  bridge_ptr <- stanmod$new_model_bridge(model_ptr)
-  list(data = data_ptr, model = model_ptr, bridge = bridge_ptr)
+  list(model = stanmod$new_model(data, seed))
 }

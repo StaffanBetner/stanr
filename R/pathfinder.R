@@ -96,8 +96,7 @@ pathfinder <- function(
 
   withr::with_envvar(
     c(STAN_NUM_THREADS = num_threads),
-    result <- .Call(`newstan_run`, model_instance$model,
-                    c(args, list(bridge = model_instance$bridge)))
+    result <- stanmod$run_model(model_instance$model, args)
   )
 
   # Handle non-zero return codes

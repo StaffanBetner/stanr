@@ -11,3 +11,4 @@
 ^\.cache$
 ^\.clang-tidy$
 ^\.devcontainer
+libs

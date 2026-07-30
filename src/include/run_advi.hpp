@@ -7,7 +7,7 @@
 #include "get_arg.hpp"
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
-#include "r_data_context.hpp"
+#include <newstan/r_data_context.hpp>
 #include "r_logger.hpp"
 
 namespace newstan {

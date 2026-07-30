@@ -48,87 +48,41 @@ stan_model <- function(
   # Step 1: Stan -> C++ via stanc.js (QuickJSR)
   cpp_code <- stanc_process(code)
 
-  fun_base <- "
-    #include <Rcpp.h>
-    #include <stan/math/rev/core.hpp>
-
-    namespace newstan {
-    struct model_bridge {
-      using log_prob_fn = double (*)(const void*, const double*, double*, bool,
-                                     bool, std::ostream*);
-      const void* context;
-      log_prob_fn log_prob;
-    };
-
-    inline double model_log_prob(const void* context, const double* theta,
-                                 double* gradient, bool propto, bool jacobian,
-                                 std::ostream* msgs) {
-      const auto* model = static_cast<const stan_model*>(context);
-      stan::math::nested_rev_autodiff nested;
-      Eigen::Matrix<stan::math::var, Eigen::Dynamic, 1> ad_theta(
-          model->num_params_r());
-      for (size_t i = 0; i < model->num_params_r(); ++i) {
-        ad_theta(i) = theta[i];
-      }
-
-      stan::math::var ad_log_prob;
-      if (propto) {
-        ad_log_prob = jacobian
-            ? model->template log_prob<true, true>(ad_theta, msgs)
-            : model->template log_prob<true, false>(ad_theta, msgs);
-      } else {
-        ad_log_prob = jacobian
-            ? model->template log_prob<false, true>(ad_theta, msgs)
-            : model->template log_prob<false, false>(ad_theta, msgs);
-      }
-
-      const double log_prob = ad_log_prob.val();
-      if (gradient != nullptr) {
-        ad_log_prob.grad();
-        for (size_t i = 0; i < model->num_params_r(); ++i) {
-          gradient[i] = ad_theta(i).adj();
-        }
-      }
-      return log_prob;
-    }
-    }  // namespace newstan
-
-    // [[Rcpp::depends(BH)]]
-    // [[Rcpp::depends(RcppEigen)]]
-    // [[Rcpp::depends(RcppParallel)]]
-
-    // [[Rcpp::export]]
-    Rcpp::XPtr<stan::model::model_base> new_model(Rcpp::XPtr<stan::io::var_context> data_context, unsigned int seed) {
-      Rcpp::XPtr<stan::model::model_base> m(new stan_model(*data_context.get(), seed, &Rcpp::Rcout));
-      return m;
-    }
-
-    // [[Rcpp::export]]
-    Rcpp::XPtr<newstan::model_bridge> new_model_bridge(
-        Rcpp::XPtr<stan::model::model_base> model) {
-      auto* bridge = new newstan::model_bridge{
-          static_cast<const stan_model*>(model.get()), newstan::model_log_prob};
-      return Rcpp::XPtr<newstan::model_bridge>(bridge);
-    }
-  "
+  cpp_file <- tempfile(fileext = ".cpp")
+  writeLines(cpp_code, cpp_file)
 
   cppflags <- paste(
+    paste("-include", shQuote(cpp_file)),
     paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS -O3 -w"
   )
 
   env <- new.env()
+  runtime_archive <- system.file(
+    "libs", "libnewstan_runner.a", package = "newstan", mustWork = FALSE
+  )
+  if (!nzchar(runtime_archive)) {
+    # pkgload::load_all() loads a copied DLL from its temporary installation,
+    # while find.package() still points to the development source tree.
+    runtime_archive <- file.path(
+      find.package("newstan"), "libs", "libnewstan_runner.a"
+    )
+  }
+  if (!file.exists(runtime_archive)) {
+    stop("newstan runner archive is missing; reinstall newstan.", call. = FALSE)
+  }
 
   withr::with_makevars(
     c(
       USE_CXX17 = 1,
-      PKG_CPPFLAGS = cppflags
+      PKG_CPPFLAGS = cppflags,
+      PKG_LIBS = paste(shQuote(runtime_archive), capture.output(RcppParallel::RcppParallelLibs()))
     ),
     Rcpp::sourceCpp(
-      code = paste0(cpp_code, fun_base, sep = "\n"),
+      file = system.file("stan_model.cpp", package = "newstan", mustWork = TRUE),
       env = env,
       rebuild = force_recompile,
-      verbose = FALSE
+      verbose = verbose
     )
   )
 

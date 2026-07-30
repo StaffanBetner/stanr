@@ -9,7 +9,7 @@
 #include "r_output.hpp"
 #include "r_logger.hpp"
 #include "r_interrupt.hpp"
-#include "r_data_context.hpp"
+#include <newstan/r_data_context.hpp>
 
 namespace newstan {
   template <class Model>

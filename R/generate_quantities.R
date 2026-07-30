@@ -34,7 +34,7 @@ generated_quantities <- function(
   }
 
   model_instance <- new_model_instance(stanmod, data, seed)
-  pars <- .Call(`constrained_par_names`, model_instance$model)
+  pars <- stanmod$constrained_param_names(model_instance$model)
 
   # Convert draws to matrix (rows=samples, columns=parameters)
   draws_matrix <- if (inherits(fitted_params, "draws")) {
@@ -53,8 +53,7 @@ generated_quantities <- function(
 
   withr::with_envvar(
     c(STAN_NUM_THREADS = num_threads),
-    result <- .Call(`newstan_run`, model_instance$model,
-                    c(args, list(bridge = model_instance$bridge)))
+    result <- stanmod$run_model(model_instance$model, args)
   )
 
   gqs_draws <- posterior::as_draws_df(as.data.frame(result$samples))
