@@ -1,21 +1,31 @@
+---
+output: github_document
+---
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
 
 # newstan
 
 <!-- badges: start -->
-
 <!-- badges: end -->
 
 `newstan` is an R interface for compiling Stan programs and running Stan
-services directly from R. Results use `posterior` draw objects where
-possible, and every service result includes the arguments passed through
-to the backend.
+services directly from R. Results use `posterior` draw objects where possible,
+and every service result includes the arguments passed through to the backend.
 
 ## Service Return Types
 
 | Function | Purpose | Return type |
-|----|----|----|
+| --- | --- | --- |
 | `sampling()` | MCMC sampling, including HMC/NUTS and fixed-parameter runs | list with `draws`, `diagnostics`, `return_code`, `args` |
 | `pathfinder()` | Pathfinder approximate posterior draws | list with `draws`, `diagnostics`, `return_code`, `args` |
 | `variational()` | ADVI approximate posterior draws | list with `draws`, `return_code`, `args` |
@@ -35,11 +45,10 @@ pak::pak("andrjohns/newstan")
 
 ## Compile A Model
 
-Models can be compiled from a string or from a `.stan` file. The
-returned object is a model environment used by the service functions
-below.
+Models can be compiled from a string or from a `.stan` file. The returned object
+is a model environment used by the service functions below.
 
-``` r
+```{r compile-model}
 library(newstan)
 
 bernoulli_model <- "
@@ -81,16 +90,15 @@ fixed_mod <- stan_model(code = fixed_param_model, model_name = "fixed_param")
 fixed_data <- list(N = 5)
 ```
 
-`stan_model()` returns an S3 object of class `"newstan_fit"` wrapping
-the compiled model.
+`stan_model()` returns an S3 object of class `"newstan_fit"` wrapping the
+compiled model.
 
 ## Sampling
 
-Use `sampling()` for MCMC. The result is a list with posterior draws,
-sampler diagnostics, a Stan return code, and the normalized argument
-list.
+Use `sampling()` for MCMC. The result is a list with posterior draws, sampler
+diagnostics, a Stan return code, and the normalized argument list.
 
-``` r
+```{r sampling}
 fit <- sampling(
   mod,
   data,
@@ -107,36 +115,23 @@ list(
   variables = posterior::variables(fit$draws),
   return_code = fit$return_code
 )
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $diagnostics_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "lp__"       "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3" 
-#>  [6] "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8" 
-#> [11] "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
 ```
 
 The return value has:
 
 - `draws`: a `posterior::draws_df` containing model parameter draws.
-- `diagnostics`: a `posterior::draws_df` containing sampler diagnostics
-  such as `accept_stat__`, `stepsize__`, `treedepth__`, `n_leapfrog__`,
+- `diagnostics`: a `posterior::draws_df` containing sampler diagnostics such as
+  `accept_stat__`, `stepsize__`, `treedepth__`, `n_leapfrog__`,
   `divergent__`, and `energy__`.
 - `return_code`: integer status code.
 - `args`: named list of sampling arguments.
 
 ### Fixed Param
 
-For models without parameters, or when you only want generated
-quantities, use the fixed-parameter sampler.
+For models without parameters, or when you only want generated quantities, use
+the fixed-parameter sampler.
 
-``` r
+```{r fixed-param}
 fixed_fit <- sampling(
   fixed_mod,
   fixed_data,
@@ -152,26 +147,17 @@ list(
   ndraws = posterior::ndraws(fixed_fit$draws),
   return_code = fixed_fit$return_code
 )
-#> $variables
-#> [1] "lp__"    "y_rep.1" "y_rep.2" "y_rep.3" "y_rep.4" "y_rep.5"
-#> 
-#> $ndraws
-#> [1] 10
-#> 
-#> $return_code
-#> [1] 0
 ```
 
 ### Supplying Inverse Metrics
 
-`sampling()` accepts precomputed inverse metric values through
-`metric_file`. This corresponds to Stan’s `inv_metric` input.
+`sampling()` accepts precomputed inverse metric values through `metric_file`.
+This corresponds to Stan's `inv_metric` input.
 
-For a diagonal metric, pass a numeric vector with one value per
-unconstrained parameter. The Bernoulli model above has one unconstrained
-parameter.
+For a diagonal metric, pass a numeric vector with one value per unconstrained
+parameter. The Bernoulli model above has one unconstrained parameter.
 
-``` r
+```{r sampling-diag-metric}
 diag_metric_fit <- sampling(
   mod,
   data,
@@ -187,20 +173,13 @@ list(
   variables = posterior::variables(diag_metric_fit$draws),
   return_code = diag_metric_fit$return_code
 )
-#> $variables
-#>  [1] "lp__"       "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3" 
-#>  [6] "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8" 
-#> [11] "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
 ```
 
-For a dense metric, pass a square matrix. To provide one metric per
-chain, pass a list whose length equals `num_chains`; a single vector or
-matrix is reused for all chains.
+For a dense metric, pass a square matrix. To provide one metric per chain, pass
+a list whose length equals `num_chains`; a single vector or matrix is reused for
+all chains.
 
-``` r
+```{r sampling-dense-metric}
 dense_metric_fit <- sampling(
   mod,
   data,
@@ -217,20 +196,13 @@ list(
   variables = posterior::variables(dense_metric_fit$draws),
   return_code = dense_metric_fit$return_code
 )
-#> $variables
-#>  [1] "lp__"       "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3" 
-#>  [6] "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8" 
-#> [11] "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
 ```
 
 ## Pathfinder
 
 Use `pathfinder()` for an approximate posterior based on L-BFGS paths.
 
-``` r
+```{r pathfinder}
 pf <- pathfinder(
   mod,
   data,
@@ -247,31 +219,17 @@ list(
   variables = posterior::variables(pf$draws),
   return_code = pf$return_code
 )
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $diagnostics_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3"  "log_lik.4" 
-#>  [6] "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8"  "log_lik.9" 
-#> [11] "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
 ```
 
-The return value has `draws`, `diagnostics`, `return_code`, and `args`.
-If no pathfinder diagnostic columns are returned, `diagnostics` is
-`NULL`.
+The return value has `draws`, `diagnostics`, `return_code`, and `args`. If no
+pathfinder diagnostic columns are returned, `diagnostics` is `NULL`.
 
 ## Variational Inference
 
-Use `variational()` for ADVI with either a mean-field or full-rank
-Gaussian family.
+Use `variational()` for ADVI with either a mean-field or full-rank Gaussian
+family.
 
-``` r
+```{r variational}
 vb <- variational(
   mod,
   data,
@@ -287,26 +245,15 @@ list(
   variables = posterior::variables(vb$draws),
   return_code = vb$return_code
 )
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "lp__"       "log_p__"    "log_g__"    "theta"      "log_lik.1" 
-#>  [6] "log_lik.2"  "log_lik.3"  "log_lik.4"  "log_lik.5"  "log_lik.6" 
-#> [11] "log_lik.7"  "log_lik.8"  "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
 ```
 
 The return value has `draws`, `return_code`, and `args`.
 
 ## Optimization
 
-Use `optimizing()` to find a posterior mode or maximum likelihood
-estimate.
+Use `optimizing()` to find a posterior mode or maximum likelihood estimate.
 
-``` r
+```{r optimizing}
 opt <- optimizing(
   mod,
   data,
@@ -320,30 +267,17 @@ list(
   value = opt$value,
   return_code = opt$return_code
 )
-#> $par
-#>        lp__ converged__       theta   log_lik.1   log_lik.2   log_lik.3 
-#>  -6.9314718  31.0000000   0.5000001  -0.6931471  -0.6931473  -0.6931471 
-#>   log_lik.4   log_lik.5   log_lik.6   log_lik.7   log_lik.8   log_lik.9 
-#>  -0.6931471  -0.6931473  -0.6931471  -0.6931473  -0.6931473  -0.6931471 
-#>  log_lik.10 
-#>  -0.6931473 
-#> 
-#> $value
-#> [1] -6.931472
-#> 
-#> $return_code
-#> [1] 0
 ```
 
 The return value has `par`, `value`, `return_code`, and `args`.
 
 ## Laplace Approximation
 
-Use `laplace()` to draw from a Laplace approximation around a mode. You
-can pass the full `optimizing()` result or a named numeric vector of
-constrained parameters.
+Use `laplace()` to draw from a Laplace approximation around a mode. You can pass
+the full `optimizing()` result or a named numeric vector of constrained
+parameters.
 
-``` r
+```{r laplace}
 lap <- laplace(
   mod,
   data,
@@ -358,26 +292,16 @@ list(
   variables = posterior::variables(lap$draws),
   return_code = lap$return_code
 )
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "log_p__"    "log_q__"    "theta"      "log_lik.1"  "log_lik.2" 
-#>  [6] "log_lik.3"  "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7" 
-#> [11] "log_lik.8"  "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
 ```
 
 The return value has `draws`, `return_code`, and `args`.
 
 ## Generated Quantities
 
-Use `generated_quantities()` with existing parameter draws and a model
-containing a `generated quantities` block.
+Use `generated_quantities()` with existing parameter draws and a model containing
+a `generated quantities` block.
 
-``` r
+```{r generated-quantities}
 gq <- generated_quantities(
   mod,
   data,
@@ -391,51 +315,37 @@ list(
   variables = posterior::variables(gq$draws),
   return_code = gq$return_code
 )
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "log_lik.1"  "log_lik.2"  "log_lik.3"  "log_lik.4"  "log_lik.5" 
-#>  [6] "log_lik.6"  "log_lik.7"  "log_lik.8"  "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
 ```
 
 The return value has `draws`, `return_code`, and `args`.
 
 ## Gradient Check
 
-Use `gradient_check()` to compare autodiff gradients with
-finite-difference approximations.
+Use `gradient_check()` to compare autodiff gradients with finite-difference
+approximations.
 
-``` r
+```{r gradient-check}
 n_failed <- gradient_check(
   mod,
   data,
   seed = 123,
   verbose = FALSE
 )
-#> [newstan] All gradient tests passed.
 
 n_failed
-#> [1] 0
 ```
 
-`gradient_check()` returns an integer count of failed parameter gradient
-checks.
+`gradient_check()` returns an integer count of failed parameter gradient checks.
 
 ## Stan Compilation Helpers
 
-`stanc()` compiles Stan code to C++ and returns the generated C++ source
-as a single string.
+`stanc()` compiles Stan code to C++ and returns the generated C++ source as a
+single string.
 
-``` r
+```{r stanc}
 cpp_code <- stanc(bernoulli_model)
 substr(cpp_code, 1, 80)
-#> [1] "// Code generated by stanc 4d256d1\n#include <stan/model/model_header.hpp>\nnamesp"
 ```
 
-`stan_model()` is usually the higher-level entry point: it calls
-`stanc()`, compiles the generated C++, and returns the model object used
-by the services.
+`stan_model()` is usually the higher-level entry point: it calls `stanc()`,
+compiles the generated C++, and returns the model object used by the services.
