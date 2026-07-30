@@ -47,12 +47,14 @@ stan_model <- function(
 
   # Step 1: Stan -> C++ via stanc.js (QuickJSR)
   cpp_code <- stanc_process(code)
+  model_hash <- digest::digest(cpp_code, algo = "xxhash64")
 
-  cpp_file <- tempfile(fileext = ".cpp")
-  writeLines(cpp_code, cpp_file)
+  cpp_file <- file.path(tempdir(), paste0("stan_", model_hash, ".cpp"))
+  if (!file.exists(cpp_file)) {
+    writeLines(c(cpp_code, readLines(system.file("stan_model.cpp", package = "newstan", mustWork = TRUE))), cpp_file)
+  }
 
   cppflags <- paste(
-    paste("-include", shQuote(cpp_file)),
     paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS -O3 -w"
   )
@@ -76,7 +78,7 @@ stan_model <- function(
       PKG_LIBS = libs
     ),
     Rcpp::sourceCpp(
-      file = system.file("stan_model.cpp", package = "newstan", mustWork = TRUE),
+      file = cpp_file,
       env = env,
       rebuild = force_recompile,
       verbose = verbose
