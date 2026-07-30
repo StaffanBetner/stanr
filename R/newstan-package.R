@@ -11,7 +11,5 @@
 #' @importFrom Rcpp sourceCpp
 #' @importFrom posterior as_draws_df subset_draws
 #' @importFrom withr with_makevars with_envvar
-#' @import BH
-#' @import RcppEigen
 #'
 "_PACKAGE"
