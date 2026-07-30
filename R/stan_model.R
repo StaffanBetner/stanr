@@ -99,7 +99,7 @@ stan_model <- function(
 
   withr::with_makevars(
     c(
-      USE_CXX17 = 1,
+      USE_CXX20 = 1,
       PKG_CPPFLAGS = cppflags,
       PKG_LIBS = libs
     ),
