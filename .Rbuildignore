@@ -19,3 +19,10 @@
 ^\.devcontainer
 ^libs$
 ^lib$
+
+\.gitignore$
+\.prepare
+.*\.o$
+.*\.a$
+.*\.so$
+.*\.dll$

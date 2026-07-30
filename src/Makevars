@@ -33,12 +33,13 @@ SUNDIALS_KINSOL := \
 SUNDIALS_NVECSERIAL := \
 	$(wildcard math/lib/sundials_*/src/nvector/serial/nvector_serial.c)
 
-SOURCES = $(SUNDIALS_CVODES) $(SUNDIALS_IDAS) $(SUNDIALS_KINSOL) $(SUNDIALS_NVECSERIAL)
-OBJECTS_C = $(SOURCES:.c=.o)
-OBJECTS = $(OBJECTS_C) runner.o init.o
+SUNDIALS_SOURCES = $(SUNDIALS_CVODES) $(SUNDIALS_IDAS) $(SUNDIALS_KINSOL) $(SUNDIALS_NVECSERIAL)
+SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
+OBJECTS = runner.o init.o
 
 $(SHLIB): static
-$(OBJECTS): package
+$(OBJECTS): $(SUNDIALS_OBJECTS)
+$(SUNDIALS_OBJECTS): package
 
 package:
 	@mkdir -p ../inst/include
@@ -48,12 +49,12 @@ package:
 	@cp -Rf math/lib/sundials_*/src/sundials .
 	@cp -Rf include/. ../inst/include/newstan
 
-static: $(OBJECTS)
-	@mkdir -p ../lib
-	$(AR) -rs ../lib/libnewstan_runner.a $(OBJECTS_C) runner.o
+static: $(OBJECTS) $(SUNDIALS_OBJECTS)
+	@mkdir -p ../inst/lib/$(R_ARCH)
+	$(AR) -rs ../inst/lib/$(R_ARCH)/libnewstan_runner.a $(SUNDIALS_OBJECTS) runner.o
 
 clean:
-	rm -rf ../lib
+	rm -rf ../inst/lib
 	rm $(OBJECTS)
 	rm -rf ../inst/include/
 	rm -rf sundials
