@@ -4,6 +4,7 @@
 #include <Rcpp.h>
 #include <memory>
 #include <stan/io/array_var_context.hpp>
+#include <stan/io/var_context.hpp>
 #include <stan/services/sample/fixed_param.hpp>
 #include <stan/services/sample/hmc_nuts_dense_e.hpp>
 #include <stan/services/sample/hmc_nuts_dense_e_adapt.hpp>
@@ -26,6 +27,40 @@
 #include "stack_writer_chains.hpp"
 
 namespace newstan {
+
+  template <class Model>
+  std::vector<std::shared_ptr<stan::io::var_context>> make_metric_contexts(
+      Model& model, const Rcpp::List& args, const std::string& metric,
+      int num_chains) {
+    const bool metric_supplied = args.containsElementNamed("inv_metric") &&
+        !Rcpp::as<bool>(args["inv_metric_na"]);
+    if (!metric_supplied || metric == "unit_e") return {};
+
+    Rcpp::List inv_metric_list = Rcpp::as<Rcpp::List>(args["inv_metric"]);
+    const size_t num_params = model.num_params_r();
+    const bool per_chain =
+        inv_metric_list.length() == static_cast<R_xlen_t>(num_chains);
+    std::vector<std::shared_ptr<stan::io::var_context>> contexts;
+    contexts.reserve(num_chains);
+
+    for (int i = 0; i < num_chains; ++i) {
+      SEXP metric_value = inv_metric_list[per_chain ? i : 0];
+      std::vector<double> values;
+      std::vector<std::vector<size_t>> dimensions;
+      if (metric == "diag_e") {
+        Rcpp::NumericVector vector = Rcpp::as<Rcpp::NumericVector>(metric_value);
+        values.assign(vector.begin(), vector.end());
+        dimensions = {{num_params}};
+      } else {
+        Rcpp::NumericMatrix matrix = Rcpp::as<Rcpp::NumericMatrix>(metric_value);
+        values.assign(matrix.begin(), matrix.end());
+        dimensions = {{num_params, num_params}};
+      }
+      contexts.emplace_back(std::make_shared<stan::io::array_var_context>(
+          std::vector<std::string>{"inv_metric"}, values, dimensions));
+    }
+    return contexts;
+  }
 
   template <class Model>
   Rcpp::List run_sampling(Model& model, Rcpp::List args) {
@@ -89,46 +124,10 @@ namespace newstan {
       metric_writers.emplace_back(std::make_unique<std::ostringstream>());
     }
 
-    // ── Build per-chain metric contexts from inv_metric ─────────────
-    // User can provide:
-    //   - Single vector/matrix: same metric for all chains
-    //   - List of vectors/matrices: one metric per chain
-    // Stored as shared_ptr<var_context> (same pattern as CmdStan)
     const bool metric_supplied = args.containsElementNamed("inv_metric") &&
                            !Rcpp::as<bool>(args["inv_metric_na"]);
-    std::vector<std::shared_ptr<stan::io::var_context>> metric_ctxs;
-
-    if (metric_supplied) {
-      Rcpp::List inv_metric_list = Rcpp::as<Rcpp::List>(args["inv_metric"]);
-      const size_t num_params = model.num_params_r();
-
-      // Determine if user provided one metric (recycled) or one per chain
-      const bool per_chain = inv_metric_list.length() == static_cast<R_xlen_t>(num_chains);
-
-      metric_ctxs.reserve(num_chains);
-      for (int i = 0; i < num_chains; ++i) {
-        SEXP inv_metric_sexp = inv_metric_list[per_chain ? i : 0];
-
-        if (metric == "diag_e") {
-          // Diagonal metric: vector of length num_params
-          Rcpp::NumericVector inv_metric_vec = Rcpp::as<Rcpp::NumericVector>(inv_metric_sexp);
-          std::vector<double> vals(inv_metric_vec.begin(), inv_metric_vec.end());
-          std::vector<std::vector<size_t>> dims{{num_params}};
-          metric_ctxs.emplace_back(std::make_shared<stan::io::array_var_context>(
-              std::vector<std::string>{"inv_metric"}, vals, dims));
-        } else if (metric == "dense_e") {
-          // Dense metric: matrix of size num_params x num_params
-          Rcpp::NumericMatrix inv_metric_mat = Rcpp::as<Rcpp::NumericMatrix>(inv_metric_sexp);
-          std::vector<double> vals(inv_metric_mat.begin(), inv_metric_mat.end());
-          std::vector<std::vector<size_t>> dims{{num_params, num_params}};
-          metric_ctxs.emplace_back(std::make_shared<stan::io::array_var_context>(
-              std::vector<std::string>{"inv_metric"}, vals, dims));
-        } else {
-          // unit_e: inv_metric is ignored
-          metric_ctxs.emplace_back(nullptr);
-        }
-      }
-    }
+    auto metric_ctxs = make_metric_contexts(model, args, metric, num_chains);
+    const bool multi_chain = num_chains > 1;
 
     // Multi-chain Stan services call this callback from TBB workers, where
     // Rcpp interrupt polling is unsafe. Single-chain services run on R's
@@ -146,7 +145,7 @@ namespace newstan {
 
     // ── Dispatch: fixed_param ───────────────────────────────────────
     } else if (algorithm == "fixed_param") {
-      if (num_chains > 1) {
+      if (multi_chain) {
         return_code = stan::services::sample::fixed_param(
             model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
             init_radius, num_samples, num_thin, refresh,
@@ -166,25 +165,14 @@ namespace newstan {
         // ── NUTS with adaptation ────────────────────────────────────
 
         if (metric == "unit_e") {
-          if (metric_supplied) {
-            return_code = stan::services::sample::hmc_nuts_unit_e_adapt(
-                model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-                init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, max_depth,
-                delta, gamma, kappa, t0,
-                interrupt, logger,
-                init_writers, sample_writers, diag_writers,
-                metric_writers);
-          } else {
-            return_code = stan::services::sample::hmc_nuts_unit_e_adapt(
-                model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-                init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, max_depth,
-                delta, gamma, kappa, t0,
-                interrupt, logger,
-                init_writers, sample_writers, diag_writers,
-                metric_writers);
-          }
+          return_code = stan::services::sample::hmc_nuts_unit_e_adapt(
+              model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
+              init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
+              stepsize, stepsize_jitter, max_depth,
+              delta, gamma, kappa, t0,
+              interrupt, logger,
+              init_writers, sample_writers, diag_writers,
+              metric_writers);
 
         } else if (metric == "diag_e") {
           if (metric_supplied) {
@@ -237,7 +225,7 @@ namespace newstan {
         // ── NUTS without adaptation (fixed stepsize) ────────────────
 
         if (metric == "unit_e") {
-          if (num_chains > 1) {
+          if (multi_chain) {
             return_code = stan::services::sample::hmc_nuts_unit_e(
                 model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
                 init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
@@ -251,26 +239,23 @@ namespace newstan {
                 interrupt, logger, init_writers[0],
                 sample_writers[0], diag_writers[0]);
           }
+        } else if (metric_supplied && multi_chain) {
+          std::ostringstream msg;
+          msg << "inv_metric with non-adaptive " << metric
+              << " is only supported for a single chain. "
+              << "Set adapt_engaged = TRUE for multi-chain with custom metric.";
+          logger.error(msg.str());
+          return_code = stan::services::error_codes::CONFIG;
         } else if (metric == "diag_e") {
           if (metric_supplied) {
-            // With user-supplied metric, use single-chain with metric context
-            // (multi-chain non-adaptive diag_e doesn't accept metric contexts in Stan)
-            if (num_chains > 1) {
-              std::ostringstream msg;
-              msg << "inv_metric with non-adaptive diag_e is only supported for a single chain. "
-                  << "Set adapt_engaged = TRUE for multi-chain with custom metric.";
-              logger.error(msg.str());
-              return_code = stan::services::error_codes::CONFIG;
-            } else {
               return_code = stan::services::sample::hmc_nuts_diag_e(
                   model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
                   num_warmup, num_samples, num_thin, save_warmup, refresh,
                   stepsize, stepsize_jitter, max_depth,
                   interrupt, logger, init_writers[0],
                   sample_writers[0], diag_writers[0]);
-            }
           } else {
-            if (num_chains > 1) {
+            if (multi_chain) {
               return_code = stan::services::sample::hmc_nuts_diag_e(
                   model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
                   init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
@@ -287,22 +272,14 @@ namespace newstan {
           }
         } else if (metric == "dense_e") {
           if (metric_supplied) {
-            if (num_chains > 1) {
-              std::ostringstream msg;
-              msg << "inv_metric with non-adaptive dense_e is only supported for a single chain. "
-                  << "Set adapt_engaged = TRUE for multi-chain with custom metric.";
-              logger.error(msg.str());
-              return_code = stan::services::error_codes::CONFIG;
-            } else {
               return_code = stan::services::sample::hmc_nuts_dense_e(
                   model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
                   num_warmup, num_samples, num_thin, save_warmup, refresh,
                   stepsize, stepsize_jitter, max_depth,
                   interrupt, logger, init_writers[0],
                   sample_writers[0], diag_writers[0]);
-            }
           } else {
-            if (num_chains > 1) {
+            if (multi_chain) {
               return_code = stan::services::sample::hmc_nuts_dense_e(
                   model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
                   init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
@@ -323,7 +300,7 @@ namespace newstan {
     // ── Dispatch: HMC + static ───────────────────────────────────────
     } else if (algorithm == "hmc" && engine == "static") {
       // Static HMC is single-chain only (no multi-chain overloads in Stan)
-      if (num_chains > 1) {
+      if (multi_chain) {
         std::ostringstream msg;
         msg << "Static HMC only supports a single chain. Set chains = 1.";
         logger.error(msg.str());
