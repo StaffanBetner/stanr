@@ -4,7 +4,7 @@
 \alias{.newstan_pch_flags}
 \title{Return flags that make sourceCpp use a cached Stan PCH.}
 \usage{
-.newstan_pch_flags(cppflags, verbose = FALSE)
+.newstan_pch_flags(cppflags, verbose = FALSE, rebuild = FALSE)
 }
 \description{
 Return flags that make sourceCpp use a cached Stan PCH.
