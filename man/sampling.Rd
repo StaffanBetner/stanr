@@ -18,7 +18,7 @@ sampling(
   algorithm = "hmc",
   engine = "nuts",
   metric = "diag_e",
-  metric_file = NULL,
+  inv_metric = NULL,
   stepsize = 1,
   stepsize_jitter = 0,
   max_depth = 10,
@@ -68,7 +68,7 @@ used when \code{algorithm = "hmc"}.}
 \item{metric}{Euclidean metric: \code{"unit_e"}, \code{"diag_e"}, or \code{"dense_e"}
 (default: \code{"diag_e"}).}
 
-\item{metric_file}{Precomputed inverse metric. For \code{"diag_e"}, a numeric vector
+\item{inv_metric}{Precomputed inverse metric. For \code{"diag_e"}, a numeric vector
 of length equal to the number of unconstrained parameters. For \code{"dense_e"},
 a square matrix. Can be a single metric (recycled across chains) or a list
 of metrics (one per chain). Corresponds to CmdStan's \code{metric_file} argument.

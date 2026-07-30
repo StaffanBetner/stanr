@@ -98,7 +98,7 @@ test_that("sampling with inv_metric (diag_e) works", {
     algorithm = "hmc",
     engine = "nuts",
     metric = "diag_e",
-    metric_file = c(1.0),
+    inv_metric = c(1.0),
     seed = 42,
     verbose = FALSE
   )
@@ -304,7 +304,7 @@ test_that("sampling with static HMC + inv_metric (diag_e) works", {
     algorithm = "hmc",
     engine = "static",
     metric = "diag_e",
-    metric_file = c(1.0),
+    inv_metric = c(1.0),
     adapt_engaged = TRUE,
     stepsize = 1,
     int_time = 10,

@@ -17,7 +17,7 @@
 #'   used when `algorithm = "hmc"`.
 #' @param metric Euclidean metric: `"unit_e"`, `"diag_e"`, or `"dense_e"`
 #'   (default: `"diag_e"`).
-#' @param metric_file Precomputed inverse metric. For `"diag_e"`, a numeric vector
+#' @param inv_metric Precomputed inverse metric. For `"diag_e"`, a numeric vector
 #'   of length equal to the number of unconstrained parameters. For `"dense_e"`,
 #'   a square matrix. Can be a single metric (recycled across chains) or a list
 #'   of metrics (one per chain). Corresponds to CmdStan's `metric_file` argument.
@@ -64,7 +64,7 @@ sampling <- function(
   algorithm = "hmc",
   engine = "nuts",
   metric = "diag_e",
-  metric_file = NULL,
+  inv_metric = NULL,
   stepsize = 1,
   stepsize_jitter = 0,
   max_depth = 10,
@@ -150,21 +150,21 @@ sampling <- function(
   }
 
   # Warn if inv_metric provided with unit_e
-  if (!is.null(metric_file) && metric == "unit_e") {
-    warning("metric_file is ignored when metric = 'unit_e'", call. = FALSE)
+  if (!is.null(inv_metric) && metric == "unit_e") {
+    warning("inv_metric is ignored when metric = 'unit_e'", call. = FALSE)
   }
 
-  # Prepare metric_file for C++: wrap in list if needed
-  inv_metric_na <- is.null(metric_file)
+  # Prepare inv_metric for C++: wrap in list if needed
+  inv_metric_na <- is.null(inv_metric)
   if (!inv_metric_na) {
     # If not already a list, wrap as single metric recycled across chains
-    if (!is.list(metric_file)) {
-      metric_file <- list(metric_file)
+    if (!is.list(inv_metric)) {
+      inv_metric <- list(inv_metric)
     }
     # Validate length if per-chain
-    if (length(metric_file) > 1 && length(metric_file) != num_chains) {
+    if (length(inv_metric) > 1 && length(inv_metric) != num_chains) {
       stop(
-        "metric_file must be a single metric or a list of length ",
+        "inv_metric must be a single metric or a list of length ",
         num_chains,
         " (one per chain)",
         call. = FALSE
@@ -210,7 +210,7 @@ sampling <- function(
     term_buffer = as.integer(term_buffer),
     window = as.integer(window),
     init = normalize_init(init),
-    inv_metric = metric_file,
+    inv_metric = inv_metric,
     inv_metric_na = inv_metric_na,
     verbose = as.logical(verbose),
     num_threads = as.integer(num_threads)

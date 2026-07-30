@@ -32,7 +32,7 @@ C++ before the model is compiled. See \code{\link[=stanc]{stanc()}}.}
 \item{force_recompile}{Whether to always recompile, even if a cached model is found}
 }
 \value{
-An S3 object of class \code{"newstan_fit"} wrapping a compiled Stan model.
+An environment containing a \code{new_model()} function for instantiating a model
 }
 \description{
 Compile and load a Stan model

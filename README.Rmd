@@ -115,6 +115,8 @@ list(
   variables = posterior::variables(fit$draws),
   return_code = fit$return_code
 )
+
+head(summary(fit), 3)
 ```
 
 The return value has:
@@ -147,12 +149,14 @@ list(
   ndraws = posterior::ndraws(fixed_fit$draws),
   return_code = fixed_fit$return_code
 )
+
+head(summary(fixed_fit), 3)
 ```
 
 ### Supplying Inverse Metrics
 
-`sampling()` accepts precomputed inverse metric values through `metric_file`.
-This corresponds to Stan's `inv_metric` input.
+`sampling()` accepts precomputed inverse metric values through `inv_metric`.
+This corresponds to Stan's `metric_file` input.
 
 For a diagonal metric, pass a numeric vector with one value per unconstrained
 parameter. The Bernoulli model above has one unconstrained parameter.
@@ -162,7 +166,7 @@ diag_metric_fit <- sampling(
   mod,
   data,
   metric = "diag_e",
-  metric_file = c(1.0),
+  inv_metric = c(1.0),
   num_warmup = 20,
   num_samples = 20,
   seed = 123,
@@ -173,6 +177,8 @@ list(
   variables = posterior::variables(diag_metric_fit$draws),
   return_code = diag_metric_fit$return_code
 )
+
+head(summary(diag_metric_fit), 3)
 ```
 
 For a dense metric, pass a square matrix. To provide one metric per chain, pass
@@ -184,7 +190,7 @@ dense_metric_fit <- sampling(
   mod,
   data,
   metric = "dense_e",
-  metric_file = list(matrix(1.0, nrow = 1, ncol = 1)),
+  inv_metric = list(matrix(1.0, nrow = 1, ncol = 1)),
   num_chains = 1,
   num_warmup = 20,
   num_samples = 20,
@@ -196,6 +202,8 @@ list(
   variables = posterior::variables(dense_metric_fit$draws),
   return_code = dense_metric_fit$return_code
 )
+
+head(summary(dense_metric_fit), 3)
 ```
 
 ## Pathfinder
@@ -219,6 +227,8 @@ list(
   variables = posterior::variables(pf$draws),
   return_code = pf$return_code
 )
+
+head(summary(pf), 3)
 ```
 
 The return value has `draws`, `diagnostics`, `return_code`, and `args`. If no
@@ -245,6 +255,8 @@ list(
   variables = posterior::variables(vb$draws),
   return_code = vb$return_code
 )
+
+head(summary(vb), 3)
 ```
 
 The return value has `draws`, `return_code`, and `args`.
@@ -267,6 +279,8 @@ list(
   value = opt$value,
   return_code = opt$return_code
 )
+
+summary(opt)
 ```
 
 The return value has `par`, `value`, `return_code`, and `args`.
@@ -292,6 +306,8 @@ list(
   variables = posterior::variables(lap$draws),
   return_code = lap$return_code
 )
+
+head(summary(lap), 3)
 ```
 
 The return value has `draws`, `return_code`, and `args`.
@@ -315,6 +331,8 @@ list(
   variables = posterior::variables(gq$draws),
   return_code = gq$return_code
 )
+
+head(summary(gq), 3)
 ```
 
 The return value has `draws`, `return_code`, and `args`.
@@ -333,6 +351,8 @@ n_failed <- gradient_check(
 )
 
 n_failed
+
+summary(n_failed)
 ```
 
 `gradient_check()` returns an integer count of failed parameter gradient checks.
