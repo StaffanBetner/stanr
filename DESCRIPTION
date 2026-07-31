@@ -13,6 +13,7 @@ License: MIT + file LICENSE
 Depends:
     R (>= 4.0)
 Imports:
+    R6,
     Rcpp (>= 1.0.0),
     RcppParallel,
     QuickJSR,

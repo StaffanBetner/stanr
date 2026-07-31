@@ -29,7 +29,7 @@
 #'   - `args`: named list of optimization configuration arguments. Large inputs
 #'     are omitted.
 #'
-#' @export
+#' @noRd
 optimizing <- function(
   stanmod,
   data,

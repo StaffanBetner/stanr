@@ -3,22 +3,22 @@
     Code
       stan_model()
     Condition
-      Error in `stan_model()`:
-      ! Either 'file' or 'code' must be provided.
+      Error:
+      ! Supply exactly one of `stan_file` and `code`.
 
 # stan_model errors when both file and code given
 
     Code
-      stan_model(file = path, code = "parameters { real x; }")
+      stan_model(stan_file = path, code = "parameters { real x; }")
     Condition
-      Error in `stan_model()`:
-      ! Provide either 'file' or 'code', not both.
+      Error:
+      ! Supply exactly one of `stan_file` and `code`.
 
 # stan_model errors on missing file
 
     Code
-      stan_model(file = "nonexistent.stan")
+      stan_model(stan_file = "nonexistent.stan")
     Condition
-      Error in `stan_model()`:
-      ! File not found: nonexistent.stan
+      Error:
+      ! `stan_file` must name an existing Stan file.
 

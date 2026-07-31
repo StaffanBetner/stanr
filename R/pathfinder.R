@@ -36,7 +36,7 @@
 #'   - `args`: named list of Pathfinder configuration arguments. Large inputs
 #'     are omitted.
 #'
-#' @export
+#' @noRd
 pathfinder <- function(
   stanmod,
   data,

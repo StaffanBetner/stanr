@@ -50,7 +50,7 @@
 #'   - `args`: named list of sampling configuration arguments. Large inputs are
 #'     omitted.
 #'
-#' @export
+#' @noRd
 sampling <- function(
   stanmod,
   data,
@@ -100,10 +100,12 @@ sampling <- function(
   if (thin < 1) {
     stop("thin must be at least 1.", call. = FALSE)
   }
-  num_saved_draws <- num_samples %/% thin + as.integer(num_samples %% thin != 0)
+  # Calculate in double precision so adding two valid integer iteration counts
+  # cannot overflow to NA before the explicit R-size guard below.
+  num_saved_draws <- ceiling(as.double(num_samples) / as.double(thin))
   if (save_warmup) {
-    num_saved_draws <- num_saved_draws + num_warmup %/% thin +
-      as.integer(num_warmup %% thin != 0)
+    num_saved_draws <- num_saved_draws +
+      ceiling(as.double(num_warmup) / as.double(thin))
   }
   if (num_saved_draws > .Machine$integer.max) {
     stop("Requested number of saved draws is too large.", call. = FALSE)

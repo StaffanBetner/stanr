@@ -39,6 +39,7 @@ class r_data_context : public stan::io::var_context {
  private:
   struct value_entry {
     std::vector<double> reals;
+    std::vector<std::complex<double>> complexes;
     std::optional<std::vector<int>> ints;
     std::vector<size_t> dims;
   };
@@ -92,8 +93,8 @@ class r_data_context : public stan::io::var_context {
           ints[j] = input[j];
           reals[j] = static_cast<double>(input[j]);
         }
-        values_.emplace(name, value_entry{std::move(reals), std::move(ints),
-                                          std::move(dims)});
+        values_.emplace(name, value_entry{std::move(reals), {},
+                                          std::move(ints), std::move(dims)});
       } else if (Rf_isNumeric(value)) {
         Rcpp::NumericVector input(value);
         std::vector<double> reals(input.begin(), input.end());
@@ -112,11 +113,35 @@ class r_data_context : public stan::io::var_context {
         }
         values_.emplace(name,
                         value_entry{std::move(reals),
+                                    {},
                                     is_integer_valued
                                         ? std::optional<std::vector<int>>(
                                               std::move(ints))
                                         : std::nullopt,
                                     std::move(dims)});
+      } else if (Rf_isComplex(value)) {
+        Rcpp::ComplexVector input(value);
+        std::vector<std::complex<double>> complexes;
+        complexes.reserve(input.size());
+        for (R_xlen_t j = 0; j < input.size(); ++j) {
+          const Rcomplex element = input[j];
+          if (!std::isfinite(element.r) || !std::isfinite(element.i)) {
+            Rcpp::stop("Complex variable '" + name
+                       + "' contains a non-finite value.");
+          }
+          complexes.emplace_back(element.r, element.i);
+        }
+        // Stan's var_context convention represents a complex scalar as a
+        // final real/imaginary dimension of size two. vals_c() removes that
+        // storage dimension and returns one std::complex per logical value.
+        dims.push_back(2);
+        values_.emplace(name, value_entry{{}, std::move(complexes),
+                                          std::nullopt, std::move(dims)});
+      } else {
+        Rcpp::stop("Variable '" + name
+                   + "' must be an integer, numeric, or complex atomic "
+                     "vector or array; tuple/list values are not yet "
+                     "supported.");
       }
     }
   }
@@ -128,8 +153,11 @@ class r_data_context : public stan::io::var_context {
     const auto it = values_.find(name);
     return it == values_.end() ? std::vector<double>() : it->second.reals;
   }
-  std::vector<std::complex<double>> vals_c(const std::string&) const override {
-    return {};
+  std::vector<std::complex<double>> vals_c(
+      const std::string& name) const override {
+    const auto it = values_.find(name);
+    return it == values_.end() ? std::vector<std::complex<double>>()
+                               : it->second.complexes;
   }
   std::vector<size_t> dims_r(const std::string& name) const override {
     const auto it = values_.find(name);

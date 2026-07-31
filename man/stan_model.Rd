@@ -5,40 +5,49 @@
 \title{Compile and load a Stan model}
 \usage{
 stan_model(
-  file = NULL,
+  stan_file = NULL,
   code = NULL,
+  compile = TRUE,
   model_name = NULL,
-  include_directories = character(),
-  external_cpp = NULL,
-  verbose = FALSE,
+  include_paths = NULL,
+  user_header = NULL,
+  cpp_options = list(),
+  stanc_options = list(),
+  force_recompile = getOption("newstan_force_recompile", FALSE),
   precompiled_headers = FALSE,
-  force_recompile = FALSE
+  quiet = TRUE,
+  external_cpp = NULL
 )
 }
 \arguments{
-\item{file}{Path to a \code{.stan} file (or \code{NULL} if \code{code} is provided)}
+\item{stan_file}{Path to a Stan program. Supply either \code{stan_file} or \code{code}.}
 
-\item{code}{Stan model code as a string (alternative to \code{file})}
+\item{code}{Stan model code as a single string.}
 
-\item{model_name}{Override model name (default: basename of \code{file} without \code{.stan})}
+\item{compile}{Whether to compile immediately. If \code{FALSE}, compilation is
+deferred until a service method or \verb{$compile()} is called.}
 
-\item{include_directories}{Directories searched, in order, to resolve Stan
-\verb{#include} directives.}
+\item{model_name}{Optional model name.}
 
-\item{external_cpp}{\code{NULL} or paths to C++ files prepended to the generated
-C++ before the model is compiled. See \code{\link[=stanc]{stanc()}}.}
+\item{include_paths}{Directories used to resolve Stan includes.}
 
-\item{verbose}{Print compilation progress}
+\item{user_header}{Optional C++ header to include in model compilation.}
 
-\item{precompiled_headers}{Whether to use a cached precompiled Stan model header.
-This substantially speeds up repeated model compilations, but the initial
-build is large and is stored in the user's cache directory. It is disabled
-automatically when \code{external_cpp} is supplied.}
+\item{cpp_options}{Named C++ compilation options. Reserved for compilation
+options supported by the in-process backend.}
 
-\item{force_recompile}{Whether to always recompile, even if a cached model is found}
+\item{stanc_options}{Named options passed to the bundled Stan compiler.}
+
+\item{force_recompile}{Force native recompilation.}
+
+\item{precompiled_headers}{Use newstan's cached precompiled Stan header.}
+
+\item{quiet}{Suppress compilation progress.}
+
+\item{external_cpp}{Paths to C++ files prepended to generated model code.}
 }
 \value{
-An environment containing a \code{new_model()} function for instantiating a model
+A \code{StanModel} R6 object.
 }
 \description{
 Compile and load a Stan model

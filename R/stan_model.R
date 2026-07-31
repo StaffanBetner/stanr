@@ -1,22 +1,4 @@
-#' Compile and load a Stan model
-#'
-#' @param file Path to a `.stan` file (or `NULL` if `code` is provided)
-#' @param code Stan model code as a string (alternative to `file`)
-#' @param model_name Override model name (default: basename of `file` without `.stan`)
-#' @param include_directories Directories searched, in order, to resolve Stan
-#'   `#include` directives.
-#' @param external_cpp `NULL` or paths to C++ files prepended to the generated
-#'   C++ before the model is compiled. See [stanc()].
-#' @param precompiled_headers Whether to use a cached precompiled Stan model header.
-#'   This substantially speeds up repeated model compilations, but the initial
-#'   build is large and is stored in the user's cache directory. It is disabled
-#'   automatically when `external_cpp` is supplied.
-#' @param force_recompile Whether to always recompile, even if a cached model is found
-#' @param verbose Print compilation progress
-#'
-#' @return An environment containing a `new_model()` function for instantiating a model
-#' @export
-stan_model <- function(
+.compile_stan_model_environment <- function(
   file = NULL,
   code = NULL,
   model_name = NULL,
@@ -70,7 +52,30 @@ stan_model <- function(
   model_support <- readLines(
     system.file("stan_model.cpp", package = "newstan", mustWork = TRUE)
   )
-  model_hash <- digest::digest(c(cpp_code, model_support), algo = "xxhash64")
+  bridge_headers <- c(
+    system.file(
+      "include", "newstan", "model_methods.hpp",
+      package = "newstan", mustWork = TRUE
+    ),
+    system.file(
+      "include", "newstan", "r_data_context.hpp",
+      package = "newstan", mustWork = TRUE
+    )
+  )
+  bridge_code <- unlist(
+    lapply(bridge_headers, readLines, warn = FALSE),
+    use.names = FALSE
+  )
+  model_hash <- digest::digest(
+    c(
+      cpp_code,
+      model_support,
+      bridge_code,
+      as.character(utils::packageVersion("newstan")),
+      .newstan_stan_version()
+    ),
+    algo = "xxhash64"
+  )
 
   cpp_file <- file.path(tempdir(), paste0("stan_", model_hash, ".cpp"))
   if (!file.exists(cpp_file)) {
@@ -136,4 +141,53 @@ stan_model <- function(
   )
 
   env
+}
+
+#' Compile and load a Stan model
+#'
+#' @param stan_file Path to a Stan program. Supply either `stan_file` or `code`.
+#' @param code Stan model code as a single string.
+#' @param compile Whether to compile immediately. If `FALSE`, compilation is
+#'   deferred until a service method or `$compile()` is called.
+#' @param model_name Optional model name.
+#' @param include_paths Directories used to resolve Stan includes.
+#' @param user_header Optional C++ header to include in model compilation.
+#' @param cpp_options Named C++ compilation options. Reserved for compilation
+#'   options supported by the in-process backend.
+#' @param stanc_options Named options passed to the bundled Stan compiler.
+#' @param force_recompile Force native recompilation.
+#' @param precompiled_headers Use newstan's cached precompiled Stan header.
+#' @param quiet Suppress compilation progress.
+#' @param external_cpp Paths to C++ files prepended to generated model code.
+#'
+#' @return A `StanModel` R6 object.
+#' @export
+stan_model <- function(
+  stan_file = NULL,
+  code = NULL,
+  compile = TRUE,
+  model_name = NULL,
+  include_paths = NULL,
+  user_header = NULL,
+  cpp_options = list(),
+  stanc_options = list(),
+  force_recompile = getOption("newstan_force_recompile", FALSE),
+  precompiled_headers = FALSE,
+  quiet = TRUE,
+  external_cpp = NULL
+) {
+  StanModel$new(
+    stan_file = stan_file,
+    code = code,
+    compile = compile,
+    model_name = model_name,
+    include_paths = include_paths,
+    user_header = user_header,
+    cpp_options = cpp_options,
+    stanc_options = stanc_options,
+    force_recompile = force_recompile,
+    precompiled_headers = precompiled_headers,
+    quiet = quiet,
+    external_cpp = external_cpp
+  )
 }

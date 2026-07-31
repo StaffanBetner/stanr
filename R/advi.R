@@ -26,7 +26,7 @@
 #'   - `return_code`: integer status code.
 #'   - `args`: named list of ADVI configuration arguments. Large inputs are omitted.
 #'
-#' @export
+#' @noRd
 variational <- function(
   stanmod,
   data,

@@ -1,39 +1,36 @@
 test_that("advi returns expected structure", {
   path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(file = path)
+  mod <- stan_model(stan_file = path)
   data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 
-  result <- variational(
-    mod,
-    data,
+  result <- mod$variational(
+    data = data,
     iter = 1000,
-    output_samples = 100,
+    draws = 100,
     seed = 42,
-    verbose = FALSE
+    show_messages = FALSE
   )
 
-  expect_type(result, "list")
-  expect_s3_class(result, "StanVariational")
-  expect_named(result, c("draws", "return_code", "args"))
-  expect_s3_class(result$draws, "draws_df")
-  expect_s3_class(summary(result), "draws_summary")
-  expect_equal(result$return_code, 0L)
+  expect_s3_class(result, "StanVB")
+  expect_s3_class(result, "StanFit")
+  expect_s3_class(result$draws(), "draws_matrix")
+  expect_s3_class(result$summary(), "draws_summary")
+  expect_equal(result$return_codes(), 0L)
 })
 
 test_that("advi with meanfield algorithm works", {
   path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(file = path)
+  mod <- stan_model(stan_file = path)
   data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 
-  result <- variational(
-    mod,
-    data,
+  result <- mod$variational(
+    data = data,
     algorithm = "meanfield",
     iter = 1000,
-    output_samples = 100,
+    draws = 100,
     seed = 42,
-    verbose = FALSE
+    show_messages = FALSE
   )
 
-  expect_equal(result$return_code, 0L)
+  expect_equal(result$return_codes(), 0L)
 })

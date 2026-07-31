@@ -11,14 +11,14 @@ test_that("stanc resolves nested includes from include_directories", {
   expect_match(cpp_code, "centered")
 })
 
-test_that("stan_model forwards include_directories to stanc", {
+test_that("stan_model forwards include_paths to stanc", {
   mod <- stan_model(
-    file = test_path("test-models/include_model.stan"),
-    include_directories = test_path("test-models/includes")
+    stan_file = test_path("test-models/include_model.stan"),
+    include_paths = test_path("test-models/includes")
   )
 
-  expect_true(is.environment(mod))
-  expect_true(exists("new_model", envir = mod))
+  expect_s3_class(mod, "StanModel")
+  expect_true(mod$is_compiled())
 })
 
 test_that("stanc reports an unresolved include and its search path", {
@@ -84,8 +84,8 @@ test_that("stan_model compiles a model using external C++", {
     external_cpp = test_path("test-models/external_mean.hpp")
   )
 
-  expect_true(is.environment(mod))
-  expect_true(exists("new_model", envir = mod))
+  expect_s3_class(mod, "StanModel")
+  expect_true(mod$is_compiled())
 })
 
 test_that("stanc validates external C++ paths", {

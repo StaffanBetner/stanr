@@ -1,550 +1,295 @@
-
-<!-- README.md is generated from README.Rmd. Please edit that file -->
+<!-- README.md currently documents the implemented R6 API directly. -->
 
 # newstan
 
-<!-- badges: start -->
+`newstan` is an in-process R interface to Stan. It compiles a Stan program to
+native code, exposes Stan services through a `StanModel` R6 object, and returns
+service-specific `StanFit` R6 objects backed by `posterior` draw formats.
 
-<!-- badges: end -->
-
-`newstan` is an R interface for compiling Stan programs and running Stan
-services directly from R. Results use `posterior` draw objects where
-possible, and every service result includes its normalized configuration
-arguments (large execution inputs are omitted).
-
-## Service Return Types
-
-| Function | Purpose | Return type |
-|----|----|----|
-| `sampling()` | MCMC sampling, including HMC/NUTS and fixed-parameter runs | list with `draws`, `diagnostics`, `return_code`, `args` |
-| `pathfinder()` | Pathfinder approximate posterior draws | list with `draws`, `diagnostics`, `return_code`, `args` |
-| `variational()` | ADVI approximate posterior draws | list with `draws`, `return_code`, `args` |
-| `optimizing()` | Posterior mode or maximum likelihood estimate | list with `par`, `value`, `return_code`, `args` |
-| `laplace()` | Laplace approximation draws around a mode | list with `draws`, `return_code`, `args` |
-| `generated_quantities()` | Generated quantities from existing parameter draws | list with `draws`, `return_code`, `args` |
-| `gradient_check()` | Finite-difference gradient diagnostic | integer count of failed checks |
+The package is under active development. Its current API follows the shape and
+argument names of `cmdstanr`, but not every `cmdstanr` feature is implemented
+yet.
 
 ## Installation
 
-You can install the development version of newstan from GitHub:
+Install the development version from GitHub:
 
 ``` r
 # install.packages("pak")
 pak::pak("andrjohns/newstan")
 ```
 
-## Compile A Model
+## Compile a model
 
-Models can be compiled from a string or from a `.stan` file. The
-returned object is a model environment used by the service functions
-below.
+Pass a Stan file to `stan_model()`. Compilation happens immediately by default
+and the result is a `StanModel` R6 object.
 
 ``` r
 library(newstan)
 
-bernoulli_model <- "
-data {
-  int<lower=0> N;
-  array[N] int<lower=0, upper=1> y;
-}
-parameters {
-  real<lower=0, upper=1> theta;
-}
-model {
-  theta ~ beta(1, 1);
-  y ~ bernoulli(theta);
-}
-generated quantities {
-  array[N] real log_lik;
-  for (n in 1:N) {
-    log_lik[n] = bernoulli_lpmf(y[n] | theta);
-  }
-}
-"
+mod <- stan_model(
+  stan_file = "bernoulli.stan",
+  quiet = TRUE
+)
 
-mod <- stan_model(code = bernoulli_model, model_name = "bernoulli")
-data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
-
-fixed_param_model <- "
-data {
-  int<lower=0> N;
-}
-generated quantities {
-  array[N] int<lower=0, upper=1> y_rep;
-  for (n in 1:N) {
-    y_rep[n] = bernoulli_rng(0.5);
-  }
-}
-"
-
-fixed_mod <- stan_model(code = fixed_param_model, model_name = "fixed_param")
-fixed_data <- list(N = 5)
+mod$model_name()
+mod$stan_file()
+mod$stan_version()
+mod$is_compiled()
 ```
 
-`stan_model()` returns an S3 object of class `"newstan_fit"` wrapping
-the compiled model.
-
-## Sampling
-
-Use `sampling()` for MCMC. The result is a list with posterior draws,
-sampler diagnostics, a Stan return code, and the normalized configuration
-argument list.
+Use `compile = FALSE` to defer compilation until `$compile()` or a service
+method is called:
 
 ``` r
-fit <- sampling(
-  mod,
-  data,
-  num_warmup = 20,
-  num_samples = 20,
-  num_chains = 2,
+mod <- stan_model(
+  stan_file = "bernoulli.stan",
+  compile = FALSE
+)
+
+mod$compile()
+```
+
+`stan_model()` also accepts `code` instead of `stan_file`, but exactly one of
+the two must be supplied. `include_paths` and `external_cpp` are available for
+models with Stan includes or external C++ definitions.
+
+## Run Stan services
+
+Each service is a method on `StanModel`. The methods use the canonical argument
+names of the new R6 API and return a specialized fit object.
+
+| Model method | Result class | Purpose |
+|---|---|---|
+| `$sample()` | `StanMCMC` | HMC/NUTS or fixed-parameter sampling |
+| `$optimize()` | `StanMLE` | Optimization |
+| `$laplace()` | `StanLaplace` | Laplace approximation |
+| `$variational()` | `StanVB` | Mean-field or full-rank ADVI |
+| `$pathfinder()` | `StanPathfinder` | Pathfinder approximation |
+| `$generate_quantities()` | `StanGQ` | Generated quantities for existing draws |
+| `$diagnose()` | `StanDiagnose` | Finite-difference gradient checks |
+
+Assume that `bernoulli.stan` contains data variables `N` and `y`, a scalar
+parameter `theta`, and a generated-quantities block:
+
+``` r
+data <- list(
+  N = 10L,
+  y = c(1L, 0L, 1L, 1L, 0L, 1L, 0L, 0L, 1L, 0L)
+)
+
+fit <- mod$sample(
+  data = data,
   seed = 123,
-  verbose = FALSE
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 500,
+  iter_sampling = 500,
+  adapt_delta = 0.9,
+  max_treedepth = 12,
+  refresh = 100
 )
-
-list(
-  draws_class = class(fit$draws)[1],
-  diagnostics_class = class(fit$diagnostics)[1],
-  variables = posterior::variables(fit$draws),
-  return_code = fit$return_code
-)
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $diagnostics_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "lp__"       "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3" 
-#>  [6] "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8" 
-#> [11] "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(fit), 3)
-#> # A tibble: 3 × 10
-#>   variable    mean median    sd   mad     q5    q95  rhat ess_bulk ess_tail
-#>   <chr>      <dbl>  <dbl> <dbl> <dbl>  <dbl>  <dbl> <dbl>    <dbl>    <dbl>
-#> 1 lp__      -8.73  -8.47  0.612 0.210 -9.99  -8.32   1.24     10.6     22.4
-#> 2 theta      0.500  0.485 0.126 0.101  0.316  0.700  1.20     21.1     21.4
-#> 3 log_lik.1 -0.727 -0.723 0.282 0.218 -1.15  -0.357  1.16     21.1     21.4
 ```
 
-The return value has:
-
-- `draws`: a `posterior::draws_df` containing model parameter draws.
-- `diagnostics`: a `posterior::draws_df` containing sampler diagnostics
-  such as `accept_stat__`, `stepsize__`, `treedepth__`, `n_leapfrog__`,
-  `divergent__`, and `energy__`.
-- `return_code`: integer status code.
-- `args`: named list of sampling arguments.
-
-### Fixed Param
-
-For models without parameters, or when you only want generated
-quantities, use the fixed-parameter sampler.
+For a model without parameters, set `fixed_param = TRUE` and normally set
+`iter_warmup = 0`:
 
 ``` r
-fixed_fit <- sampling(
-  fixed_mod,
-  fixed_data,
-  algorithm = "fixed_param",
-  num_warmup = 0,
-  num_samples = 10,
+fixed_mod <- stan_model(stan_file = "fixed-param.stan")
+fixed_data <- list(N = 100L)
+
+fixed_fit <- fixed_mod$sample(
+  data = fixed_data,
   seed = 123,
-  verbose = FALSE
+  chains = 1,
+  iter_warmup = 0,
+  iter_sampling = 100,
+  fixed_param = TRUE,
+  refresh = 0
 )
-
-list(
-  variables = posterior::variables(fixed_fit$draws),
-  ndraws = posterior::ndraws(fixed_fit$draws),
-  return_code = fixed_fit$return_code
-)
-#> $variables
-#> [1] "lp__"    "y_rep.1" "y_rep.2" "y_rep.3" "y_rep.4" "y_rep.5"
-#> 
-#> $ndraws
-#> [1] 10
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(fixed_fit), 3)
-#> # A tibble: 3 × 10
-#>   variable  mean median    sd   mad    q5   q95  rhat ess_bulk ess_tail
-#>   <chr>    <dbl>  <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>    <dbl>    <dbl>
-#> 1 lp__       0      0   0     0         0     0 NA          NA       NA
-#> 2 y_rep.1    0.5    0.5 0.527 0.741     0     1 NA           5       NA
-#> 3 y_rep.2    0.6    1   0.516 0         0     1  1.06        5       NA
 ```
 
-### Supplying Inverse Metrics
-
-`sampling()` accepts precomputed inverse metric values through
-`inv_metric`. This corresponds to Stan’s `metric_file` input.
-
-For a diagonal metric, pass a numeric vector with one value per
-unconstrained parameter. The Bernoulli model above has one unconstrained
-parameter.
+An inverse metric can be supplied in memory with `inv_metric`. Use a numeric
+vector with `metric = "diag_e"` or a square matrix with
+`metric = "dense_e"`; a list can provide one metric per chain.
 
 ``` r
-diag_metric_fit <- sampling(
-  mod,
-  data,
+metric_fit <- mod$sample(
+  data = data,
+  chains = 1,
+  iter_warmup = 500,
+  iter_sampling = 500,
   metric = "diag_e",
-  inv_metric = c(1.0),
-  num_warmup = 20,
-  num_samples = 20,
-  seed = 123,
-  verbose = FALSE
+  inv_metric = 1,
+  step_size = 0.5,
+  seed = 123
 )
-
-list(
-  variables = posterior::variables(diag_metric_fit$draws),
-  return_code = diag_metric_fit$return_code
-)
-#> $variables
-#>  [1] "lp__"       "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3" 
-#>  [6] "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8" 
-#> [11] "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(diag_metric_fit), 3)
-#> # A tibble: 3 × 10
-#>   variable    mean median     sd    mad     q5    q95  rhat ess_bulk ess_tail
-#>   <chr>      <dbl>  <dbl>  <dbl>  <dbl>  <dbl>  <dbl> <dbl>    <dbl>    <dbl>
-#> 1 lp__      -8.52  -8.42  0.235  0.110  -8.99  -8.32  0.988    15.1      20.4
-#> 2 theta      0.464  0.453 0.0856 0.0523  0.337  0.605 0.985     9.66     20.4
-#> 3 log_lik.1 -0.783 -0.792 0.186  0.115  -1.09  -0.502 0.985     9.66     20.4
 ```
 
-For a dense metric, pass a square matrix. To provide one metric per
-chain, pass a list whose length equals `num_chains`; a single vector or
-matrix is reused for all chains.
+Other services use the same model object:
 
 ``` r
-dense_metric_fit <- sampling(
-  mod,
-  data,
-  metric = "dense_e",
-  inv_metric = list(matrix(1.0, nrow = 1, ncol = 1)),
-  num_chains = 1,
-  num_warmup = 20,
-  num_samples = 20,
-  seed = 123,
-  verbose = FALSE
-)
-
-list(
-  variables = posterior::variables(dense_metric_fit$draws),
-  return_code = dense_metric_fit$return_code
-)
-#> $variables
-#>  [1] "lp__"       "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3" 
-#>  [6] "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8" 
-#> [11] "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(dense_metric_fit), 3)
-#> # A tibble: 3 × 10
-#>   variable    mean median     sd    mad     q5    q95  rhat ess_bulk ess_tail
-#>   <chr>      <dbl>  <dbl>  <dbl>  <dbl>  <dbl>  <dbl> <dbl>    <dbl>    <dbl>
-#> 1 lp__      -8.52  -8.42  0.235  0.110  -8.99  -8.32  0.988    15.1      20.4
-#> 2 theta      0.464  0.453 0.0856 0.0523  0.337  0.605 0.985     9.66     20.4
-#> 3 log_lik.1 -0.783 -0.792 0.186  0.115  -1.09  -0.502 0.985     9.66     20.4
-```
-
-## Pathfinder
-
-Use `pathfinder()` for an approximate posterior based on L-BFGS paths.
-
-``` r
-pf <- pathfinder(
-  mod,
-  data,
-  max_lbfgs_iters = 100,
-  num_paths = 1,
-  num_draws = 50,
-  seed = 123,
-  verbose = FALSE
-)
-
-list(
-  draws_class = class(pf$draws)[1],
-  diagnostics_class = class(pf$diagnostics)[1],
-  variables = posterior::variables(pf$draws),
-  return_code = pf$return_code
-)
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $diagnostics_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "theta"      "log_lik.1"  "log_lik.2"  "log_lik.3"  "log_lik.4" 
-#>  [6] "log_lik.5"  "log_lik.6"  "log_lik.7"  "log_lik.8"  "log_lik.9" 
-#> [11] "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(pf), 3)
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> # A tibble: 3 × 10
-#>   variable    mean median    sd   mad     q5    q95  rhat ess_bulk ess_tail
-#>   <chr>      <dbl>  <dbl> <dbl> <dbl>  <dbl>  <dbl> <dbl>    <dbl>    <dbl>
-#> 1 theta      0.491  0.495 0.140 0.135  0.283  0.740 0.994     84.9     34.0
-#> 2 log_lik.1 -0.753 -0.703 0.297 0.286 -1.26  -0.301 0.994     84.9     34.0
-#> 3 log_lik.2 -0.721 -0.683 0.325 0.252 -1.35  -0.332 0.994     84.9     34.0
-```
-
-The return value has `draws`, `diagnostics`, `return_code`, and `args`.
-If no pathfinder diagnostic columns are returned, `diagnostics` is
-`NULL`.
-
-## Variational Inference
-
-Use `variational()` for ADVI with either a mean-field or full-rank
-Gaussian family.
-
-``` r
-vb <- variational(
-  mod,
-  data,
-  algorithm = "meanfield",
-  iter = 1000,
-  output_samples = 50,
-  seed = 123,
-  verbose = FALSE
-)
-
-list(
-  draws_class = class(vb$draws)[1],
-  variables = posterior::variables(vb$draws),
-  return_code = vb$return_code
-)
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "lp__"       "log_p__"    "log_g__"    "theta"      "log_lik.1" 
-#>  [6] "log_lik.2"  "log_lik.3"  "log_lik.4"  "log_lik.5"  "log_lik.6" 
-#> [11] "log_lik.7"  "log_lik.8"  "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(vb), 3)
-#> # A tibble: 3 × 10
-#>   variable   mean median    sd   mad     q5      q95  rhat ess_bulk ess_tail
-#>   <chr>     <dbl>  <dbl> <dbl> <dbl>  <dbl>    <dbl> <dbl>    <dbl>    <dbl>
-#> 1 lp__      0      0      0    0       0     0       NA        NA       NA  
-#> 2 log_p__  -8.71  -8.52   1.49 0.273 -10.7  -8.32     1.01     42.1     46.0
-#> 3 log_g__  -0.644 -0.169  1.04 0.240  -3.11 -0.00251  1.01     30.8     17.9
-```
-
-The return value has `draws`, `return_code`, and `args`.
-
-## Optimization
-
-Use `optimizing()` to find a posterior mode or maximum likelihood
-estimate.
-
-``` r
-opt <- optimizing(
-  mod,
-  data,
+opt <- mod$optimize(
+  data = data,
   algorithm = "lbfgs",
-  seed = 123,
-  verbose = FALSE
+  iter = 2000,
+  seed = 123
 )
 
-list(
-  par = opt$par,
-  value = opt$value,
-  return_code = opt$return_code
-)
-#> $par
-#>        lp__ converged__       theta   log_lik.1   log_lik.2   log_lik.3 
-#>  -6.9314718  31.0000000   0.5000001  -0.6931471  -0.6931473  -0.6931471 
-#>   log_lik.4   log_lik.5   log_lik.6   log_lik.7   log_lik.8   log_lik.9 
-#>  -0.6931471  -0.6931473  -0.6931471  -0.6931473  -0.6931473  -0.6931471 
-#>  log_lik.10 
-#>  -0.6931473 
-#> 
-#> $value
-#> [1] -6.931472
-#> 
-#> $return_code
-#> [1] 0
-
-summary(opt)
-#>       variable   estimate
-#> 1         lp__ -6.9314718
-#> 2  converged__ 31.0000000
-#> 3        theta  0.5000001
-#> 4    log_lik.1 -0.6931471
-#> 5    log_lik.2 -0.6931473
-#> 6    log_lik.3 -0.6931471
-#> 7    log_lik.4 -0.6931471
-#> 8    log_lik.5 -0.6931473
-#> 9    log_lik.6 -0.6931471
-#> 10   log_lik.7 -0.6931473
-#> 11   log_lik.8 -0.6931473
-#> 12   log_lik.9 -0.6931471
-#> 13  log_lik.10 -0.6931473
-#> 14        lp__ -6.9314718
-```
-
-The return value has `par`, `value`, `return_code`, and `args`.
-
-## Laplace Approximation
-
-Use `laplace()` to draw from a Laplace approximation around a mode. You
-can pass the full `optimizing()` result or a named numeric vector of
-constrained parameters.
-
-``` r
-lap <- laplace(
-  mod,
-  data,
+lap <- mod$laplace(
+  data = data,
   mode = opt,
-  draws = 20,
+  jacobian = FALSE,
+  draws = 1000,
+  seed = 123
+)
+
+vb <- mod$variational(
+  data = data,
+  algorithm = "meanfield",
+  iter = 10000,
+  draws = 1000,
+  seed = 123
+)
+
+pf <- mod$pathfinder(
+  data = data,
+  num_paths = 4,
+  single_path_draws = 1000,
+  draws = 1000,
+  seed = 123
+)
+
+gq <- mod$generate_quantities(
+  fitted_params = fit,
+  data = data,
+  seed = 123
+)
+
+diagnosis <- mod$diagnose(
+  data = data,
   seed = 123,
-  verbose = FALSE
+  epsilon = 1e-6,
+  error = 1e-6
 )
-
-list(
-  draws_class = class(lap$draws)[1],
-  variables = posterior::variables(lap$draws),
-  return_code = lap$return_code
-)
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "log_p__"    "log_q__"    "theta"      "log_lik.1"  "log_lik.2" 
-#>  [6] "log_lik.3"  "log_lik.4"  "log_lik.5"  "log_lik.6"  "log_lik.7" 
-#> [11] "log_lik.8"  "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(lap), 3)
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> Warning: The ESS has been capped to avoid unstable estimates.
-#> # A tibble: 3 × 10
-#>   variable   mean median    sd   mad      q5     q95  rhat ess_bulk ess_tail
-#>   <chr>     <dbl>  <dbl> <dbl> <dbl>   <dbl>   <dbl> <dbl>    <dbl>    <dbl>
-#> 1 log_p__  -9.16  -8.78  0.928 0.645 -10.7   -8.33   1.13      19.0     25.6
-#> 2 log_q__  -0.586 -0.433 0.764 0.597  -1.34  -0.0106 0.985     20.5     20.4
-#> 3 theta     0.596  0.609 0.149 0.181   0.386  0.785  0.954     26.0     25.6
 ```
 
-The return value has `draws`, `return_code`, and `args`.
+`$laplace()` accepts a `StanMLE` result or a named constrained parameter vector
+as `mode`. `$generate_quantities()` accepts a `StanFit` or a compatible draws
+object as `fitted_params`.
 
-## Generated Quantities
+## Work with fit objects
 
-Use `generated_quantities()` with existing parameter draws and a model
-containing a `generated quantities` block.
+All service results inherit from `StanFit`. Use methods rather than accessing
+implementation fields:
 
 ``` r
-gq <- generated_quantities(
-  mod,
-  data,
-  fitted_params = fit$draws,
-  seed = 123,
-  verbose = FALSE
-)
-
-list(
-  draws_class = class(gq$draws)[1],
-  variables = posterior::variables(gq$draws),
-  return_code = gq$return_code
-)
-#> $draws_class
-#> [1] "draws_df"
-#> 
-#> $variables
-#>  [1] "log_lik.1"  "log_lik.2"  "log_lik.3"  "log_lik.4"  "log_lik.5" 
-#>  [6] "log_lik.6"  "log_lik.7"  "log_lik.8"  "log_lik.9"  "log_lik.10"
-#> 
-#> $return_code
-#> [1] 0
-
-head(summary(gq), 3)
-#> # A tibble: 3 × 10
-#>   variable    mean median    sd   mad    q5    q95  rhat ess_bulk ess_tail
-#>   <chr>      <dbl>  <dbl> <dbl> <dbl> <dbl>  <dbl> <dbl>    <dbl>    <dbl>
-#> 1 log_lik.1 -0.727 -0.723 0.282 0.218 -1.15 -0.357  1.09     16.0     21.1
-#> 2 log_lik.2 -0.728 -0.664 0.268 0.197 -1.20 -0.380  1.09     16.0     21.1
-#> 3 log_lik.3 -0.727 -0.723 0.282 0.218 -1.15 -0.357  1.09     16.0     21.1
+fit$draws()
+fit$draws(variables = "theta", format = "draws_df")
+fit$summary(variables = "theta")
+fit$return_codes()
+fit$metadata()
+fit$time()
+fit$output()
+fit$init()
+fit$code()
 ```
 
-The return value has `draws`, `return_code`, and `args`.
+Supported draw formats are `"draws_array"`, `"draws_matrix"`, `"draws_df"`,
+`"draws_list"`, and `"rvars"`. `StanMCMC` uses `draws_array` by default;
+other draw-producing fits use their service-specific default. Request a format
+explicitly when downstream code requires one.
 
-## Gradient Check
-
-Use `gradient_check()` to compare autodiff gradients with
-finite-difference approximations.
+`StanMCMC` adds sampling-specific accessors:
 
 ``` r
-n_failed <- gradient_check(
-  mod,
-  data,
-  seed = 123,
-  verbose = FALSE
-)
-#> [newstan] All gradient tests passed.
-
-n_failed
-#> [1] 0
-#> attr(,"class")
-#> [1] "StanDiagnose" "integer"
-
-summary(n_failed)
-#>   diagnostic value
-#> 1 num_failed     0
+fit$num_chains()
+fit$sampler_diagnostics()
+fit$diagnostic_summary()
+fit$inv_metric()
 ```
 
-`gradient_check()` returns an integer count of failed parameter gradient
-checks.
+When warmup was retained with `save_warmup = TRUE`, pass
+`inc_warmup = TRUE` to `$draws()` or `$sampler_diagnostics()`.
 
-## Stan Compilation Helpers
-
-`stanc()` compiles Stan code to C++ and returns the generated C++ source
-as a single string.
+Other specialized accessors are:
 
 ``` r
-cpp_code <- stanc(bernoulli_model)
-substr(cpp_code, 1, 80)
-#> [1] "// Code generated by stanc 4d256d1\n#include <stan/model/model_header.hpp>\nnamesp"
+opt$mle()
+lap$mode()
+gq$num_chains()
+diagnosis$num_failed()
+diagnosis$gradients()
 ```
 
-`stan_model()` is usually the higher-level entry point: it calls
-`stanc()`, compiles the generated C++, and returns the model object used
-by the services.
+Persist a fit with `$save_object()`:
+
+``` r
+fit$save_object("bernoulli-fit.rds")
+fit2 <- readRDS("bernoulli-fit.rds")
+```
+
+Native model bindings are restored automatically when a model-evaluation
+method is first needed after deserialization.
+
+## Evaluate the model log density
+
+Fit objects retain the data-bound native model and expose log-density and
+parameter-transformation methods. Inputs to the density methods are on the
+unconstrained scale.
+
+``` r
+upars <- fit$unconstrain_variables(list(theta = 0.5))
+
+fit$log_prob(upars, jacobian = TRUE)
+fit$grad_log_prob(upars, jacobian = TRUE)
+fit$hessian(upars, jacobian = TRUE)
+
+fit$constrain_variables(
+  upars,
+  transformed_parameters = TRUE,
+  generated_quantities = TRUE
+)
+
+fit$variable_skeleton(
+  transformed_parameters = TRUE,
+  generated_quantities = TRUE
+)
+```
+
+`$constrain_variables()` can run transformed parameters and generated
+quantities, so its random-number stream is controlled separately. Reset that
+stream with `$init_model_methods(seed)` when reproducibility is required.
+
+Convert all constrained parameter draws at once with `$unconstrain_draws()`:
+
+``` r
+unconstrained <- fit$unconstrain_draws(format = "draws_matrix")
+```
+
+## Current limitations
+
+The R6 classes and in-process services are implemented, but several parts of
+the `cmdstanr`-shaped interface are intentionally unavailable at present:
+
+- File-backed service output is not implemented. Non-default `output_dir`,
+  `output_basename`, `sig_figs`, and `save_cmdstan_config` requests produce an
+  error. `metric_file` is also unsupported; use `inv_metric` in memory.
+- OpenCL execution is not implemented, so `opencl_ids` is rejected.
+- Saving latent dynamics is not implemented.
+- The native runner currently exposes aggregate service status and output
+  metadata. Consequently `$return_codes()`, `$output()`, and `$time()` do not
+  yet provide complete independent per-chain records; for multi-chain fits an
+  aggregate return code may be repeated for each chain.
+- Jacobian-adjusted optimization is not implemented. Calling `$optimize()`
+  with `jacobian = TRUE` errors. If `$laplace()` needs to optimize its own
+  mode, use `jacobian = FALSE`; alternatively supply an already computed
+  `mode`.
+- `StanModel$variables()` currently returns a placeholder structure whose
+  sections contain `NULL`, rather than parsed Stan variable metadata.
+- Non-empty `cpp_options` and `stanc_options` are currently rejected, and
+  `user_header` is not supported. Use `external_cpp` for external C++ code.
+- The in-process backend does not yet reproduce every file, console-output,
+  diagnostic, timing, and metric artifact available from CmdStan.
+
+Unsupported options fail explicitly rather than being silently ignored.

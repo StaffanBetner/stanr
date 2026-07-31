@@ -6,7 +6,7 @@
 #'   a Stan model with a generated quantities block.
 #' @param data Named list of data variables to pass to the model.
 #' @param fitted_params An object containing posterior draws of constrained parameters
-#'   (e.g., the `draws` element from a [sampling()] result).
+#'   (e.g., the draws produced by the internal sampling adapter).
 #' @param seed Random seed (NA = random).
 #' @param verbose Print progress (default: FALSE).
 #' @param num_threads Number of threads, or `-1` for all available threads.
@@ -18,7 +18,7 @@
 #'   - `args`: named list of generated quantities configuration arguments.
 #'     Large inputs are omitted.
 #'
-#' @export
+#' @noRd
 generated_quantities <- function(
   stanmod,
   data,

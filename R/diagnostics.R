@@ -17,7 +17,7 @@
 #' @return An integer: number of parameters that failed the gradient test
 #'   (0 = all pass).
 #'
-#' @export
+#' @noRd
 gradient_check <- function(
   stanmod,
   data,

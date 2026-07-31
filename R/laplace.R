@@ -15,7 +15,7 @@
 #'
 #' @return A list containing Laplace draws, a return code, and the arguments.
 #'
-#' @export
+#' @noRd
 laplace <- function(
   stanmod,
   data,
