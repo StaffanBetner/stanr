@@ -11,9 +11,18 @@ test_that("stan_model exposes the replacement constructor contract", {
   .newstan_expect_formals(
     stan_model,
     c(
-      "stan_file", "code", "compile", "model_name", "include_paths",
-      "user_header", "cpp_options", "stanc_options", "force_recompile",
-      "precompiled_headers", "quiet", "external_cpp"
+      "stan_file",
+      "code",
+      "compile",
+      "model_name",
+      "include_paths",
+      "user_header",
+      "cpp_options",
+      "stanc_options",
+      "force_recompile",
+      "precompiled_headers",
+      "quiet",
+      "external_cpp"
     )
   )
   expect_identical(formals(stan_model)$compile, TRUE)
@@ -22,16 +31,33 @@ test_that("stan_model exposes the replacement constructor contract", {
   expect_identical(formals(stan_model)$stanc_options, quote(list()))
 
   # The old procedural API is intentionally not retained during development.
-  expect_false(any(c(
-    "sampling", "optimizing", "laplace", "advi", "variational",
-    "pathfinder", "generated_quantities", "diagnose", "gradient_check"
-  ) %in% getNamespaceExports("newstan")))
+  expect_false(any(
+    c(
+      "sampling",
+      "optimizing",
+      "laplace",
+      "advi",
+      "variational",
+      "pathfinder",
+      "generated_quantities",
+      "diagnose",
+      "gradient_check"
+    ) %in%
+      getNamespaceExports("newstan")
+  ))
 })
 
 test_that("all public result types are R6 classes with the Stan names", {
   class_names <- c(
-    "StanModel", "StanFit", "StanMCMC", "StanMLE", "StanLaplace",
-    "StanVB", "StanPathfinder", "StanGQ", "StanDiagnose"
+    "StanModel",
+    "StanFit",
+    "StanMCMC",
+    "StanMLE",
+    "StanLaplace",
+    "StanVB",
+    "StanPathfinder",
+    "StanGQ",
+    "StanDiagnose"
   )
 
   generators <- lapply(class_names, .newstan_generator)
@@ -52,62 +78,210 @@ test_that("all public result types are R6 classes with the Stan names", {
 
 test_that("StanModel has the Phase 1-3 public surface", {
   methods <- .newstan_generator("StanModel")$public_methods
-  expect_true(all(c(
-    "sample", "optimize", "laplace", "variational", "pathfinder",
-    "generate_quantities", "diagnose", "code", "print", "model_name",
-    "stan_file", "has_stan_file", "include_paths", "stan_version",
-    "compile", "variables"
-  ) %in% names(methods)))
+  expect_true(all(
+    c(
+      "sample",
+      "optimize",
+      "laplace",
+      "variational",
+      "pathfinder",
+      "generate_quantities",
+      "diagnose",
+      "code",
+      "print",
+      "model_name",
+      "stan_file",
+      "has_stan_file",
+      "include_paths",
+      "stan_version",
+      "compile",
+      "variables"
+    ) %in%
+      names(methods)
+  ))
 
-  .newstan_expect_formals(methods$sample, c(
-    "data", "seed", "refresh", "init", "save_latent_dynamics",
-    "output_dir", "output_basename", "sig_figs", "chains",
-    "parallel_chains", "chain_ids", "threads_per_chain", "opencl_ids",
-    "iter_warmup", "iter_sampling", "save_warmup", "thin",
-    "max_treedepth", "adapt_engaged", "adapt_delta", "step_size",
-    "metric", "metric_file", "inv_metric", "init_buffer", "term_buffer",
-    "window", "fixed_param", "show_messages", "show_exceptions",
-    "diagnostics", "save_metric", "save_cmdstan_config", "engine",
-    "int_time", "step_size_jitter", "adapt_gamma", "adapt_kappa",
-    "adapt_t0"
-  ))
-  .newstan_expect_formals(methods$optimize, c(
-    "data", "seed", "refresh", "init", "output_dir", "output_basename",
-    "sig_figs", "threads", "opencl_ids", "algorithm", "jacobian",
-    "init_alpha", "iter", "tol_obj", "tol_rel_obj", "tol_grad",
-    "tol_rel_grad", "tol_param", "history_size", "show_messages",
-    "show_exceptions", "save_cmdstan_config", "save_iterations"
-  ))
-  .newstan_expect_formals(methods$laplace, c(
-    "data", "seed", "refresh", "init", "output_dir", "output_basename",
-    "sig_figs", "threads", "opencl_ids", "mode", "opt_args", "jacobian",
-    "draws", "show_messages", "show_exceptions", "save_cmdstan_config",
-    "calculate_lp"
-  ))
-  .newstan_expect_formals(methods$variational, c(
-    "data", "seed", "refresh", "init", "save_latent_dynamics",
-    "output_dir", "output_basename", "sig_figs", "threads", "opencl_ids",
-    "algorithm", "iter", "grad_samples", "elbo_samples", "eta",
-    "adapt_engaged", "adapt_iter", "tol_rel_obj", "eval_elbo", "draws",
-    "show_messages", "show_exceptions", "save_cmdstan_config"
-  ))
-  .newstan_expect_formals(methods$pathfinder, c(
-    "data", "seed", "refresh", "init", "output_dir", "output_basename",
-    "sig_figs", "threads", "opencl_ids", "init_alpha", "tol_obj",
-    "tol_rel_obj", "tol_grad", "tol_rel_grad", "tol_param", "history_size",
-    "single_path_draws", "draws", "num_paths", "max_lbfgs_iters",
-    "num_elbo_draws", "save_single_paths", "psis_resample", "calculate_lp",
-    "show_messages", "show_exceptions", "save_cmdstan_config"
-  ))
-  .newstan_expect_formals(methods$generate_quantities, c(
-    "fitted_params", "data", "seed", "output_dir", "output_basename",
-    "sig_figs", "parallel_chains", "threads_per_chain", "opencl_ids",
-    "show_messages", "show_exceptions"
-  ))
-  .newstan_expect_formals(methods$diagnose, c(
-    "data", "seed", "init", "output_dir", "output_basename", "epsilon",
-    "error"
-  ))
+  .newstan_expect_formals(
+    methods$sample,
+    c(
+      "data",
+      "seed",
+      "refresh",
+      "init",
+      "save_latent_dynamics",
+      "output_dir",
+      "output_basename",
+      "sig_figs",
+      "chains",
+      "parallel_chains",
+      "chain_ids",
+      "threads_per_chain",
+      "opencl_ids",
+      "iter_warmup",
+      "iter_sampling",
+      "save_warmup",
+      "thin",
+      "max_treedepth",
+      "adapt_engaged",
+      "adapt_delta",
+      "step_size",
+      "metric",
+      "metric_file",
+      "inv_metric",
+      "init_buffer",
+      "term_buffer",
+      "window",
+      "fixed_param",
+      "show_messages",
+      "show_exceptions",
+      "diagnostics",
+      "save_metric",
+      "save_cmdstan_config",
+      "engine",
+      "int_time",
+      "step_size_jitter",
+      "adapt_gamma",
+      "adapt_kappa",
+      "adapt_t0"
+    )
+  )
+  .newstan_expect_formals(
+    methods$optimize,
+    c(
+      "data",
+      "seed",
+      "refresh",
+      "init",
+      "output_dir",
+      "output_basename",
+      "sig_figs",
+      "threads",
+      "opencl_ids",
+      "algorithm",
+      "jacobian",
+      "init_alpha",
+      "iter",
+      "tol_obj",
+      "tol_rel_obj",
+      "tol_grad",
+      "tol_rel_grad",
+      "tol_param",
+      "history_size",
+      "show_messages",
+      "show_exceptions",
+      "save_cmdstan_config",
+      "save_iterations"
+    )
+  )
+  .newstan_expect_formals(
+    methods$laplace,
+    c(
+      "data",
+      "seed",
+      "refresh",
+      "init",
+      "output_dir",
+      "output_basename",
+      "sig_figs",
+      "threads",
+      "opencl_ids",
+      "mode",
+      "opt_args",
+      "jacobian",
+      "draws",
+      "show_messages",
+      "show_exceptions",
+      "save_cmdstan_config",
+      "calculate_lp"
+    )
+  )
+  .newstan_expect_formals(
+    methods$variational,
+    c(
+      "data",
+      "seed",
+      "refresh",
+      "init",
+      "save_latent_dynamics",
+      "output_dir",
+      "output_basename",
+      "sig_figs",
+      "threads",
+      "opencl_ids",
+      "algorithm",
+      "iter",
+      "grad_samples",
+      "elbo_samples",
+      "eta",
+      "adapt_engaged",
+      "adapt_iter",
+      "tol_rel_obj",
+      "eval_elbo",
+      "draws",
+      "show_messages",
+      "show_exceptions",
+      "save_cmdstan_config"
+    )
+  )
+  .newstan_expect_formals(
+    methods$pathfinder,
+    c(
+      "data",
+      "seed",
+      "refresh",
+      "init",
+      "output_dir",
+      "output_basename",
+      "sig_figs",
+      "threads",
+      "opencl_ids",
+      "init_alpha",
+      "tol_obj",
+      "tol_rel_obj",
+      "tol_grad",
+      "tol_rel_grad",
+      "tol_param",
+      "history_size",
+      "single_path_draws",
+      "draws",
+      "num_paths",
+      "max_lbfgs_iters",
+      "num_elbo_draws",
+      "save_single_paths",
+      "psis_resample",
+      "calculate_lp",
+      "show_messages",
+      "show_exceptions",
+      "save_cmdstan_config"
+    )
+  )
+  .newstan_expect_formals(
+    methods$generate_quantities,
+    c(
+      "fitted_params",
+      "data",
+      "seed",
+      "output_dir",
+      "output_basename",
+      "sig_figs",
+      "parallel_chains",
+      "threads_per_chain",
+      "opencl_ids",
+      "show_messages",
+      "show_exceptions"
+    )
+  )
+  .newstan_expect_formals(
+    methods$diagnose,
+    c(
+      "data",
+      "seed",
+      "init",
+      "output_dir",
+      "output_basename",
+      "epsilon",
+      "error"
+    )
+  )
 
   expect_identical(formals(methods$sample)$chains, 4)
   expect_identical(formals(methods$sample)$save_warmup, FALSE)
@@ -120,13 +294,30 @@ test_that("StanModel has the Phase 1-3 public surface", {
 
 test_that("StanFit has common accessors and model methods", {
   methods <- .newstan_generator("StanFit")$public_methods
-  expect_true(all(c(
-    "draws", "summary", "print", "return_codes", "metadata", "time",
-    "output", "init", "code", "materialize", "save_object",
-    "init_model_methods", "log_prob", "grad_log_prob", "hessian",
-    "unconstrain_variables", "unconstrain_draws", "variable_skeleton",
-    "constrain_variables"
-  ) %in% names(methods)))
+  expect_true(all(
+    c(
+      "draws",
+      "summary",
+      "print",
+      "return_codes",
+      "metadata",
+      "time",
+      "output",
+      "init",
+      "code",
+      "materialize",
+      "save_object",
+      "init_model_methods",
+      "log_prob",
+      "grad_log_prob",
+      "hessian",
+      "unconstrain_variables",
+      "unconstrain_draws",
+      "variable_skeleton",
+      "constrain_variables"
+    ) %in%
+      names(methods)
+  ))
 
   .newstan_expect_formals(methods$init_model_methods, c("seed", "verbose"))
   .newstan_expect_formals(
@@ -153,7 +344,8 @@ test_that("StanFit has common accessors and model methods", {
   .newstan_expect_formals(
     methods$constrain_variables,
     c(
-      "unconstrained_variables", "transformed_parameters",
+      "unconstrained_variables",
+      "transformed_parameters",
       "generated_quantities"
     )
   )

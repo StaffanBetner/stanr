@@ -1,5 +1,8 @@
 test_that("stanc resolves nested includes from include_directories", {
-  code <- paste(readLines(test_path("test-models/include_model.stan")), collapse = "\n")
+  code <- paste(
+    readLines(test_path("test-models/include_model.stan")),
+    collapse = "\n"
+  )
 
   cpp_code <- stanc(
     code,
@@ -90,9 +93,124 @@ test_that("stan_model compiles a model using external C++", {
 
 test_that("stanc validates external C++ paths", {
   expect_error(
-    stanc("parameters { real x; } model { x ~ normal(0, 1); }",
+    stanc(
+      "parameters { real x; } model { x ~ normal(0, 1); }",
       external_cpp = "does-not-exist.hpp"
     ),
     "External C\\+\\+ files do not exist"
   )
+})
+
+test_that("model_variables returns correct structure from stanc info", {
+  code <- paste(
+    "data { int N; }",
+    "parameters { real alpha; vector[N] beta; }",
+    "transformed parameters { real gamma; }",
+    "generated quantities { real delta; }",
+    sep = "\n"
+  )
+
+  vars <- newstan:::model_variables(code)
+
+  expect_named(
+    vars,
+    c("data", "parameters", "transformed_parameters", "generated_quantities")
+  )
+  expect_named(vars$data, "N")
+  expect_equal(vars$data$N$type, "int")
+  expect_equal(vars$data$N$dimensions, 0L)
+
+  expect_named(vars$parameters, c("alpha", "beta"))
+  expect_equal(vars$parameters$alpha$dimensions, 0L)
+  expect_equal(vars$parameters$beta$dimensions, 1L)
+
+  expect_named(vars$transformed_parameters, "gamma")
+  expect_named(vars$generated_quantities, "delta")
+})
+
+test_that("model_variables handles arrays and matrices", {
+  code <- paste(
+    "data { array[2, 3] int y; }",
+    "parameters { array[2] matrix[3, 4] theta; }",
+    sep = "\n"
+  )
+
+  vars <- newstan:::model_variables(code)
+
+  expect_equal(vars$data$y$dimensions, 2L)
+  expect_equal(vars$parameters$theta$dimensions, 3L)
+})
+
+test_that("model_variables allows undefined functions with flag", {
+  code <- paste(
+    "functions { real external_fn(real x); }",
+    "parameters { real x; }",
+    "model { x ~ normal(external_fn(x), 1); }",
+    sep = "\n"
+  )
+
+  expect_error(newstan:::model_variables(code), "declared without")
+  vars <- newstan:::model_variables(code, allow_undefined = TRUE)
+  expect_named(vars$parameters, "x")
+})
+
+test_that("StanModel$variables() returns correct structure", {
+  mod <- stan_model(
+    code = paste(
+      "data { int N; }",
+      "parameters { real alpha; vector[N] beta; }",
+      sep = "\n"
+    ),
+    compile = FALSE
+  )
+
+  vars <- mod$variables()
+  expect_named(
+    vars,
+    c("data", "parameters", "transformed_parameters", "generated_quantities")
+  )
+  expect_named(vars$data, "N")
+  expect_named(vars$parameters, c("alpha", "beta"))
+  expect_equal(vars$parameters$alpha$dimensions, 0L)
+  expect_equal(vars$parameters$beta$dimensions, 1L)
+})
+
+test_that("StanModel$variables() caches result", {
+  mod <- stan_model(
+    code = "parameters { real x; }",
+    compile = FALSE
+  )
+
+  vars1 <- mod$variables()
+  vars2 <- mod$variables()
+  expect_identical(vars1, vars2)
+})
+
+test_that("StanModel$variables() works with stan_file", {
+  mod <- stan_model(
+    stan_file = test_path("test-models/bernoulli.stan"),
+    compile = FALSE
+  )
+
+  vars <- mod$variables()
+  expect_named(vars$data, c("N", "y"))
+  expect_named(vars$parameters, "theta")
+})
+
+test_that("StanModel$variables() works with external_cpp", {
+  code <- paste(
+    "functions { real external_mean(real x); }",
+    "parameters { real mu; }",
+    "model { mu ~ normal(external_mean(0), 1); }",
+    sep = "\n"
+  )
+
+  mod <- stan_model(
+    code = code,
+    external_cpp = test_path("test-models/external_mean.hpp"),
+    compile = FALSE
+  )
+
+  vars <- mod$variables()
+  expect_named(vars$parameters, "mu")
 })

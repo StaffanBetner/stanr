@@ -10,8 +10,10 @@
     mode <- mode$par
   }
   if (!is.numeric(mode) || is.null(names(mode))) {
-    stop("mode must be a named numeric vector or an optimization result.",
-         call. = FALSE)
+    stop(
+      "mode must be a named numeric vector or an optimization result.",
+      call. = FALSE
+    )
   }
 
   model_instance <- new_model_instance(stanmod, args$data, args$seed)
@@ -38,9 +40,12 @@
     result <- stanmod$run_model(model_instance$model, native_args)
   )
 
-  structure(list(
-    draws = posterior::as_draws_df(result$draws),
-    return_code = result$return_code,
-    args = service_args(native_args)
-  ), class = c("StanLaplace", "StanService", "list"))
+  structure(
+    list(
+      draws = posterior::as_draws_df(result$draws),
+      return_code = result$return_code,
+      args = service_args(native_args)
+    ),
+    class = c("StanLaplace", "StanService", "list")
+  )
 }

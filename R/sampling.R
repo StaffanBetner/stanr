@@ -49,12 +49,15 @@
   # Handle non-zero return codes
   if (result$return_code != 0) {
     return(
-      structure(list(
-        draws = NULL,
-        diagnostics = NULL,
-        return_code = result$return_code,
-        args = service_args(native_args)
-      ), class = c("StanSample", "StanService", "list"))
+      structure(
+        list(
+          draws = NULL,
+          diagnostics = NULL,
+          return_code = result$return_code,
+          args = service_args(native_args)
+        ),
+        class = c("StanSample", "StanService", "list")
+      )
     )
   }
 
@@ -91,14 +94,17 @@
     diagnostics <- posterior::subset_draws(draws, variable = diagnostic_vars)
   }
 
-  structure(list(
-    draws = if (args$fixed_param) {
-      posterior::as_draws_df(result$samples[, par_vars, drop = FALSE])
-    } else {
-      posterior::subset_draws(draws, par_vars)
-    },
-    diagnostics = diagnostics,
-    return_code = result$return_code,
-    args = service_args(native_args)
-  ), class = c("StanSample", "StanService", "list"))
+  structure(
+    list(
+      draws = if (args$fixed_param) {
+        posterior::as_draws_df(result$samples[, par_vars, drop = FALSE])
+      } else {
+        posterior::subset_draws(draws, par_vars)
+      },
+      diagnostics = diagnostics,
+      return_code = result$return_code,
+      args = service_args(native_args)
+    ),
+    class = c("StanSample", "StanService", "list")
+  )
 }

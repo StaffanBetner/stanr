@@ -110,10 +110,14 @@
 #' or inline `c()` to merge with service-specific arguments.
 #'
 #' @noRd
-.newstan_normalize_common <- function(data = NULL, seed = NULL,
-                                       refresh = NULL, init = NULL,
-                                       show_messages = TRUE,
-                                       show_exceptions = TRUE) {
+.newstan_normalize_common <- function(
+  data = NULL,
+  seed = NULL,
+  refresh = NULL,
+  init = NULL,
+  show_messages = TRUE,
+  show_exceptions = TRUE
+) {
   data <- data %||% list()
   seed <- .newstan_seed(seed)
   refresh <- as.integer(refresh %||% 100L)
@@ -134,43 +138,80 @@
 #'
 #' @noRd
 .newstan_normalize_sample <- function(
-  data = NULL, seed = NULL, refresh = NULL, init = NULL,
-  chains = 4, chain_ids = seq_len(chains),
+  data = NULL,
+  seed = NULL,
+  refresh = NULL,
+  init = NULL,
+  chains = 4,
+  chain_ids = seq_len(chains),
   parallel_chains = getOption("mc.cores", 1),
-  threads_per_chain = NULL, iter_warmup = NULL, iter_sampling = NULL,
-  save_warmup = FALSE, thin = NULL, max_treedepth = NULL,
-  adapt_engaged = TRUE, adapt_delta = NULL, step_size = NULL,
-  metric = NULL, inv_metric = NULL,
-  init_buffer = NULL, term_buffer = NULL, window = NULL,
-  fixed_param = FALSE, show_messages = TRUE, show_exceptions = TRUE,
-  engine = "nuts", int_time = 2 * pi, step_size_jitter = 0,
-  adapt_gamma = 0.05, adapt_kappa = 0.75, adapt_t0 = 10
+  threads_per_chain = NULL,
+  iter_warmup = NULL,
+  iter_sampling = NULL,
+  save_warmup = FALSE,
+  thin = NULL,
+  max_treedepth = NULL,
+  adapt_engaged = TRUE,
+  adapt_delta = NULL,
+  step_size = NULL,
+  metric = NULL,
+  inv_metric = NULL,
+  init_buffer = NULL,
+  term_buffer = NULL,
+  window = NULL,
+  fixed_param = FALSE,
+  show_messages = TRUE,
+  show_exceptions = TRUE,
+  engine = "nuts",
+  int_time = 2 * pi,
+  step_size_jitter = 0,
+  adapt_gamma = 0.05,
+  adapt_kappa = 0.75,
+  adapt_t0 = 10
 ) {
   def <- .newstan_defaults$sample
 
   chains <- as.integer(chains)
-  if (chains < 1L) stop("`chains` must be a positive integer.", call. = FALSE)
+  if (chains < 1L) {
+    stop("`chains` must be a positive integer.", call. = FALSE)
+  }
 
   chain_ids <- as.integer(chain_ids)
-  if (length(chain_ids) != chains || anyNA(chain_ids) ||
-      anyDuplicated(chain_ids) || any(diff(chain_ids) != 1L)) {
-    stop("The current backend requires `chain_ids` to be unique consecutive integers.",
-         call. = FALSE)
+  if (
+    length(chain_ids) != chains ||
+      anyNA(chain_ids) ||
+      anyDuplicated(chain_ids) ||
+      any(diff(chain_ids) != 1L)
+  ) {
+    stop(
+      "The current backend requires `chain_ids` to be unique consecutive integers.",
+      call. = FALSE
+    )
   }
 
   parallel_chains <- as.integer(parallel_chains %||% 1L)
   threads_per_chain <- as.integer(threads_per_chain %||% 1L)
   if (parallel_chains < 1L || threads_per_chain < 1L) {
-    stop("`parallel_chains` and `threads_per_chain` must be positive.",
-         call. = FALSE)
+    stop(
+      "`parallel_chains` and `threads_per_chain` must be positive.",
+      call. = FALSE
+    )
   }
 
   resolved_metric <- .resolve_default(metric, def, "metric")
   resolved_adapt_engaged <- isTRUE(adapt_engaged)
   resolved_fixed_param <- isTRUE(fixed_param)
   resolved_engine <- .resolve_default(engine, def, "engine")
-  resolved_iter_warmup <- as.integer(.resolve_default(iter_warmup, def, "iter_warmup"))
-  resolved_iter_sampling <- as.integer(.resolve_default(iter_sampling, def, "iter_sampling"))
+  resolved_iter_warmup <- as.integer(.resolve_default(
+    iter_warmup,
+    def,
+    "iter_warmup"
+  ))
+  resolved_iter_sampling <- as.integer(.resolve_default(
+    iter_sampling,
+    def,
+    "iter_sampling"
+  ))
   resolved_thin <- as.integer(.resolve_default(thin, def, "thin"))
   resolved_save_warmup <- isTRUE(save_warmup)
 
@@ -182,7 +223,9 @@
   }
   # Calculate in double precision so adding two valid integer iteration counts
   # cannot overflow to NA before the explicit R-size guard below.
-  num_saved_draws <- ceiling(as.double(resolved_iter_sampling) / as.double(resolved_thin))
+  num_saved_draws <- ceiling(
+    as.double(resolved_iter_sampling) / as.double(resolved_thin)
+  )
   if (resolved_save_warmup) {
     num_saved_draws <- num_saved_draws +
       ceiling(as.double(resolved_iter_warmup) / as.double(resolved_thin))
@@ -191,15 +234,22 @@
     stop("Requested number of saved draws is too large.", call. = FALSE)
   }
 
-  if (!resolved_adapt_engaged && !resolved_fixed_param &&
-      resolved_iter_warmup == 0L) {
-    stop("`iter_warmup` must be > 0 when `adapt_engaged` is TRUE.",
-         call. = FALSE)
+  if (
+    !resolved_adapt_engaged &&
+      !resolved_fixed_param &&
+      resolved_iter_warmup == 0L
+  ) {
+    stop(
+      "`iter_warmup` must be > 0 when `adapt_engaged` is TRUE.",
+      call. = FALSE
+    )
   }
 
   if (!resolved_fixed_param && resolved_engine == "static" && chains > 1L) {
-    stop("Static HMC only supports a single chain. Set `chains` = 1.",
-         call. = FALSE)
+    stop(
+      "Static HMC only supports a single chain. Set `chains` = 1.",
+      call. = FALSE
+    )
   }
 
   # Normalize inv_metric: validate and wrap for native consumption
@@ -223,7 +273,11 @@
     iter_sampling = resolved_iter_sampling,
     save_warmup = resolved_save_warmup,
     thin = resolved_thin,
-    max_treedepth = as.integer(.resolve_default(max_treedepth, def, "max_treedepth")),
+    max_treedepth = as.integer(.resolve_default(
+      max_treedepth,
+      def,
+      "max_treedepth"
+    )),
     adapt_engaged = resolved_adapt_engaged,
     adapt_delta = .resolve_default(adapt_delta, def, "adapt_delta"),
     step_size = .resolve_default(step_size, def, "step_size"),
@@ -237,7 +291,11 @@
     show_exceptions = isTRUE(show_exceptions),
     engine = resolved_engine,
     int_time = .resolve_default(int_time, def, "int_time"),
-    step_size_jitter = .resolve_default(step_size_jitter, def, "step_size_jitter"),
+    step_size_jitter = .resolve_default(
+      step_size_jitter,
+      def,
+      "step_size_jitter"
+    ),
     adapt_gamma = .resolve_default(adapt_gamma, def, "adapt_gamma"),
     adapt_kappa = .resolve_default(adapt_kappa, def, "adapt_kappa"),
     adapt_t0 = .resolve_default(adapt_t0, def, "adapt_t0")
@@ -251,8 +309,15 @@
 #' a per-chain list. Issues a warning if inv_metric is supplied with unit_e.
 #'
 #' @noRd
-.newstan_normalize_inv_metric <- function(inv_metric, metric, adapt_engaged, chains) {
-  if (is.null(inv_metric)) return(NULL)
+.newstan_normalize_inv_metric <- function(
+  inv_metric,
+  metric,
+  adapt_engaged,
+  chains
+) {
+  if (is.null(inv_metric)) {
+    return(NULL)
+  }
 
   if (metric == "unit_e") {
     warning("inv_metric is ignored when metric = 'unit_e'", call. = FALSE)
@@ -268,7 +333,8 @@
   if (length(inv_metric) > 1L && length(inv_metric) != chains) {
     stop(
       "inv_metric must be a single metric or a list of length ",
-      chains, " (one per chain).",
+      chains,
+      " (one per chain).",
       call. = FALSE
     )
   }
@@ -281,12 +347,23 @@
 #'
 #' @noRd
 .newstan_normalize_optimize <- function(
-  data = NULL, seed = NULL, refresh = NULL, init = NULL,
-  threads = NULL, algorithm = NULL, jacobian = FALSE,
-  init_alpha = NULL, iter = NULL, tol_obj = NULL,
-  tol_rel_obj = NULL, tol_grad = NULL, tol_rel_grad = NULL,
-  tol_param = NULL, history_size = NULL,
-  show_messages = TRUE, show_exceptions = TRUE
+  data = NULL,
+  seed = NULL,
+  refresh = NULL,
+  init = NULL,
+  threads = NULL,
+  algorithm = NULL,
+  jacobian = FALSE,
+  init_alpha = NULL,
+  iter = NULL,
+  tol_obj = NULL,
+  tol_rel_obj = NULL,
+  tol_grad = NULL,
+  tol_rel_grad = NULL,
+  tol_param = NULL,
+  history_size = NULL,
+  show_messages = TRUE,
+  show_exceptions = TRUE
 ) {
   def <- .newstan_defaults$optimize
 
@@ -305,7 +382,11 @@
     tol_grad = .resolve_default(tol_grad, def, "tol_grad"),
     tol_rel_grad = .resolve_default(tol_rel_grad, def, "tol_rel_grad"),
     tol_param = .resolve_default(tol_param, def, "tol_param"),
-    history_size = as.integer(.resolve_default(history_size, def, "history_size")),
+    history_size = as.integer(.resolve_default(
+      history_size,
+      def,
+      "history_size"
+    )),
     show_messages = isTRUE(show_messages),
     show_exceptions = isTRUE(show_exceptions)
   )
@@ -316,10 +397,18 @@
 #'
 #' @noRd
 .newstan_normalize_laplace <- function(
-  data = NULL, seed = NULL, refresh = NULL, init = NULL,
-  threads = NULL, mode = NULL, opt_args = NULL,
-  jacobian = TRUE, draws = NULL, calculate_lp = TRUE,
-  show_messages = TRUE, show_exceptions = TRUE
+  data = NULL,
+  seed = NULL,
+  refresh = NULL,
+  init = NULL,
+  threads = NULL,
+  mode = NULL,
+  opt_args = NULL,
+  jacobian = TRUE,
+  draws = NULL,
+  calculate_lp = TRUE,
+  show_messages = TRUE,
+  show_exceptions = TRUE
 ) {
   def <- .newstan_defaults$laplace
 
@@ -348,12 +437,23 @@
 #'
 #' @noRd
 .newstan_normalize_variational <- function(
-  data = NULL, seed = NULL, refresh = NULL, init = NULL,
-  threads = NULL, algorithm = NULL, iter = NULL,
-  grad_samples = NULL, elbo_samples = NULL, tol_rel_obj = NULL,
-  eta = NULL, adapt_engaged = NULL, adapt_iter = NULL,
-  eval_elbo = NULL, draws = NULL,
-  show_messages = TRUE, show_exceptions = TRUE
+  data = NULL,
+  seed = NULL,
+  refresh = NULL,
+  init = NULL,
+  threads = NULL,
+  algorithm = NULL,
+  iter = NULL,
+  grad_samples = NULL,
+  elbo_samples = NULL,
+  tol_rel_obj = NULL,
+  eta = NULL,
+  adapt_engaged = NULL,
+  adapt_iter = NULL,
+  eval_elbo = NULL,
+  draws = NULL,
+  show_messages = TRUE,
+  show_exceptions = TRUE
 ) {
   def <- .newstan_defaults$variational
 
@@ -365,8 +465,16 @@
     threads = as.integer(threads %||% 1L),
     algorithm = .resolve_default(algorithm, def, "algorithm"),
     iter = as.integer(.resolve_default(iter, def, "iter")),
-    grad_samples = as.integer(.resolve_default(grad_samples, def, "grad_samples")),
-    elbo_samples = as.integer(.resolve_default(elbo_samples, def, "elbo_samples")),
+    grad_samples = as.integer(.resolve_default(
+      grad_samples,
+      def,
+      "grad_samples"
+    )),
+    elbo_samples = as.integer(.resolve_default(
+      elbo_samples,
+      def,
+      "elbo_samples"
+    )),
     tol_rel_obj = .resolve_default(tol_rel_obj, def, "tol_rel_obj"),
     eta = .resolve_default(eta, def, "eta"),
     adapt_engaged = .resolve_default(adapt_engaged, def, "adapt_engaged"),
@@ -383,15 +491,28 @@
 #'
 #' @noRd
 .newstan_normalize_pathfinder <- function(
-  data = NULL, seed = NULL, refresh = NULL, init = NULL,
-  threads = NULL, init_alpha = NULL, tol_obj = NULL,
-  tol_rel_obj = NULL, tol_grad = NULL, tol_rel_grad = NULL,
-  tol_param = NULL, history_size = NULL,
-  single_path_draws = NULL, draws = NULL, num_paths = 4,
-  max_lbfgs_iters = NULL, num_elbo_draws = NULL,
-  save_single_paths = NULL, psis_resample = NULL,
+  data = NULL,
+  seed = NULL,
+  refresh = NULL,
+  init = NULL,
+  threads = NULL,
+  init_alpha = NULL,
+  tol_obj = NULL,
+  tol_rel_obj = NULL,
+  tol_grad = NULL,
+  tol_rel_grad = NULL,
+  tol_param = NULL,
+  history_size = NULL,
+  single_path_draws = NULL,
+  draws = NULL,
+  num_paths = 4,
+  max_lbfgs_iters = NULL,
+  num_elbo_draws = NULL,
+  save_single_paths = NULL,
+  psis_resample = NULL,
   calculate_lp = NULL,
-  show_messages = TRUE, show_exceptions = TRUE
+  show_messages = TRUE,
+  show_exceptions = TRUE
 ) {
   def <- .newstan_defaults$pathfinder
 
@@ -407,13 +528,33 @@
     tol_grad = .resolve_default(tol_grad, def, "tol_grad"),
     tol_rel_grad = .resolve_default(tol_rel_grad, def, "tol_rel_grad"),
     tol_param = .resolve_default(tol_param, def, "tol_param"),
-    history_size = as.integer(.resolve_default(history_size, def, "history_size")),
-    single_path_draws = as.integer(.resolve_default(single_path_draws, def, "single_path_draws")),
+    history_size = as.integer(.resolve_default(
+      history_size,
+      def,
+      "history_size"
+    )),
+    single_path_draws = as.integer(.resolve_default(
+      single_path_draws,
+      def,
+      "single_path_draws"
+    )),
     draws = as.integer(.resolve_default(draws, def, "draws")),
     num_paths = as.integer(num_paths),
-    max_lbfgs_iters = as.integer(.resolve_default(max_lbfgs_iters, def, "max_lbfgs_iters")),
-    num_elbo_draws = as.integer(.resolve_default(num_elbo_draws, def, "num_elbo_draws")),
-    save_single_paths = .resolve_default(save_single_paths, def, "save_single_paths"),
+    max_lbfgs_iters = as.integer(.resolve_default(
+      max_lbfgs_iters,
+      def,
+      "max_lbfgs_iters"
+    )),
+    num_elbo_draws = as.integer(.resolve_default(
+      num_elbo_draws,
+      def,
+      "num_elbo_draws"
+    )),
+    save_single_paths = .resolve_default(
+      save_single_paths,
+      def,
+      "save_single_paths"
+    ),
     psis_resample = .resolve_default(psis_resample, def, "psis_resample"),
     calculate_lp = .resolve_default(calculate_lp, def, "calculate_lp"),
     show_messages = isTRUE(show_messages),
@@ -426,8 +567,11 @@
 #'
 #' @noRd
 .newstan_normalize_diagnose <- function(
-  data = NULL, seed = NULL, init = NULL,
-  epsilon = NULL, error = NULL
+  data = NULL,
+  seed = NULL,
+  init = NULL,
+  epsilon = NULL,
+  error = NULL
 ) {
   def <- .newstan_defaults$diagnose
 

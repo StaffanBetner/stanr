@@ -58,8 +58,10 @@ test_that("pathfinder multi-path returns expected structure", {
   expect_equal(result$return_codes(), 0L)
   expect_s3_class(draws, "draws_df")
   expect_equal(posterior::ndraws(draws), 100L)
-  expect_true(all(c("lp_approx__", "lp__", "path__") %in%
-    posterior::variables(draws)))
+  expect_true(all(
+    c("lp_approx__", "lp__", "path__") %in%
+      posterior::variables(draws)
+  ))
 })
 
 test_that("pathfinder multi-path with num_paths = 1 uses single pathfinder", {

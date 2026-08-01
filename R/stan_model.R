@@ -15,7 +15,11 @@
   if (!is.null(file) && !is.null(code)) {
     stop("Provide either 'file' or 'code', not both.")
   }
-  if (!is.logical(precompiled_headers) || length(precompiled_headers) != 1 || is.na(precompiled_headers)) {
+  if (
+    !is.logical(precompiled_headers) ||
+      length(precompiled_headers) != 1 ||
+      is.na(precompiled_headers)
+  ) {
     stop("`precompiled_headers` must be TRUE or FALSE.", call. = FALSE)
   }
 
@@ -80,11 +84,18 @@
 
   env <- new.env()
   runtime_archive <- system.file(
-    "lib", Sys.getenv("R_ARCH"), "libnewstan_runner.a", package = "newstan", mustWork = TRUE
+    "lib",
+    Sys.getenv("R_ARCH"),
+    "libnewstan_runner.a",
+    package = "newstan",
+    mustWork = TRUE
   )
 
   tbb_libs <- utils::capture.output(RcppParallel::RcppParallelLibs())
-  if (.Platform$OS.type == "windows" && utils::packageVersion("RcppParallel") >= '6.0.0') {
+  if (
+    .Platform$OS.type == "windows" &&
+      utils::packageVersion("RcppParallel") >= '6.0.0'
+  ) {
     tbb_libs <- "-ltbb12 -ltbbmalloc"
   }
 

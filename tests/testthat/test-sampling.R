@@ -18,8 +18,10 @@ test_that("sampling returns expected structure", {
   expect_s3_class(result$sampler_diagnostics(), "draws_array")
   expect_s3_class(suppressWarnings(result$summary()), "draws_summary")
   expect_true(all(result$return_codes() == 0L))
-  expect_false(any(c("init", "inv_metric") %in%
-    names(result$metadata()$arguments)))
+  expect_false(any(
+    c("init", "inv_metric") %in%
+      names(result$metadata()$arguments)
+  ))
 })
 
 test_that("sampling with multiple chains works", {

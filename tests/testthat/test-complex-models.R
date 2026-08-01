@@ -12,8 +12,10 @@ test_that("reduce_sum model runs with a configured TBB thread pool", {
   )
 
   expect_equal(result$return_codes(), 0L)
-  expect_true(all(c("mu", "sigma", "log_lik") %in%
-    posterior::variables(result$draws())))
+  expect_true(all(
+    c("mu", "sigma", "log_lik") %in%
+      posterior::variables(result$draws())
+  ))
 })
 
 test_that("ODE model evaluates solver output during fixed-parameter sampling", {
@@ -38,13 +40,23 @@ test_that("ODE model evaluates solver output during fixed-parameter sampling", {
 })
 
 test_that("hierarchical non-centred logistic model samples", {
-  mod <- stan_model(stan_file = test_path("test-models/hierarchical_logistic.stan"))
+  mod <- stan_model(
+    stan_file = test_path("test-models/hierarchical_logistic.stan")
+  )
   data <- list(
     N = 8,
     K = 2,
     G = 2,
-    X = rbind(c(1, -1), c(1, -0.5), c(1, 0), c(1, 0.5),
-              c(1, 1), c(1, -0.8), c(1, 0.3), c(1, 0.8)),
+    X = rbind(
+      c(1, -1),
+      c(1, -0.5),
+      c(1, 0),
+      c(1, 0.5),
+      c(1, 1),
+      c(1, -0.8),
+      c(1, 0.3),
+      c(1, 0.8)
+    ),
     group = c(1L, 1L, 1L, 1L, 2L, 2L, 2L, 2L),
     y = c(0L, 0L, 1L, 1L, 1L, 0L, 1L, 1L)
   )
@@ -59,6 +71,8 @@ test_that("hierarchical non-centred logistic model samples", {
   )
 
   expect_equal(result$return_codes(), 0L)
-  expect_true(all(c("beta[1]", "tau[1]", "Omega[1,1]", "y_rep[1]") %in%
-    posterior::variables(result$draws())))
+  expect_true(all(
+    c("beta[1]", "tau[1]", "Omega[1,1]", "y_rep[1]") %in%
+      posterior::variables(result$draws())
+  ))
 })

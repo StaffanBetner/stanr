@@ -39,10 +39,13 @@
     numeric(0)
   }
 
-  structure(list(
-    par = par_vec,
-    value = result$value,
-    return_code = result$return_code,
-    args = service_args(native_args)
-  ), class = c("StanOptimize", "StanService", "list"))
+  structure(
+    list(
+      par = par_vec,
+      value = result$value,
+      return_code = result$return_code,
+      args = service_args(native_args)
+    ),
+    class = c("StanOptimize", "StanService", "list")
+  )
 }

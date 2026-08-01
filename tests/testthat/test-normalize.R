@@ -3,8 +3,17 @@
 test_that("bundled defaults contain expected keys for each service", {
   defaults <- newstan:::.newstan_defaults
 
-  expect_true(all(c("sample", "optimize", "laplace", "variational",
-                     "pathfinder", "diagnose") %in% names(defaults)))
+  expect_true(all(
+    c(
+      "sample",
+      "optimize",
+      "laplace",
+      "variational",
+      "pathfinder",
+      "diagnose"
+    ) %in%
+      names(defaults)
+  ))
 
   # Sampling defaults
   expect_equal(defaults$sample$iter_warmup, 1000L)
@@ -41,7 +50,9 @@ test_that("bundled defaults contain expected keys for each service", {
 
 test_that("sample normalization resolves NULL to bundled defaults", {
   args <- newstan:::.newstan_normalize_sample(
-    seed = 42L, chains = 2, chain_ids = 1:2
+    seed = 42L,
+    chains = 2,
+    chain_ids = 1:2
   )
 
   expect_equal(args$iter_warmup, 1000L)
@@ -59,9 +70,13 @@ test_that("sample normalization resolves NULL to bundled defaults", {
 
 test_that("sample normalization respects explicit values", {
   args <- newstan:::.newstan_normalize_sample(
-    seed = 42L, chains = 1, chain_ids = 1L,
-    iter_warmup = 500L, iter_sampling = 500L,
-    adapt_delta = 0.95, max_treedepth = 15L,
+    seed = 42L,
+    chains = 1,
+    chain_ids = 1L,
+    iter_warmup = 500L,
+    iter_sampling = 500L,
+    adapt_delta = 0.95,
+    max_treedepth = 15L,
     metric = "dense_e"
   )
 
@@ -76,7 +91,9 @@ test_that("sample normalization respects explicit values", {
 test_that("sample normalization rejects invalid chains", {
   expect_snapshot(error = TRUE, {
     newstan:::.newstan_normalize_sample(
-      seed = 42L, chains = 0, chain_ids = integer()
+      seed = 42L,
+      chains = 0,
+      chain_ids = integer()
     )
   })
 })
@@ -85,7 +102,9 @@ test_that("sample normalization rejects invalid chains", {
 test_that("sample normalization rejects non-consecutive chain_ids", {
   expect_snapshot(error = TRUE, {
     newstan:::.newstan_normalize_sample(
-      seed = 42L, chains = 2, chain_ids = c(1L, 3L)
+      seed = 42L,
+      chains = 2,
+      chain_ids = c(1L, 3L)
     )
   })
 })
@@ -104,7 +123,9 @@ test_that("optimize normalization resolves NULL to defaults", {
 test_that("laplace normalization rejects mode and opt_args together", {
   expect_snapshot(error = TRUE, {
     newstan:::.newstan_normalize_laplace(
-      seed = 42L, mode = c(theta = 0.5), opt_args = list(iter = 100L)
+      seed = 42L,
+      mode = c(theta = 0.5),
+      opt_args = list(iter = 100L)
     )
   })
 })

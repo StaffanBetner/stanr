@@ -145,19 +145,39 @@ test_that("constraining and unconstraining preserve structure and values", {
   expect_equal(with_tparams$beta_sum, 0, tolerance = 1e-12)
 
   with_gqs <- fit$constrain_variables(upars)
-  expect_named(with_gqs, c(
-    "theta", "beta", "beta_sum", "deterministic_gq", "stochastic_gq"
-  ))
+  expect_named(
+    with_gqs,
+    c(
+      "theta",
+      "beta",
+      "beta_sum",
+      "deterministic_gq",
+      "stochastic_gq"
+    )
+  )
   expect_equal(with_gqs$deterministic_gq, 0.5, tolerance = 1e-12)
 
   skeleton <- fit$variable_skeleton()
-  expect_named(skeleton, c(
-    "theta", "beta", "beta_sum", "deterministic_gq", "stochastic_gq"
-  ))
-  expect_identical(vapply(skeleton, length, integer(1)), c(
-    theta = 1L, beta = 2L, beta_sum = 1L,
-    deterministic_gq = 1L, stochastic_gq = 1L
-  ))
+  expect_named(
+    skeleton,
+    c(
+      "theta",
+      "beta",
+      "beta_sum",
+      "deterministic_gq",
+      "stochastic_gq"
+    )
+  )
+  expect_identical(
+    vapply(skeleton, length, integer(1)),
+    c(
+      theta = 1L,
+      beta = 2L,
+      beta_sum = 1L,
+      deterministic_gq = 1L,
+      stochastic_gq = 1L
+    )
+  )
   expect_named(
     fit$variable_skeleton(FALSE, FALSE),
     c("theta", "beta")

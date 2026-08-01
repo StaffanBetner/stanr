@@ -19,7 +19,8 @@ Imports:
     QuickJSR,
     posterior,
     withr,
-    digest
+    digest,
+    jsonlite
 LinkingTo:
     Rcpp,
     RcppEigen,

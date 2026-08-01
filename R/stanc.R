@@ -6,56 +6,69 @@
 #'
 #' @return The Stan program with matching include directives replaced by their contents.
 #' @keywords internal
-resolve_stan_includes <- function(model_code, include_directories,
-                                  include_stack = character()) {
+resolve_stan_includes <- function(
+  model_code,
+  include_directories,
+  include_stack = character()
+) {
   lines <- strsplit(model_code, "\n", fixed = TRUE)[[1]]
 
-  resolved_lines <- vapply(lines, function(line) {
-    match <- regexec("^[[:space:]]*#include[[:space:]]+(.+?)[[:space:]]*$", line,
-      perl = TRUE
-    )
-    parts <- regmatches(line, match)[[1]]
-    if (length(parts) == 0) {
-      return(line)
-    }
-
-    include_name <- trimws(sub("[[:space:]]*//.*$", "", parts[2]))
-    include_name <- sub('^"([^"]+)"$', "\\1", include_name)
-    include_name <- sub("^<([^>]+)>$", "\\1", include_name)
-    if (include_name == "" || grepl("[[:space:]]", include_name)) {
-      return(line)
-    }
-
-    candidates <- file.path(include_directories, include_name)
-    match_index <- which(file.exists(candidates) & !dir.exists(candidates))[1]
-    if (is.na(match_index)) {
-      searched <- if (length(include_directories) == 0) {
-        "no include directories"
-      } else {
-        paste(shQuote(include_directories), collapse = ", ")
+  resolved_lines <- vapply(
+    lines,
+    function(line) {
+      match <- regexec(
+        "^[[:space:]]*#include[[:space:]]+(.+?)[[:space:]]*$",
+        line,
+        perl = TRUE
+      )
+      parts <- regmatches(line, match)[[1]]
+      if (length(parts) == 0) {
+        return(line)
       }
-      stop(
-        "Could not find Stan include file '", include_name,
-        "'. Searched ", searched, ".",
-        call. = FALSE
-      )
-    }
 
-    include_path <- normalizePath(candidates[match_index], mustWork = TRUE)
-    if (include_path %in% include_stack) {
-      stop(
-        "Circular Stan include detected: ",
-        paste(c(include_stack, include_path), collapse = " -> "),
-        call. = FALSE
-      )
-    }
+      include_name <- trimws(sub("[[:space:]]*//.*$", "", parts[2]))
+      include_name <- sub('^"([^"]+)"$', "\\1", include_name)
+      include_name <- sub("^<([^>]+)>$", "\\1", include_name)
+      if (include_name == "" || grepl("[[:space:]]", include_name)) {
+        return(line)
+      }
 
-    resolve_stan_includes(
-      paste(readLines(include_path, warn = FALSE), collapse = "\n"),
-      include_directories = include_directories,
-      include_stack = c(include_stack, include_path)
-    )
-  }, character(1), USE.NAMES = FALSE)
+      candidates <- file.path(include_directories, include_name)
+      match_index <- which(file.exists(candidates) & !dir.exists(candidates))[1]
+      if (is.na(match_index)) {
+        searched <- if (length(include_directories) == 0) {
+          "no include directories"
+        } else {
+          paste(shQuote(include_directories), collapse = ", ")
+        }
+        stop(
+          "Could not find Stan include file '",
+          include_name,
+          "'. Searched ",
+          searched,
+          ".",
+          call. = FALSE
+        )
+      }
+
+      include_path <- normalizePath(candidates[match_index], mustWork = TRUE)
+      if (include_path %in% include_stack) {
+        stop(
+          "Circular Stan include detected: ",
+          paste(c(include_stack, include_path), collapse = " -> "),
+          call. = FALSE
+        )
+      }
+
+      resolve_stan_includes(
+        paste(readLines(include_path, warn = FALSE), collapse = "\n"),
+        include_directories = include_directories,
+        include_stack = c(include_stack, include_path)
+      )
+    },
+    character(1),
+    USE.NAMES = FALSE
+  )
 
   paste(resolved_lines, collapse = "\n")
 }
@@ -94,7 +107,9 @@ stanc <- function(
   warn_uninitialized = FALSE,
   external_cpp = NULL
 ) {
-  if (!is.character(model_code) || length(model_code) != 1 || is.na(model_code)) {
+  if (
+    !is.character(model_code) || length(model_code) != 1 || is.na(model_code)
+  ) {
     stop("model_code must be a single, non-missing string.", call. = FALSE)
   }
   if (model_code == "") {
@@ -113,7 +128,10 @@ stanc <- function(
     if (any(missing_directories)) {
       stop(
         "Include directories do not exist: ",
-        paste(shQuote(include_directories[missing_directories]), collapse = ", "),
+        paste(
+          shQuote(include_directories[missing_directories]),
+          collapse = ", "
+        ),
         call. = FALSE
       )
     }
@@ -124,7 +142,8 @@ stanc <- function(
     external_cpp <- character()
   }
   if (!is.character(external_cpp) || anyNA(external_cpp)) {
-    stop("external_cpp must be NULL or a character vector of file paths.",
+    stop(
+      "external_cpp must be NULL or a character vector of file paths.",
       call. = FALSE
     )
   }
@@ -140,9 +159,13 @@ stanc <- function(
     NULL
   } else {
     paste(
-      vapply(external_cpp, function(path) {
-        paste(readLines(path, warn = FALSE), collapse = "\n")
-      }, character(1)),
+      vapply(
+        external_cpp,
+        function(path) {
+          paste(readLines(path, warn = FALSE), collapse = "\n")
+        },
+        character(1)
+      ),
       collapse = "\n"
     )
   }
@@ -177,4 +200,57 @@ stanc <- function(
   } else {
     paste(external_cpp_code, res$result, sep = "\n")
   }
+}
+
+#' Extract variable metadata from Stan code using stanc info output
+#'
+#' @param model_code Stan model code as a single string.
+#' @param include_directories Character vector of directories to search for
+#'   Stan include files.
+#' @param allow_undefined Allow undefined functions.
+#'
+#' @return A named list with elements `data`, `parameters`,
+#'   `transformed_parameters`, and `generated_quantities`. Each element is a
+#'   named list of variables, where each variable has `type` and `dimensions`.
+#' @keywords internal
+model_variables <- function(
+  model_code,
+  include_directories = character(),
+  allow_undefined = FALSE
+) {
+  model_code <- resolve_stan_includes(model_code, include_directories)
+
+  flags <- c(
+    "info",
+    if (allow_undefined) "allow-undefined"
+  )
+
+  res <- stanc_context$call(
+    "stanc",
+    "model",
+    model_code,
+    as.array(flags)
+  )
+
+  if (!is.null(res$errors)) {
+    stop(paste(res$errors, collapse = "\n"), call. = FALSE)
+  }
+
+  variables <- jsonlite::fromJSON(res$result)
+  variables$data <- variables$inputs
+  variables$inputs <- NULL
+  variables$transformed_parameters <- variables[["transformed parameters"]]
+  variables[["transformed parameters"]] <- NULL
+  variables$generated_quantities <- variables[["generated quantities"]]
+  variables[["generated quantities"]] <- NULL
+  variables$functions <- NULL
+  variables$distributions <- NULL
+  variables$included_files <- NULL
+  # Reorder to match expected output
+  variables[c(
+    "data",
+    "parameters",
+    "transformed_parameters",
+    "generated_quantities"
+  )]
 }

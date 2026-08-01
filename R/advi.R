@@ -32,17 +32,23 @@
 
   if (result$return_code != 0) {
     return(
-      structure(list(
-        draws = NULL,
-        return_code = result$return_code,
-        args = service_args(native_args)
-      ), class = c("StanVariational", "StanService", "list"))
+      structure(
+        list(
+          draws = NULL,
+          return_code = result$return_code,
+          args = service_args(native_args)
+        ),
+        class = c("StanVariational", "StanService", "list")
+      )
     )
   }
 
-  structure(list(
-    draws = posterior::as_draws_df(result$draws),
-    return_code = result$return_code,
-    args = service_args(native_args)
-  ), class = c("StanVariational", "StanService", "list"))
+  structure(
+    list(
+      draws = posterior::as_draws_df(result$draws),
+      return_code = result$return_code,
+      args = service_args(native_args)
+    ),
+    class = c("StanVariational", "StanService", "list")
+  )
 }

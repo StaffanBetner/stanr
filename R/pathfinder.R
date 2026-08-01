@@ -38,11 +38,14 @@
 
   if (result$return_code != 0) {
     return(
-      structure(list(
-        draws = NULL,
-        return_code = result$return_code,
-        args = service_args(native_args)
-      ), class = c("StanPathfinder", "StanService", "list"))
+      structure(
+        list(
+          draws = NULL,
+          return_code = result$return_code,
+          args = service_args(native_args)
+        ),
+        class = c("StanPathfinder", "StanService", "list")
+      )
     )
   }
 
@@ -62,10 +65,13 @@
     diagnostics <- NULL
   }
 
-  structure(list(
-    draws = draws,
-    diagnostics = diagnostics,
-    return_code = result$return_code,
-    args = service_args(native_args)
-  ), class = c("StanPathfinder", "StanService", "list"))
+  structure(
+    list(
+      draws = draws,
+      diagnostics = diagnostics,
+      return_code = result$return_code,
+      args = service_args(native_args)
+    ),
+    class = c("StanPathfinder", "StanService", "list")
+  )
 }
