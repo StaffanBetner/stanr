@@ -19,21 +19,40 @@ knitr::opts_chunk$set(
 <!-- badges: end -->
 
 `newstan` is an R interface for compiling Stan programs and running Stan
-services directly from R. Results use `posterior` draw objects where possible,
-and every service result includes its normalized configuration arguments
-(large execution inputs are omitted).
+services directly from R. It uses an R6-based API similar to `cmdstanr`:
+`stan_model()` returns a [`StanModel`] object, and inference methods
+(`$sample()`, `$optimize()`, `$variational()`, etc.) return R6 fit objects
+with methods for extracting draws, summaries, and diagnostics. Results use
+`posterior` draw objects where possible.
 
-## Service Return Types
+## Inference Methods
 
-| Function | Purpose | Return type |
+| Method | Purpose | Return type |
 | --- | --- | --- |
-| `sampling()` | MCMC sampling, including HMC/NUTS and fixed-parameter runs | list with `draws`, `diagnostics`, `return_code`, `args` |
-| `pathfinder()` | Pathfinder approximate posterior draws | list with `draws`, `diagnostics`, `return_code`, `args` |
-| `variational()` | ADVI approximate posterior draws | list with `draws`, `return_code`, `args` |
-| `optimizing()` | Posterior mode or maximum likelihood estimate | list with `par`, `value`, `return_code`, `args` |
-| `laplace()` | Laplace approximation draws around a mode | list with `draws`, `return_code`, `args` |
-| `generated_quantities()` | Generated quantities from existing parameter draws | list with `draws`, `return_code`, `args` |
-| `gradient_check()` | Finite-difference gradient diagnostic | integer count of failed checks |
+| [`$sample()`][model-method-sample] | MCMC sampling (HMC/NUTS, static HMC, fixed param) | [`StanMCMC`] |
+| [`$optimize()`][model-method-optimize] | Posterior mode or maximum likelihood estimate | [`StanMLE`] |
+| [`$laplace()`][model-method-laplace] | Laplace approximation draws around a mode | [`StanLaplace`] |
+| [`$variational()`][model-method-variational] | ADVI approximate posterior draws | [`StanVB`] |
+| [`$pathfinder()`][model-method-pathfinder] | Pathfinder approximate posterior draws | [`StanPathfinder`] |
+| [`$generate_quantities()`][model-method-generate-quantities] | Generated quantities from existing draws | [`StanGQ`] |
+| [`$diagnose()`][model-method-diagnose] | Gradient checking diagnostic | [`StanDiagnose`] |
+
+## Fit Object Methods
+
+All fit objects inherit from [`StanFit`] and share common methods:
+
+| Method | Description |
+| --- | --- |
+| [`$draws()`][fit-method-draws] | Extract draws as `posterior` objects |
+| [`$summary()`][fit-method-summary] | Summarize draws via `posterior::summarise_draws()` |
+| [`$print()`][fit-method-print] | Print a summary table |
+| [`$return_codes()`][fit-method-fit-info] | Stan return codes (0 = success) |
+| [`$metadata()`][fit-method-fit-info] | Fit metadata (seed, data, arguments) |
+| [`$time()`][fit-method-fit-info] | Timing information |
+| [`$log_prob()`][fit-method-model-methods] | Evaluate log probability |
+| [`$constrain_variables()`][fit-method-model-methods] | Constrain unconstrained parameters |
+| [`$unconstrain_variables()`][fit-method-model-methods] | Unconstrain parameters |
+| [`$save_object()`][fit-method-save] | Save fit to file |
 
 ## Installation
 
@@ -44,10 +63,10 @@ You can install the development version of newstan from GitHub:
 pak::pak("andrjohns/newstan")
 ```
 
-## Compile A Model
+## Compile a Model
 
-Models can be compiled from a string or from a `.stan` file. The returned object
-is a model environment used by the service functions below.
+Models are compiled from a string or from a `.stan` file. `stan_model()`
+returns a [`StanModel`] R6 object.
 
 ```{r compile-model}
 library(newstan)
@@ -74,7 +93,47 @@ generated quantities {
 
 mod <- stan_model(code = bernoulli_model, model_name = "bernoulli")
 data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+```
 
+## Sampling
+
+Call `$sample()` on a [`StanModel`] to run MCMC. The result is a
+[`StanMCMC`] object with methods for extracting draws and diagnostics.
+
+```{r sampling}
+fit <- mod$sample(
+  data = data,
+  iter_warmup = 20,
+  iter_sampling = 20,
+  chains = 2,
+  seed = 123,
+  show_messages = FALSE
+)
+
+posterior::variables(fit$draws())
+```
+
+Extract a summary via `$summary()`:
+
+```{r sampling-summary}
+fit$summary()
+```
+
+Access sampler diagnostics and chain information:
+
+```{r sampling-diagnostics}
+list(
+  chains = fit$num_chains(),
+  return_codes = fit$return_codes(),
+  diagnostics = fit$diagnostic_summary()
+)
+```
+
+### Fixed Param
+
+For models without parameters, use `fixed_param = TRUE`:
+
+```{r fixed-param}
 fixed_param_model <- "
 data {
   int<lower=0> N;
@@ -88,275 +147,162 @@ generated quantities {
 "
 
 fixed_mod <- stan_model(code = fixed_param_model, model_name = "fixed_param")
-fixed_data <- list(N = 5)
-```
 
-`stan_model()` returns an S3 object of class `"newstan_fit"` wrapping the
-compiled model.
-
-## Sampling
-
-Use `sampling()` for MCMC. The result is a list with posterior draws, sampler
-diagnostics, a Stan return code, and the normalized configuration argument list.
-
-```{r sampling}
-fit <- sampling(
-  mod,
-  data,
-  num_warmup = 20,
-  num_samples = 20,
-  num_chains = 2,
+fixed_fit <- fixed_mod$sample(
+  data = list(N = 5),
+  iter_warmup = 0,
+  iter_sampling = 10,
+  fixed_param = TRUE,
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  draws_class = class(fit$draws)[1],
-  diagnostics_class = class(fit$diagnostics)[1],
-  variables = posterior::variables(fit$draws),
-  return_code = fit$return_code
-)
-
-head(summary(fit), 3)
-```
-
-The return value has:
-
-- `draws`: a `posterior::draws_df` containing model parameter draws.
-- `diagnostics`: a `posterior::draws_df` containing sampler diagnostics such as
-  `accept_stat__`, `stepsize__`, `treedepth__`, `n_leapfrog__`,
-  `divergent__`, and `energy__`.
-- `return_code`: integer status code.
-- `args`: named list of sampling arguments.
-
-### Fixed Param
-
-For models without parameters, or when you only want generated quantities, use
-the fixed-parameter sampler.
-
-```{r fixed-param}
-fixed_fit <- sampling(
-  fixed_mod,
-  fixed_data,
-  algorithm = "fixed_param",
-  num_warmup = 0,
-  num_samples = 10,
-  seed = 123,
-  verbose = FALSE
-)
-
-list(
-  variables = posterior::variables(fixed_fit$draws),
-  ndraws = posterior::ndraws(fixed_fit$draws),
-  return_code = fixed_fit$return_code
-)
-
-head(summary(fixed_fit), 3)
+posterior::variables(fixed_fit$draws())
 ```
 
 ### Supplying Inverse Metrics
 
-`sampling()` accepts precomputed inverse metric values through `inv_metric`.
-This corresponds to Stan's `metric_file` input.
+`$sample()` accepts precomputed inverse metric values through `inv_metric`.
 
 For a diagonal metric, pass a numeric vector with one value per unconstrained
-parameter. The Bernoulli model above has one unconstrained parameter.
+parameter:
 
 ```{r sampling-diag-metric}
-diag_metric_fit <- sampling(
-  mod,
-  data,
+diag_fit <- mod$sample(
+  data = data,
   metric = "diag_e",
   inv_metric = c(1.0),
-  num_warmup = 20,
-  num_samples = 20,
+  iter_warmup = 20,
+  iter_sampling = 20,
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  variables = posterior::variables(diag_metric_fit$draws),
-  return_code = diag_metric_fit$return_code
-)
-
-head(summary(diag_metric_fit), 3)
+posterior::variables(diag_fit$draws())
 ```
 
-For a dense metric, pass a square matrix. To provide one metric per chain, pass
-a list whose length equals `num_chains`; a single vector or matrix is reused for
-all chains.
+For a dense metric, pass a square matrix. To provide one metric per chain,
+pass a list whose length equals `chains`:
 
 ```{r sampling-dense-metric}
-dense_metric_fit <- sampling(
-  mod,
-  data,
+dense_fit <- mod$sample(
+  data = data,
   metric = "dense_e",
   inv_metric = list(matrix(1.0, nrow = 1, ncol = 1)),
-  num_chains = 1,
-  num_warmup = 20,
-  num_samples = 20,
+  chains = 1,
+  iter_warmup = 20,
+  iter_sampling = 20,
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  variables = posterior::variables(dense_metric_fit$draws),
-  return_code = dense_metric_fit$return_code
-)
-
-head(summary(dense_metric_fit), 3)
+posterior::variables(dense_fit$draws())
 ```
 
 ## Pathfinder
 
-Use `pathfinder()` for an approximate posterior based on L-BFGS paths.
+Call `$pathfinder()` for an approximate posterior based on L-BFGS paths.
 
 ```{r pathfinder}
-pf <- pathfinder(
-  mod,
-  data,
+pf <- mod$pathfinder(
+  data = data,
   max_lbfgs_iters = 100,
   num_paths = 1,
-  num_draws = 50,
+  draws = 50,
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  draws_class = class(pf$draws)[1],
-  diagnostics_class = class(pf$diagnostics)[1],
-  variables = posterior::variables(pf$draws),
-  return_code = pf$return_code
-)
-
-head(summary(pf), 3)
+posterior::variables(pf$draws())
+pf$summary()
 ```
-
-The return value has `draws`, `diagnostics`, `return_code`, and `args`. If no
-pathfinder diagnostic columns are returned, `diagnostics` is `NULL`.
 
 ## Variational Inference
 
-Use `variational()` for ADVI with either a mean-field or full-rank Gaussian
+Call `$variational()` for ADVI with either a mean-field or full-rank Gaussian
 family.
 
 ```{r variational}
-vb <- variational(
-  mod,
-  data,
+vb <- mod$variational(
+  data = data,
   algorithm = "meanfield",
   iter = 1000,
-  output_samples = 50,
+  draws = 50,
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  draws_class = class(vb$draws)[1],
-  variables = posterior::variables(vb$draws),
-  return_code = vb$return_code
-)
-
-head(summary(vb), 3)
+posterior::variables(vb$draws())
+vb$summary()
 ```
-
-The return value has `draws`, `return_code`, and `args`.
 
 ## Optimization
 
-Use `optimizing()` to find a posterior mode or maximum likelihood estimate.
+Call `$optimize()` to find a posterior mode or maximum likelihood estimate.
 
 ```{r optimizing}
-opt <- optimizing(
-  mod,
-  data,
+opt <- mod$optimize(
+  data = data,
   algorithm = "lbfgs",
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  par = opt$par,
-  value = opt$value,
-  return_code = opt$return_code
-)
-
-summary(opt)
+opt$mle()
+opt$summary()
 ```
-
-The return value has `par`, `value`, `return_code`, and `args`.
 
 ## Laplace Approximation
 
-Use `laplace()` to draw from a Laplace approximation around a mode. You can pass
-the full `optimizing()` result or a named numeric vector of constrained
-parameters.
+Call `$laplace()` to draw from a Gaussian approximation around a mode. Pass a
+[`StanMLE`] object or let `$laplace()` run optimization first.
 
 ```{r laplace}
-lap <- laplace(
-  mod,
-  data,
+lap <- mod$laplace(
+  data = data,
   mode = opt,
   draws = 20,
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  draws_class = class(lap$draws)[1],
-  variables = posterior::variables(lap$draws),
-  return_code = lap$return_code
-)
-
-head(summary(lap), 3)
+posterior::variables(lap$draws())
+lap$summary()
 ```
-
-The return value has `draws`, `return_code`, and `args`.
 
 ## Generated Quantities
 
-Use `generated_quantities()` with existing parameter draws and a model containing
-a `generated quantities` block.
+Call `$generate_quantities()` with a [`StanFit`] object or draws matrix to
+evaluate the generated quantities block.
 
 ```{r generated-quantities}
-gq <- generated_quantities(
-  mod,
-  data,
-  fitted_params = fit$draws,
+gq <- mod$generate_quantities(
+  fitted_params = fit,
+  data = data,
   seed = 123,
-  verbose = FALSE
+  show_messages = FALSE
 )
 
-list(
-  draws_class = class(gq$draws)[1],
-  variables = posterior::variables(gq$draws),
-  return_code = gq$return_code
-)
-
-head(summary(gq), 3)
+posterior::variables(gq$draws())
+gq$summary()
 ```
-
-The return value has `draws`, `return_code`, and `args`.
 
 ## Gradient Check
 
-Use `gradient_check()` to compare autodiff gradients with finite-difference
+Call `$diagnose()` to compare autodiff gradients with finite-difference
 approximations.
 
 ```{r gradient-check}
-n_failed <- gradient_check(
-  mod,
-  data,
-  seed = 123,
-  verbose = FALSE
+diag <- mod$diagnose(
+  data = data,
+  seed = 123
 )
 
-n_failed
-
-summary(n_failed)
+list(
+  num_failed = diag$num_failed(),
+  gradients = diag$gradients()
+)
 ```
-
-`gradient_check()` returns an integer count of failed parameter gradient checks.
 
 ## Stan Compilation Helpers
 
@@ -368,5 +314,6 @@ cpp_code <- stanc(bernoulli_model)
 substr(cpp_code, 1, 80)
 ```
 
-`stan_model()` is usually the higher-level entry point: it calls `stanc()`,
-compiles the generated C++, and returns the model object used by the services.
+`stan_model()` is the higher-level entry point: it calls `stanc()`, compiles
+the generated C++, and returns a [`StanModel`] object used by all inference
+methods.
