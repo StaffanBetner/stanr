@@ -138,24 +138,68 @@
   env
 }
 
-#' Compile and load a Stan model
+#' Create a Stan model object
 #'
-#' @param stan_file Path to a Stan program. Supply either `stan_file` or `code`.
-#' @param code Stan model code as a single string.
-#' @param compile Whether to compile immediately. If `FALSE`, compilation is
-#'   deferred until a service method or `$compile()` is called.
-#' @param model_name Optional model name.
-#' @param include_paths Directories used to resolve Stan includes.
-#' @param user_header Optional C++ header to include in model compilation.
-#' @param cpp_options Named C++ compilation options. Reserved for compilation
-#'   options supported by the in-process backend.
-#' @param stanc_options Named options passed to the bundled Stan compiler.
-#' @param force_recompile Force native recompilation.
-#' @param precompiled_headers Use newstan's cached precompiled Stan header.
-#' @param quiet Suppress compilation progress.
-#' @param external_cpp Paths to C++ files prepended to generated model code.
+#' @description Create a new [`StanModel`] object from a Stan program file or
+#'   from Stan code as a string. The [`StanModel`] object stores the Stan
+#'   program source and compiled model, and provides methods for fitting the
+#'   model using Stan's inference algorithms.
 #'
-#' @return A `StanModel` R6 object.
+#'   See the `compile` argument for control over whether and how compilation
+#'   happens.
+#'
+#' @param stan_file (string) The path to a `.stan` file containing a Stan
+#'   program. If `stan_file` is not specified then `code` must be specified.
+#' @param code (string) A Stan program as a single string. If `code` is not
+#'   specified then `stan_file` must be specified.
+#' @param compile (logical) Should the model be compiled? The default is
+#'   `TRUE`. If `FALSE` compilation can be done later via the
+#'   [`$compile()`][model-method-compile] method.
+#' @param model_name (string) The name to use for the model. If `NULL` (the
+#'   default), the model name is derived from the Stan file name (if provided)
+#'   or set to `"model"`.
+#' @param include_paths (character vector) Paths to directories where Stan
+#'   should look for files specified in `#include` directives.
+#' @param user_header (string) Not yet supported. Use `external_cpp` instead.
+#' @param cpp_options (list) C++ compilation options. Not yet supported by the
+#'   in-process backend.
+#' @param stanc_options (list) Stan-to-C++ transpiler options. Not yet supported.
+#' @param force_recompile (logical) Should the model be recompiled even if it
+#'   has not been modified? The default is `FALSE`, but can be set via the
+#'   `newstan_force_recompile` option.
+#' @param precompiled_headers (logical) Should precompiled headers be used to
+#'   speed up compilation? The default is `FALSE`.
+#' @param quiet (logical) Should verbose output from compilation be suppressed?
+#'   The default is `TRUE`.
+#' @param external_cpp (character vector) Paths to C++ files to prepend to the
+#'   generated model code. Useful for defining custom functions.
+#'
+#' @return A [`StanModel`] object.
+#'
+#' @seealso [`StanModel`], [`$compile()`][model-method-compile],
+#'   [`$sample()`][model-method-sample]
+#'
+#' @examples
+#' \dontrun{
+#' # Create a StanModel from Stan code
+#' mod <- stan_model(
+#'   code = "
+#'     parameters {
+#'       real theta;
+#'     }
+#'     model {
+#'       theta ~ normal(0, 1);
+#'     }
+#'   "
+#' )
+#' mod$model_name()
+#' mod$variables()
+#'
+#' # Run MCMC sampling
+#' fit <- mod$sample(data = list(), chains = 2)
+#' fit$summary()
+#' }
+#'
 #' @export
 stan_model <- function(
   stan_file = NULL,

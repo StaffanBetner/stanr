@@ -2,7 +2,7 @@
 % Please edit documentation in R/stan_model.R
 \name{stan_model}
 \alias{stan_model}
-\title{Compile and load a Stan model}
+\title{Create a Stan model object}
 \usage{
 stan_model(
   stan_file = NULL,
@@ -20,35 +20,78 @@ stan_model(
 )
 }
 \arguments{
-\item{stan_file}{Path to a Stan program. Supply either \code{stan_file} or \code{code}.}
+\item{stan_file}{(string) The path to a \code{.stan} file containing a Stan
+program. If \code{stan_file} is not specified then \code{code} must be specified.}
 
-\item{code}{Stan model code as a single string.}
+\item{code}{(string) A Stan program as a single string. If \code{code} is not
+specified then \code{stan_file} must be specified.}
 
-\item{compile}{Whether to compile immediately. If \code{FALSE}, compilation is
-deferred until a service method or \verb{$compile()} is called.}
+\item{compile}{(logical) Should the model be compiled? The default is
+\code{TRUE}. If \code{FALSE} compilation can be done later via the
+\code{\link[=model-method-compile]{$compile()}} method.}
 
-\item{model_name}{Optional model name.}
+\item{model_name}{(string) The name to use for the model. If \code{NULL} (the
+default), the model name is derived from the Stan file name (if provided)
+or set to \code{"model"}.}
 
-\item{include_paths}{Directories used to resolve Stan includes.}
+\item{include_paths}{(character vector) Paths to directories where Stan
+should look for files specified in \verb{#include} directives.}
 
-\item{user_header}{Optional C++ header to include in model compilation.}
+\item{user_header}{(string) Not yet supported. Use \code{external_cpp} instead.}
 
-\item{cpp_options}{Named C++ compilation options. Reserved for compilation
-options supported by the in-process backend.}
+\item{cpp_options}{(list) C++ compilation options. Not yet supported by the
+in-process backend.}
 
-\item{stanc_options}{Named options passed to the bundled Stan compiler.}
+\item{stanc_options}{(list) Stan-to-C++ transpiler options. Not yet supported.}
 
-\item{force_recompile}{Force native recompilation.}
+\item{force_recompile}{(logical) Should the model be recompiled even if it
+has not been modified? The default is \code{FALSE}, but can be set via the
+\code{newstan_force_recompile} option.}
 
-\item{precompiled_headers}{Use newstan's cached precompiled Stan header.}
+\item{precompiled_headers}{(logical) Should precompiled headers be used to
+speed up compilation? The default is \code{FALSE}.}
 
-\item{quiet}{Suppress compilation progress.}
+\item{quiet}{(logical) Should verbose output from compilation be suppressed?
+The default is \code{TRUE}.}
 
-\item{external_cpp}{Paths to C++ files prepended to generated model code.}
+\item{external_cpp}{(character vector) Paths to C++ files to prepend to the
+generated model code. Useful for defining custom functions.}
 }
 \value{
-A \code{StanModel} R6 object.
+A \code{\link{StanModel}} object.
 }
 \description{
-Compile and load a Stan model
+Create a new \code{\link{StanModel}} object from a Stan program file or
+from Stan code as a string. The \code{\link{StanModel}} object stores the Stan
+program source and compiled model, and provides methods for fitting the
+model using Stan's inference algorithms.
+
+See the \code{compile} argument for control over whether and how compilation
+happens.
+}
+\examples{
+\dontrun{
+# Create a StanModel from Stan code
+mod <- stan_model(
+  code = "
+    parameters {
+      real theta;
+    }
+    model {
+      theta ~ normal(0, 1);
+    }
+  "
+)
+mod$model_name()
+mod$variables()
+
+# Run MCMC sampling
+fit <- mod$sample(data = list(), chains = 2)
+fit$summary()
+}
+
+}
+\seealso{
+\code{\link{StanModel}}, \code{\link[=model-method-compile]{$compile()}},
+\code{\link[=model-method-sample]{$sample()}}
 }
