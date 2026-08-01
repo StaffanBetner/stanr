@@ -35,7 +35,7 @@ SUNDIALS_NVECSERIAL := \
 
 SUNDIALS_SOURCES = $(SUNDIALS_CVODES) $(SUNDIALS_IDAS) $(SUNDIALS_KINSOL) $(SUNDIALS_NVECSERIAL)
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
-OBJECTS = runner.o init.o
+OBJECTS = runner.o init.o model_methods.o r_data_context.o
 
 $(SHLIB): static
 $(OBJECTS): $(SUNDIALS_OBJECTS)
@@ -51,10 +51,10 @@ package:
 
 static: $(OBJECTS) $(SUNDIALS_OBJECTS)
 	@mkdir -p ../inst/lib/$(R_ARCH)
-	$(AR) -rs ../inst/lib/$(R_ARCH)/libnewstan_runner.a $(SUNDIALS_OBJECTS) runner.o
+	$(AR) -rs ../inst/lib/$(R_ARCH)/libnewstan_runner.a $(SUNDIALS_OBJECTS) runner.o model_methods.o r_data_context.o
 
 clean:
 	rm -rf ../inst/lib
-	rm $(OBJECTS)
+	rm -f $(OBJECTS)
 	rm -rf ../inst/include/
 	rm -rf sundials

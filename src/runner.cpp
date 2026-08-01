@@ -13,6 +13,7 @@
 #include "include/run_laplace.hpp"
 #include "include/run_sampling.hpp"
 #include "include/run_standalone_gqs.hpp"
+#include "newstan/r_data_context.hpp"
 
 namespace newstan {
 
@@ -52,18 +53,4 @@ Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
     Rcpp::_["method"] = method
   );
 }
-
-Rcpp::CharacterVector constrained_param_names(
-    const stan::model::model_base& model) {
-  std::vector<std::string> param_names;
-  model.constrained_param_names(param_names, false, false);
-  if (param_names.size() < 1) {
-    std::stringstream msg;
-    msg << "Model " << model.model_name()
-        << " has no parameters, nothing to estimate." << std::endl;
-    Rcpp::stop(msg.str());
-  }
-  return Rcpp::wrap(param_names);
-}
-
 }  // namespace newstan

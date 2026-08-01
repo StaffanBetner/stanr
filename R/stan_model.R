@@ -52,25 +52,9 @@
   model_support <- readLines(
     system.file("stan_model.cpp", package = "newstan", mustWork = TRUE)
   )
-  bridge_headers <- c(
-    system.file(
-      "include", "newstan", "model_methods.hpp",
-      package = "newstan", mustWork = TRUE
-    ),
-    system.file(
-      "include", "newstan", "r_data_context.hpp",
-      package = "newstan", mustWork = TRUE
-    )
-  )
-  bridge_code <- unlist(
-    lapply(bridge_headers, readLines, warn = FALSE),
-    use.names = FALSE
-  )
   model_hash <- digest::digest(
     c(
       cpp_code,
-      model_support,
-      bridge_code,
       as.character(utils::packageVersion("newstan")),
       .newstan_stan_version()
     ),

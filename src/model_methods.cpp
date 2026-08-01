@@ -1,13 +1,15 @@
 #ifndef NEWSTAN_MODEL_METHODS_HPP
 #define NEWSTAN_MODEL_METHODS_HPP
 
-#include <Rcpp.h>
 #include <newstan/r_data_context.hpp>
+#include <stan/math/rev/functor/gradient.hpp>
 #include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>
 #include <stan/model/log_prob_grad.hpp>
 #include <stan/model/log_prob_propto.hpp>
 #include <stan/model/model_base.hpp>
 #include <stan/services/util/create_rng.hpp>
+
+#include <Rcpp.h>
 
 #include <cmath>
 #include <cstddef>
@@ -15,17 +17,16 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace newstan {
 
-inline std::string model_method_error_prefix(
+std::string model_method_error_prefix(
     const stan::model::model_base& model, const char* method) {
   return std::string(method) + " for model '" + model.model_name() + "': ";
 }
 
-inline Eigen::VectorXd checked_unconstrained_values(
+Eigen::VectorXd checked_unconstrained_values(
     const stan::model::model_base& model, Rcpp::NumericVector values,
     const char* method) {
   const R_xlen_t expected = static_cast<R_xlen_t>(model.num_params_r());
@@ -51,13 +52,13 @@ inline Eigen::VectorXd checked_unconstrained_values(
   return result;
 }
 
-inline Rcpp::NumericVector eigen_to_numeric(const Eigen::VectorXd& values) {
+Rcpp::NumericVector eigen_to_numeric(const Eigen::VectorXd& values) {
   Rcpp::NumericVector result(values.size());
   for (Eigen::Index i = 0; i < values.size(); ++i) result[i] = values[i];
   return result;
 }
 
-inline Rcpp::NumericMatrix eigen_to_numeric(const Eigen::MatrixXd& values) {
+Rcpp::NumericMatrix eigen_to_numeric(const Eigen::MatrixXd& values) {
   Rcpp::NumericMatrix result(values.rows(), values.cols());
   for (Eigen::Index column = 0; column < values.cols(); ++column) {
     for (Eigen::Index row = 0; row < values.rows(); ++row) {
@@ -68,19 +69,19 @@ inline Rcpp::NumericMatrix eigen_to_numeric(const Eigen::MatrixXd& values) {
 }
 
 template <typename RObject>
-inline void attach_messages(RObject& result, const std::ostringstream& stream) {
+void attach_messages(RObject& result, const std::ostringstream& stream) {
   const std::string messages = stream.str();
   if (!messages.empty()) result.attr("messages") = messages;
 }
 
-inline Rcpp::XPtr<stan::rng_t> make_base_rng(unsigned int seed) {
+Rcpp::XPtr<stan::rng_t> make_base_rng(unsigned int seed) {
   // A model-method RNG is an independent stream. Chain zero is intentional:
   // these draws do not share a stream with an inference chain.
   return Rcpp::XPtr<stan::rng_t>(
       new stan::rng_t(stan::services::util::create_rng(seed, 0)));
 }
 
-inline int model_num_upars(const stan::model::model_base& model) {
+int model_num_upars(const stan::model::model_base& model) {
   const size_t count = model.num_params_r();
   if (count > static_cast<size_t>(std::numeric_limits<int>::max())) {
     throw std::overflow_error("The model has too many parameters for R.");
@@ -88,7 +89,7 @@ inline int model_num_upars(const stan::model::model_base& model) {
   return static_cast<int>(count);
 }
 
-inline Rcpp::List model_param_metadata(
+Rcpp::List model_param_metadata(
     const stan::model::model_base& model) {
   std::vector<std::string> parameter_names;
   std::vector<std::vector<size_t>> parameter_dims;
@@ -142,7 +143,7 @@ inline Rcpp::List model_param_metadata(
                             Rcpp::Named("stages") = stages);
 }
 
-inline Rcpp::CharacterVector model_constrained_names(
+Rcpp::CharacterVector model_constrained_names(
     const stan::model::model_base& model, bool include_tparams,
     bool include_gqs) {
   std::vector<std::string> names;
@@ -150,14 +151,14 @@ inline Rcpp::CharacterVector model_constrained_names(
   return Rcpp::wrap(names);
 }
 
-inline Rcpp::CharacterVector model_unconstrained_names(
+Rcpp::CharacterVector model_unconstrained_names(
     const stan::model::model_base& model) {
   std::vector<std::string> names;
   model.unconstrained_param_names(names, false, false);
   return Rcpp::wrap(names);
 }
 
-inline Rcpp::NumericVector model_log_prob(
+Rcpp::NumericVector model_log_prob(
     const stan::model::model_base& model, Rcpp::NumericVector values,
     bool jacobian) {
   Eigen::VectorXd upars
@@ -177,7 +178,7 @@ inline Rcpp::NumericVector model_log_prob(
   return result;
 }
 
-inline Rcpp::NumericVector model_grad_log_prob(
+Rcpp::NumericVector model_grad_log_prob(
     const stan::model::model_base& model, Rcpp::NumericVector values,
     bool jacobian) {
   Eigen::VectorXd upars
@@ -203,7 +204,7 @@ inline Rcpp::NumericVector model_grad_log_prob(
   return result;
 }
 
-inline Rcpp::List model_hessian(const stan::model::model_base& model,
+Rcpp::List model_hessian(const stan::model::model_base& model,
                                 Rcpp::NumericVector values, bool jacobian) {
   Eigen::VectorXd upars
       = checked_unconstrained_values(model, values, "model_hessian");
@@ -242,7 +243,7 @@ inline Rcpp::List model_hessian(const stan::model::model_base& model,
   return result;
 }
 
-inline Rcpp::NumericVector model_unconstrain(
+Rcpp::NumericVector model_unconstrain(
     const stan::model::model_base& model, Rcpp::List variables) {
   r_data_context context(variables);
   Eigen::VectorXd upars;
@@ -264,7 +265,7 @@ inline Rcpp::NumericVector model_unconstrain(
   return result;
 }
 
-inline Rcpp::NumericMatrix model_unconstrain_matrix(
+Rcpp::NumericMatrix model_unconstrain_matrix(
     const stan::model::model_base& model, Rcpp::NumericMatrix values) {
   std::vector<std::string> constrained_names;
   model.constrained_param_names(constrained_names, false, false);
@@ -320,7 +321,7 @@ inline Rcpp::NumericMatrix model_unconstrain_matrix(
   return result;
 }
 
-inline Rcpp::NumericVector model_constrain(
+Rcpp::NumericVector model_constrain(
     const stan::model::model_base& model, stan::rng_t& rng,
     Rcpp::NumericVector values, bool include_tparams, bool include_gqs) {
   Eigen::VectorXd upars
@@ -348,7 +349,7 @@ inline Rcpp::NumericVector model_constrain(
   return result;
 }
 
-inline Rcpp::CharacterVector model_compile_info(
+Rcpp::CharacterVector model_compile_info(
     const stan::model::model_base& model) {
   return Rcpp::wrap(model.model_compile_info());
 }
