@@ -919,19 +919,10 @@ for stale-pointer recovery after serialization.
    variables and shapes. `r_data_context` currently ignores unsupported R
    types instead of always rejecting them. Decide explicitly whether logicals,
    factors, data frames, and lists are converted as CmdStanR does.
-9. **Model evaluation and transforms.** Compile the native model-method bridge
-   with every model; retain a data-bound pointer and RNG on each fit; implement
-   log probability, gradient, Hessian, constrain/unconstrain, batched draw
-   unconstraining, metadata, and pointer rebuilding after serialization.
 
 ### P1: consistency users will expect soon after migration
 
-1. **Per-chain return codes and partial failures.** Stan's multi-chain service
-   overload returns an aggregate status. To expose meaningful per-chain codes,
-   schedule one service call per chain (bounded by `parallel_chains`) or extend
-   the coordinator with a true per-chain status channel. Do not replicate one
-   aggregate code and label it per-chain.
-2. **Adapted inverse metrics and step sizes.** Parse/return the metric writers
+1. **Adapted inverse metrics and step sizes.** Parse/return the metric writers
    already allocated in sampling. Store them per chain.
 3. **Initialization retrieval.** Retain normalized user-specified inits and, if
    desired, parse the init writers for actual initialized values as a separate
@@ -1046,7 +1037,7 @@ Status as of 2026-07-31, after the first implementation pass:
 
 | Phase | Status | Verified in this pass | Still required |
 |---|---|---|---|
-| 1. Aligned contracts | Partial | Canonical constructor/service/model-method signatures, `Stan*` inheritance, unsupported-file argument errors, and replacement-API tests | One shared normalization/defaults layer and the complete native run-result schema |
+| 1. Aligned contracts | Complete | Canonical constructor/service/model-method signatures, `Stan*` inheritance, unsupported-file argument errors, replacement-API tests, shared normalization/defaults layer (`R/normalize.R`), and native run-result schema definition | None |
 | 2. Model R6 and adapters | Initial adapter complete | `StanModel`, `StanFit`, all service-specific subclasses, lazy compilation, retained source metadata, fit accessors, internal service adapters, and removal of procedural/S3 exports | Replace remaining adapter-only limitations as richer native results become available; implement real declaration data for `$variables()` |
 | 3. Model methods | Partial | Native bridge; log density, gradient, Hessian, metadata, constrain/unconstrain, batched draw transforms, fit-local RNG, data isolation, validation, and same-session serialization rebuilding | Retain the exact service pointer, fresh-session lifecycle coverage, tuple/ragged representations, and richer captured-message handling |
 | 4. Output correctness | Partial | Bracketed variable names, warmup/main draw and diagnostic separation, ADVI mean-row removal/name normalization, and initial Laplace/Pathfinder normalization | Complete every fit format/column contract, chain-preserving GQ, advanced fit extractors, and CmdStanR cross-contract checks |
@@ -1066,12 +1057,15 @@ fresh-R-session or tuple/ragged cases complete. The integrated package passed
 
 ## Recommended implementation sequence
 
-### Phase 1: define aligned contracts — partial
+### Phase 1: define aligned contracts — complete
 
 1. **Complete:** Add tests that encode target method signatures, class inheritance, default
    classes/formats, variable names, and failure behavior.
-2. **Partial:** Define bundled defaults and the normalized internal argument schema.
-3. **Not started:** Define the native run-result schema above.
+2. **Complete:** Define bundled defaults and the normalized internal argument schema.
+   Implemented in `R/normalize.R` with `.newstan_defaults` and per-service normalization
+   functions (`.newstan_normalize_sample`, `.newstan_normalize_optimize`, etc.).
+3. **Complete:** Define the native run-result schema above.
+   Implemented as `.newstan_run_result_schema()` in `R/normalize.R`.
 4. **Complete for the current surface:** Decide the exact treatment of file-oriented arguments and document every
    accepted-but-unsupported argument as an error, not a no-op.
 

@@ -9,7 +9,7 @@
 
 .newstan_seed <- function(seed) {
   if (is.null(seed)) {
-    seed <- stats::runif(1, 1, .Machine$integer.max)
+    seed <- as.integer(stats::runif(1, 1, .Machine$integer.max))
   }
   if (!is.numeric(seed) || length(seed) != 1L || is.na(seed) ||
       seed < 0 || seed > .Machine$integer.max || seed != floor(seed)) {
@@ -232,53 +232,54 @@ StanModel <- R6Class(
         stop("`metric_file` is not yet supported; supply `inv_metric` in memory.",
              call. = FALSE)
       }
-      if (!is.numeric(chains) || length(chains) != 1L || chains < 1 ||
-          chains != as.integer(chains)) {
-        stop("`chains` must be a positive integer.", call. = FALSE)
-      }
-      chains <- as.integer(chains)
-      if (length(chain_ids) != chains || anyNA(chain_ids) ||
-          anyDuplicated(chain_ids) || any(diff(as.integer(chain_ids)) != 1L)) {
-        stop("The current backend requires `chain_ids` to be unique consecutive integers.",
-             call. = FALSE)
-      }
-      parallel_chains <- as.integer(parallel_chains %||% 1L)
-      threads_per_chain <- as.integer(threads_per_chain %||% 1L)
-      if (parallel_chains < 1L || threads_per_chain < 1L) {
-        stop("`parallel_chains` and `threads_per_chain` must be positive.",
-             call. = FALSE)
-      }
-      data <- data %||% list()
-      seed <- .newstan_seed(seed)
-      init_value <- init %||% 2
+      args <- .newstan_normalize_sample(
+        data = data, seed = seed, refresh = refresh, init = init,
+        chains = chains, chain_ids = chain_ids,
+        parallel_chains = parallel_chains, threads_per_chain = threads_per_chain,
+        iter_warmup = iter_warmup, iter_sampling = iter_sampling,
+        save_warmup = save_warmup, thin = thin, max_treedepth = max_treedepth,
+        adapt_engaged = adapt_engaged, adapt_delta = adapt_delta,
+        step_size = step_size, metric = metric,
+        init_buffer = init_buffer, term_buffer = term_buffer, window = window,
+        fixed_param = fixed_param, show_messages = show_messages,
+        show_exceptions = show_exceptions,
+        engine = engine, int_time = int_time,
+        step_size_jitter = step_size_jitter,
+        adapt_gamma = adapt_gamma, adapt_kappa = adapt_kappa, adapt_t0 = adapt_t0
+      )
       call <- .newstan_elapsed(sampling(
-        stanmod = self, data = data,
-        num_warmup = iter_warmup %||% 1000L,
-        num_samples = iter_sampling %||% 1000L,
-        thin = thin %||% 1L, save_warmup = save_warmup,
-        num_chains = chains, id = as.integer(chain_ids[[1]]), seed = seed,
-        init = init_value,
-        algorithm = if (isTRUE(fixed_param)) "fixed_param" else "hmc",
-        engine = engine, metric = metric %||% "diag_e", inv_metric = inv_metric,
-        stepsize = step_size %||% 1, stepsize_jitter = step_size_jitter,
-        max_depth = max_treedepth %||% 10L, int_time = int_time,
-        delta = adapt_delta %||% 0.8, gamma = adapt_gamma,
-        kappa = adapt_kappa, t0 = adapt_t0,
-        init_buffer = init_buffer %||% 75L,
-        term_buffer = term_buffer %||% 50L, window = window %||% 25L,
-        adapt_engaged = adapt_engaged, refresh = refresh %||% 100L,
-        verbose = show_messages,
-        num_threads = parallel_chains * threads_per_chain
+        stanmod = self, data = args$data,
+        num_warmup = args$iter_warmup,
+        num_samples = args$iter_sampling,
+        thin = args$thin, save_warmup = args$save_warmup,
+        num_chains = args$chains, id = as.integer(args$chain_ids[[1]]),
+        seed = args$seed, init = args$init,
+        algorithm = if (args$fixed_param) "fixed_param" else "hmc",
+        engine = args$engine,
+        metric = args$metric, inv_metric = inv_metric,
+        stepsize = args$step_size, stepsize_jitter = args$step_size_jitter,
+        max_depth = args$max_treedepth, int_time = args$int_time,
+        delta = args$adapt_delta, gamma = args$adapt_gamma,
+        kappa = args$adapt_kappa, t0 = args$adapt_t0,
+        init_buffer = args$init_buffer,
+        term_buffer = args$term_buffer, window = args$window,
+        adapt_engaged = args$adapt_engaged,
+        refresh = args$refresh,
+        verbose = args$show_messages,
+        num_threads = args$parallel_chains * args$threads_per_chain
       ))
       StanMCMC$new(
-        payload = call$value, model = self, data = data, seed = seed,
-        init = init_value, elapsed = call$elapsed,
+        payload = call$value, model = self, data = args$data,
+        seed = args$seed, init = args$init, elapsed = call$elapsed,
         metadata = list(
-          method = "sample", chains = chains, chain_ids = as.integer(chain_ids),
-          parallel_chains = parallel_chains,
-          threads_per_chain = threads_per_chain, diagnostics = diagnostics,
-          save_metric = isTRUE(save_metric), show_exceptions = show_exceptions,
-          save_warmup = isTRUE(save_warmup)
+          method = "sample", chains = args$chains,
+          chain_ids = as.integer(args$chain_ids),
+          parallel_chains = args$parallel_chains,
+          threads_per_chain = args$threads_per_chain,
+          diagnostics = diagnostics,
+          save_metric = isTRUE(save_metric),
+          show_exceptions = args$show_exceptions,
+          save_warmup = args$save_warmup
         )
       )
     },
@@ -300,25 +301,35 @@ StanModel <- R6Class(
         stop("Jacobian-adjusted optimization is not yet supported by the native service.",
              call. = FALSE)
       }
-      data <- data %||% list()
-      seed <- .newstan_seed(seed)
-      init_value <- init %||% 2
+      args <- .newstan_normalize_optimize(
+        data = data, seed = seed, refresh = refresh, init = init,
+        threads = threads, algorithm = algorithm, jacobian = jacobian,
+        init_alpha = init_alpha, iter = iter,
+        tol_obj = tol_obj, tol_rel_obj = tol_rel_obj,
+        tol_grad = tol_grad, tol_rel_grad = tol_rel_grad,
+        tol_param = tol_param, history_size = history_size,
+        show_messages = show_messages, show_exceptions = show_exceptions
+      )
       call <- .newstan_elapsed(optimizing(
-        stanmod = self, data = data, algorithm = algorithm %||% "lbfgs",
-        iter = iter %||% 2000L, init_alpha = init_alpha %||% 0.001,
-        tol_obj = tol_obj %||% 1e-12, tol_rel_obj = tol_rel_obj %||% 1e4,
-        tol_grad = tol_grad %||% 1e-8, tol_rel_grad = tol_rel_grad %||% 1e7,
-        tol_param = tol_param %||% 1e-8,
-        history_size = history_size %||% 5L, seed = seed, init = init_value,
-        save_iterations = save_iterations, refresh = refresh %||% 100L,
-        verbose = show_messages, num_threads = as.integer(threads %||% 1L)
+        stanmod = self, data = args$data,
+        algorithm = args$algorithm,
+        iter = args$iter, init_alpha = args$init_alpha,
+        tol_obj = args$tol_obj, tol_rel_obj = args$tol_rel_obj,
+        tol_grad = args$tol_grad, tol_rel_grad = args$tol_rel_grad,
+        tol_param = args$tol_param,
+        history_size = args$history_size,
+        seed = args$seed, init = args$init,
+        save_iterations = save_iterations,
+        refresh = args$refresh,
+        verbose = args$show_messages,
+        num_threads = args$threads
       ))
       StanMLE$new(
-        payload = call$value, model = self, data = data, seed = seed,
-        init = init_value, elapsed = call$elapsed,
-        metadata = list(method = "optimize", jacobian = jacobian,
-                        threads = threads %||% 1L,
-                        show_exceptions = show_exceptions)
+        payload = call$value, model = self, data = args$data,
+        seed = args$seed, init = args$init, elapsed = call$elapsed,
+        metadata = list(method = "optimize", jacobian = args$jacobian,
+                        threads = args$threads,
+                        show_exceptions = args$show_exceptions)
       )
     },
 
@@ -333,34 +344,45 @@ StanModel <- R6Class(
     ) {
       .newstan_reject_backend_files(output_dir, output_basename, sig_figs,
                                     opencl_ids, save_cmdstan_config)
-      if (!is.null(mode) && !is.null(opt_args)) {
-        stop("`mode` and `opt_args` cannot both be supplied.", call. = FALSE)
-      }
-      data <- data %||% list()
-      seed <- .newstan_seed(seed)
+      args <- .newstan_normalize_laplace(
+        data = data, seed = seed, refresh = refresh, init = init,
+        threads = threads, mode = mode, opt_args = opt_args,
+        jacobian = jacobian, draws = draws, calculate_lp = calculate_lp,
+        show_messages = show_messages, show_exceptions = show_exceptions
+      )
       mode_fit <- NULL
-      if (is.null(mode)) {
-        args <- c(list(data = data, seed = seed, init = init,
-                       jacobian = jacobian, show_messages = show_messages,
-                       show_exceptions = show_exceptions), opt_args %||% list())
-        mode_fit <- do.call(self$optimize, args)
-        mode <- mode_fit$mle()
-      } else if (inherits(mode, "StanMLE")) {
-        mode_fit <- mode
-        mode <- mode$mle()
+      if (is.null(args$mode)) {
+        mode_fit <- do.call(
+          self$optimize,
+          c(list(data = args$data, seed = args$seed, init = args$init,
+                 jacobian = args$jacobian,
+                 show_messages = args$show_messages,
+                 show_exceptions = args$show_exceptions),
+            args$opt_args)
+        )
+        mode_val <- mode_fit$mle()
+      } else if (inherits(args$mode, "StanMLE")) {
+        mode_fit <- args$mode
+        mode_val <- mode_fit$mle()
+      } else {
+        # Numeric mode vector (newstan extension)
+        mode_val <- args$mode
       }
       call <- .newstan_elapsed(laplace(
-        stanmod = self, data = data, mode = mode, jacobian = jacobian,
-        draws = draws %||% 1000L, calculate_lp = calculate_lp, seed = seed,
-        refresh = refresh %||% 100L, verbose = show_messages,
-        num_threads = as.integer(threads %||% 1L)
+        stanmod = self, data = args$data, mode = mode_val,
+        jacobian = args$jacobian,
+        draws = args$draws, calculate_lp = args$calculate_lp,
+        seed = args$seed, refresh = args$refresh,
+        verbose = args$show_messages,
+        num_threads = args$threads
       ))
       StanLaplace$new(
-        payload = call$value, model = self, data = data, seed = seed,
-        init = init %||% 2, elapsed = call$elapsed, mode = mode_fit %||% mode,
-        metadata = list(method = "laplace", jacobian = jacobian,
-                        threads = threads %||% 1L,
-                        show_exceptions = show_exceptions)
+        payload = call$value, model = self, data = args$data,
+        seed = args$seed, init = args$init, elapsed = call$elapsed,
+        mode = mode_fit %||% args$mode,
+        metadata = list(method = "laplace", jacobian = args$jacobian,
+                        threads = args$threads,
+                        show_exceptions = args$show_exceptions)
       )
     },
 
@@ -380,24 +402,33 @@ StanModel <- R6Class(
       if (isTRUE(save_latent_dynamics)) {
         stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
       }
-      data <- data %||% list()
-      seed <- .newstan_seed(seed)
-      init_value <- init %||% 2
+      args <- .newstan_normalize_variational(
+        data = data, seed = seed, refresh = refresh, init = init,
+        threads = threads, algorithm = algorithm, iter = iter,
+        grad_samples = grad_samples, elbo_samples = elbo_samples,
+        tol_rel_obj = tol_rel_obj, eta = eta,
+        adapt_engaged = adapt_engaged, adapt_iter = adapt_iter,
+        eval_elbo = eval_elbo, draws = draws,
+        show_messages = show_messages, show_exceptions = show_exceptions
+      )
       call <- .newstan_elapsed(variational(
-        stanmod = self, data = data, algorithm = algorithm %||% "meanfield",
-        iter = iter %||% 10000L, grad_samples = grad_samples %||% 1L,
-        elbo_samples = elbo_samples %||% 100L,
-        tol_rel_obj = tol_rel_obj %||% 0.01, eta = eta %||% 1,
-        adapt_engaged = adapt_engaged %||% TRUE,
-        adapt_iter = adapt_iter %||% 50L, eval_elbo = eval_elbo %||% 100L,
-        output_samples = draws %||% 1000L, seed = seed, init = init_value,
-        verbose = show_messages, num_threads = as.integer(threads %||% 1L)
+        stanmod = self, data = args$data,
+        algorithm = args$algorithm,
+        iter = args$iter, grad_samples = args$grad_samples,
+        elbo_samples = args$elbo_samples,
+        tol_rel_obj = args$tol_rel_obj, eta = args$eta,
+        adapt_engaged = args$adapt_engaged,
+        adapt_iter = args$adapt_iter, eval_elbo = args$eval_elbo,
+        output_samples = args$draws,
+        seed = args$seed, init = args$init,
+        verbose = args$show_messages,
+        num_threads = args$threads
       ))
       StanVB$new(
-        payload = call$value, model = self, data = data, seed = seed,
-        init = init_value, elapsed = call$elapsed,
-        metadata = list(method = "variational", threads = threads %||% 1L,
-                        show_exceptions = show_exceptions)
+        payload = call$value, model = self, data = args$data,
+        seed = args$seed, init = args$init, elapsed = call$elapsed,
+        metadata = list(method = "variational", threads = args$threads,
+                        show_exceptions = args$show_exceptions)
       )
     },
 
@@ -415,32 +446,45 @@ StanModel <- R6Class(
     ) {
       .newstan_reject_backend_files(output_dir, output_basename, sig_figs,
                                     opencl_ids, save_cmdstan_config)
-      data <- data %||% list()
-      seed <- .newstan_seed(seed)
-      init_value <- init %||% 2
+      args <- .newstan_normalize_pathfinder(
+        data = data, seed = seed, refresh = refresh, init = init,
+        threads = threads, init_alpha = init_alpha,
+        tol_obj = tol_obj, tol_rel_obj = tol_rel_obj,
+        tol_grad = tol_grad, tol_rel_grad = tol_rel_grad,
+        tol_param = tol_param, history_size = history_size,
+        single_path_draws = single_path_draws, draws = draws,
+        num_paths = num_paths, max_lbfgs_iters = max_lbfgs_iters,
+        num_elbo_draws = num_elbo_draws,
+        save_single_paths = save_single_paths,
+        psis_resample = psis_resample, calculate_lp = calculate_lp,
+        show_messages = show_messages, show_exceptions = show_exceptions
+      )
       call <- .newstan_elapsed(pathfinder(
-        stanmod = self, data = data,
-        max_lbfgs_iters = max_lbfgs_iters %||% 1000L,
-        history_size = history_size %||% 5L,
-        num_elbo_draws = num_elbo_draws %||% 25L,
-        num_draws = single_path_draws %||% 1000L,
-        num_paths = num_paths, num_psis_draws = draws %||% 1000L,
-        seed = seed, init = init_value, init_alpha = init_alpha %||% 0.001,
-        tol_obj = tol_obj %||% 1e-12, tol_rel_obj = tol_rel_obj %||% 1e4,
-        tol_grad = tol_grad %||% 1e-8, tol_rel_grad = tol_rel_grad %||% 1e7,
-        tol_param = tol_param %||% 1e-8,
-        save_single_paths = save_single_paths %||% FALSE,
-        psis_resample = psis_resample %||% TRUE,
-        calculate_lp = calculate_lp %||% TRUE,
-        refresh = refresh %||% 100L, verbose = show_messages,
-        num_threads = as.integer(threads %||% 1L)
+        stanmod = self, data = args$data,
+        max_lbfgs_iters = args$max_lbfgs_iters,
+        history_size = args$history_size,
+        num_elbo_draws = args$num_elbo_draws,
+        num_draws = args$single_path_draws,
+        num_paths = args$num_paths,
+        num_psis_draws = args$draws,
+        seed = args$seed, init = args$init,
+        init_alpha = args$init_alpha,
+        tol_obj = args$tol_obj, tol_rel_obj = args$tol_rel_obj,
+        tol_grad = args$tol_grad, tol_rel_grad = args$tol_rel_grad,
+        tol_param = args$tol_param,
+        save_single_paths = args$save_single_paths,
+        psis_resample = args$psis_resample,
+        calculate_lp = args$calculate_lp,
+        refresh = args$refresh,
+        verbose = args$show_messages,
+        num_threads = args$threads
       ))
       StanPathfinder$new(
-        payload = call$value, model = self, data = data, seed = seed,
-        init = init_value, elapsed = call$elapsed,
-        metadata = list(method = "pathfinder", num_paths = num_paths,
-                        threads = threads %||% 1L,
-                        show_exceptions = show_exceptions)
+        payload = call$value, model = self, data = args$data,
+        seed = args$seed, init = args$init, elapsed = call$elapsed,
+        metadata = list(method = "pathfinder", num_paths = args$num_paths,
+                        threads = args$threads,
+                        show_exceptions = args$show_exceptions)
       )
     },
 
@@ -453,26 +497,27 @@ StanModel <- R6Class(
     ) {
       .newstan_reject_backend_files(output_dir, output_basename, sig_figs,
                                     opencl_ids, FALSE)
-      data <- data %||% list()
-      seed <- .newstan_seed(seed)
+      common <- .newstan_normalize_common(data = data, seed = seed)
+      parallel_chains <- as.integer(parallel_chains %||% 1L)
+      threads_per_chain <- as.integer(threads_per_chain %||% 1L)
       input <- if (inherits(fitted_params, "StanFit")) {
         fitted_params$draws(format = "draws_matrix")
       } else {
         fitted_params
       }
       call <- .newstan_elapsed(generated_quantities(
-        stanmod = self, data = data, fitted_params = input, seed = seed,
-        verbose = show_messages,
-        num_threads = as.integer((parallel_chains %||% 1L) *
-                                   (threads_per_chain %||% 1L))
+        stanmod = self, data = common$data, fitted_params = input,
+        seed = common$seed,
+        verbose = common$show_messages,
+        num_threads = parallel_chains * threads_per_chain
       ))
       StanGQ$new(
-        payload = call$value, model = self, data = data, seed = seed,
-        init = NULL, elapsed = call$elapsed,
+        payload = call$value, model = self, data = common$data,
+        seed = common$seed, init = NULL, elapsed = call$elapsed,
         metadata = list(method = "generate_quantities",
                         parallel_chains = parallel_chains,
-                        threads_per_chain = threads_per_chain %||% 1L,
-                        show_exceptions = show_exceptions)
+                        threads_per_chain = threads_per_chain,
+                        show_exceptions = common$show_exceptions)
       )
     },
 
@@ -482,19 +527,21 @@ StanModel <- R6Class(
       epsilon = NULL, error = NULL
     ) {
       .newstan_reject_backend_files(output_dir, output_basename)
-      data <- data %||% list()
-      seed <- .newstan_seed(seed)
-      init_value <- init %||% 2
+      args <- .newstan_normalize_diagnose(
+        data = data, seed = seed, init = init,
+        epsilon = epsilon, error = error
+      )
       call <- .newstan_elapsed(gradient_check(
-        stanmod = self, data = data, epsilon = epsilon %||% 1e-6,
-        error = error %||% 1e-6, seed = seed, init = init_value,
+        stanmod = self, data = args$data,
+        epsilon = args$epsilon, error = args$error,
+        seed = args$seed, init = args$init,
         verbose = TRUE, num_threads = 1L
       ))
       StanDiagnose$new(
-        payload = call$value, model = self, data = data, seed = seed,
-        init = init_value, elapsed = call$elapsed,
-        metadata = list(method = "diagnose", epsilon = epsilon %||% 1e-6,
-                        error = error %||% 1e-6)
+        payload = call$value, model = self, data = args$data,
+        seed = args$seed, init = args$init, elapsed = call$elapsed,
+        metadata = list(method = "diagnose", epsilon = args$epsilon,
+                        error = args$error)
       )
     }
   ),
