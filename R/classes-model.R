@@ -239,7 +239,7 @@ StanModel <- R6Class(
         iter_warmup = iter_warmup, iter_sampling = iter_sampling,
         save_warmup = save_warmup, thin = thin, max_treedepth = max_treedepth,
         adapt_engaged = adapt_engaged, adapt_delta = adapt_delta,
-        step_size = step_size, metric = metric,
+        step_size = step_size, metric = metric, inv_metric = inv_metric,
         init_buffer = init_buffer, term_buffer = term_buffer, window = window,
         fixed_param = fixed_param, show_messages = show_messages,
         show_exceptions = show_exceptions,
@@ -247,27 +247,7 @@ StanModel <- R6Class(
         step_size_jitter = step_size_jitter,
         adapt_gamma = adapt_gamma, adapt_kappa = adapt_kappa, adapt_t0 = adapt_t0
       )
-      call <- .newstan_elapsed(sampling(
-        stanmod = self, data = args$data,
-        num_warmup = args$iter_warmup,
-        num_samples = args$iter_sampling,
-        thin = args$thin, save_warmup = args$save_warmup,
-        num_chains = args$chains, id = as.integer(args$chain_ids[[1]]),
-        seed = args$seed, init = args$init,
-        algorithm = if (args$fixed_param) "fixed_param" else "hmc",
-        engine = args$engine,
-        metric = args$metric, inv_metric = inv_metric,
-        stepsize = args$step_size, stepsize_jitter = args$step_size_jitter,
-        max_depth = args$max_treedepth, int_time = args$int_time,
-        delta = args$adapt_delta, gamma = args$adapt_gamma,
-        kappa = args$adapt_kappa, t0 = args$adapt_t0,
-        init_buffer = args$init_buffer,
-        term_buffer = args$term_buffer, window = args$window,
-        adapt_engaged = args$adapt_engaged,
-        refresh = args$refresh,
-        verbose = args$show_messages,
-        num_threads = args$parallel_chains * args$threads_per_chain
-      ))
+      call <- .newstan_elapsed(.newstan_run_sampling(self, args))
       StanMCMC$new(
         payload = call$value, model = self, data = args$data,
         seed = args$seed, init = args$init, elapsed = call$elapsed,
@@ -310,20 +290,7 @@ StanModel <- R6Class(
         tol_param = tol_param, history_size = history_size,
         show_messages = show_messages, show_exceptions = show_exceptions
       )
-      call <- .newstan_elapsed(optimizing(
-        stanmod = self, data = args$data,
-        algorithm = args$algorithm,
-        iter = args$iter, init_alpha = args$init_alpha,
-        tol_obj = args$tol_obj, tol_rel_obj = args$tol_rel_obj,
-        tol_grad = args$tol_grad, tol_rel_grad = args$tol_rel_grad,
-        tol_param = args$tol_param,
-        history_size = args$history_size,
-        seed = args$seed, init = args$init,
-        save_iterations = save_iterations,
-        refresh = args$refresh,
-        verbose = args$show_messages,
-        num_threads = args$threads
-      ))
+      call <- .newstan_elapsed(.newstan_run_optimize(self, args))
       StanMLE$new(
         payload = call$value, model = self, data = args$data,
         seed = args$seed, init = args$init, elapsed = call$elapsed,
@@ -368,14 +335,7 @@ StanModel <- R6Class(
         # Numeric mode vector (newstan extension)
         mode_val <- args$mode
       }
-      call <- .newstan_elapsed(laplace(
-        stanmod = self, data = args$data, mode = mode_val,
-        jacobian = args$jacobian,
-        draws = args$draws, calculate_lp = args$calculate_lp,
-        seed = args$seed, refresh = args$refresh,
-        verbose = args$show_messages,
-        num_threads = args$threads
-      ))
+      call <- .newstan_elapsed(.newstan_run_laplace(self, args, mode_val))
       StanLaplace$new(
         payload = call$value, model = self, data = args$data,
         seed = args$seed, init = args$init, elapsed = call$elapsed,
@@ -411,19 +371,7 @@ StanModel <- R6Class(
         eval_elbo = eval_elbo, draws = draws,
         show_messages = show_messages, show_exceptions = show_exceptions
       )
-      call <- .newstan_elapsed(variational(
-        stanmod = self, data = args$data,
-        algorithm = args$algorithm,
-        iter = args$iter, grad_samples = args$grad_samples,
-        elbo_samples = args$elbo_samples,
-        tol_rel_obj = args$tol_rel_obj, eta = args$eta,
-        adapt_engaged = args$adapt_engaged,
-        adapt_iter = args$adapt_iter, eval_elbo = args$eval_elbo,
-        output_samples = args$draws,
-        seed = args$seed, init = args$init,
-        verbose = args$show_messages,
-        num_threads = args$threads
-      ))
+      call <- .newstan_elapsed(.newstan_run_variational(self, args))
       StanVB$new(
         payload = call$value, model = self, data = args$data,
         seed = args$seed, init = args$init, elapsed = call$elapsed,
@@ -459,26 +407,7 @@ StanModel <- R6Class(
         psis_resample = psis_resample, calculate_lp = calculate_lp,
         show_messages = show_messages, show_exceptions = show_exceptions
       )
-      call <- .newstan_elapsed(pathfinder(
-        stanmod = self, data = args$data,
-        max_lbfgs_iters = args$max_lbfgs_iters,
-        history_size = args$history_size,
-        num_elbo_draws = args$num_elbo_draws,
-        num_draws = args$single_path_draws,
-        num_paths = args$num_paths,
-        num_psis_draws = args$draws,
-        seed = args$seed, init = args$init,
-        init_alpha = args$init_alpha,
-        tol_obj = args$tol_obj, tol_rel_obj = args$tol_rel_obj,
-        tol_grad = args$tol_grad, tol_rel_grad = args$tol_rel_grad,
-        tol_param = args$tol_param,
-        save_single_paths = args$save_single_paths,
-        psis_resample = args$psis_resample,
-        calculate_lp = args$calculate_lp,
-        refresh = args$refresh,
-        verbose = args$show_messages,
-        num_threads = args$threads
-      ))
+      call <- .newstan_elapsed(.newstan_run_pathfinder(self, args))
       StanPathfinder$new(
         payload = call$value, model = self, data = args$data,
         seed = args$seed, init = args$init, elapsed = call$elapsed,
@@ -505,11 +434,8 @@ StanModel <- R6Class(
       } else {
         fitted_params
       }
-      call <- .newstan_elapsed(generated_quantities(
-        stanmod = self, data = common$data, fitted_params = input,
-        seed = common$seed,
-        verbose = common$show_messages,
-        num_threads = parallel_chains * threads_per_chain
+      call <- .newstan_elapsed(.newstan_run_generate_quantities(
+        self, common, input, parallel_chains, threads_per_chain
       ))
       StanGQ$new(
         payload = call$value, model = self, data = common$data,
@@ -531,12 +457,7 @@ StanModel <- R6Class(
         data = data, seed = seed, init = init,
         epsilon = epsilon, error = error
       )
-      call <- .newstan_elapsed(gradient_check(
-        stanmod = self, data = args$data,
-        epsilon = args$epsilon, error = args$error,
-        seed = args$seed, init = args$init,
-        verbose = TRUE, num_threads = 1L
-      ))
+      call <- .newstan_elapsed(.newstan_run_diagnose(self, args))
       StanDiagnose$new(
         payload = call$value, model = self, data = args$data,
         seed = args$seed, init = args$init, elapsed = call$elapsed,

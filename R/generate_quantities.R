@@ -1,38 +1,10 @@
-#' Generate quantities from posterior draws
-#'
-#' Takes pre-computed parameter draws and generates quantities of interest.
-#'
-#' @param stanmod A model environment returned by [stan_model()], compiled from
-#'   a Stan model with a generated quantities block.
-#' @param data Named list of data variables to pass to the model.
-#' @param fitted_params An object containing posterior draws of constrained parameters
-#'   (e.g., the draws produced by the internal sampling adapter).
-#' @param seed Random seed (NA = random).
-#' @param verbose Print progress (default: FALSE).
-#' @param num_threads Number of threads, or `-1` for all available threads.
-#' @param ... Unused.
-#'
-#' @return A list containing:
-#'   - `draws`: a `posterior::as_draws_df` object with generated quantity draws.
-#'   - `return_code`: integer status code.
-#'   - `args`: named list of generated quantities configuration arguments.
-#'     Large inputs are omitted.
-#'
-#' @noRd
-generated_quantities <- function(
-  stanmod,
-  data,
-  fitted_params,
-  seed = NA,
-  verbose = FALSE,
-  num_threads = -1,
-  ...
-) {
-  if (is.na(seed)) {
-    seed <- as.integer(stats::runif(1, 1, 2^31 - 1))
-  }
+# Internal helper for generated quantities.
+# Accepts pre-normalized common arguments and a fitted_params input.
 
-  model_instance <- new_model_instance(stanmod, data, seed)
+#' @noRd
+.newstan_run_generate_quantities <- function(stanmod, args, fitted_params,
+                                              parallel_chains, threads_per_chain) {
+  model_instance <- new_model_instance(stanmod, args$data, args$seed)
   pars <- stanmod$constrained_param_names(model_instance$model)
 
   # Convert draws to matrix (rows=samples, columns=parameters)
@@ -42,17 +14,17 @@ generated_quantities <- function(
     as.matrix(fitted_params)
   }
 
-  args <- list(
+  native_args <- list(
     method = "generate_quantities",
-    seed = as.integer(seed),
-    verbose = as.logical(verbose),
-    num_threads = as.integer(num_threads),
+    seed = as.integer(args$seed),
+    verbose = as.logical(args$show_messages),
+    num_threads = as.integer(parallel_chains * threads_per_chain),
     draws = draws_matrix
   )
 
   withr::with_envvar(
-    c(STAN_NUM_THREADS = num_threads),
-    result <- stanmod$run_model(model_instance$model, args)
+    c(STAN_NUM_THREADS = parallel_chains * threads_per_chain),
+    result <- stanmod$run_model(model_instance$model, native_args)
   )
 
   gqs_draws <- posterior::as_draws_df(result$samples)
@@ -60,6 +32,6 @@ generated_quantities <- function(
   structure(list(
     draws = gqs_draws,
     return_code = result$return_code,
-    args = service_args(args)
+    args = service_args(native_args)
   ), class = c("StanGeneratedQuantities", "StanService", "list"))
 }

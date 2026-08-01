@@ -1,56 +1,25 @@
-#' Check model gradients via finite differences
-#'
-#' Verifies that Stan's generated gradients match finite-difference approximations.
-#'
-#' @param stanmod A model environment returned by [stan_model()].
-#' @param data Named list of data variables to pass to the model.
-#' @param epsilon Finite difference step size (default: 1e-6).
-#' @param error Error threshold for comparison (default: 1e-6).
-#' @param seed Random seed (NA = random).
-#' @param id Chain ID for RNG advancement (default: 1).
-#' @param init Initialization radius, or named constrained initial values
-#'   (default: 2).
-#' @param verbose Print progress (default: TRUE).
-#' @param num_threads Number of threads, or `-1` for all available threads.
-#' @param ... Unused.
-#'
-#' @return An integer: number of parameters that failed the gradient test
-#'   (0 = all pass).
-#'
-#' @noRd
-gradient_check <- function(
-  stanmod,
-  data,
-  epsilon = 1e-6,
-  error = 1e-6,
-  seed = NA,
-  id = 1,
-  init = 2,
-  verbose = TRUE,
-  num_threads = -1,
-  ...
-) {
-  if (is.na(seed)) {
-    seed <- as.integer(stats::runif(1, 1, 2^31 - 1))
-  }
+# Internal helper for gradient diagnostics.
+# Accepts pre-normalized arguments from .newstan_normalize_diagnose().
 
-  args <- list(
+#' @noRd
+.newstan_run_diagnose <- function(stanmod, args) {
+  native_args <- list(
     method = "diagnose",
-    epsilon = as.double(epsilon),
-    error = as.double(error),
-    seed = as.integer(seed),
-    id = as.integer(id),
-    init_radius = init_radius(init),
-    verbose = as.logical(verbose),
-    num_threads = as.integer(num_threads),
-    init = normalize_init(init)
+    epsilon = as.double(args$epsilon),
+    error = as.double(args$error),
+    seed = as.integer(args$seed),
+    id = 1L,
+    init_radius = init_radius(args$init),
+    verbose = TRUE,
+    num_threads = 1L,
+    init = normalize_init(args$init)
   )
 
-  model_instance <- new_model_instance(stanmod, data, seed)
+  model_instance <- new_model_instance(stanmod, args$data, args$seed)
 
   withr::with_envvar(
-    c(STAN_NUM_THREADS = num_threads),
-    result <- stanmod$run_model(model_instance$model, args)
+    c(STAN_NUM_THREADS = 1),
+    result <- stanmod$run_model(model_instance$model, native_args)
   )
 
   n_failed <- as.integer(result$num_failed)

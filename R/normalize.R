@@ -140,7 +140,8 @@
   threads_per_chain = NULL, iter_warmup = NULL, iter_sampling = NULL,
   save_warmup = FALSE, thin = NULL, max_treedepth = NULL,
   adapt_engaged = TRUE, adapt_delta = NULL, step_size = NULL,
-  metric = NULL, init_buffer = NULL, term_buffer = NULL, window = NULL,
+  metric = NULL, inv_metric = NULL,
+  init_buffer = NULL, term_buffer = NULL, window = NULL,
   fixed_param = FALSE, show_messages = TRUE, show_exceptions = TRUE,
   engine = "nuts", int_time = 2 * pi, step_size_jitter = 0,
   adapt_gamma = 0.05, adapt_kappa = 0.75, adapt_t0 = 10
@@ -164,16 +165,50 @@
          call. = FALSE)
   }
 
-  if (!isTRUE(adapt_engaged) && !isTRUE(fixed_param) &&
-      .resolve_default(iter_warmup, def, "iter_warmup") == 0L) {
+  resolved_metric <- .resolve_default(metric, def, "metric")
+  resolved_adapt_engaged <- isTRUE(adapt_engaged)
+  resolved_fixed_param <- isTRUE(fixed_param)
+  resolved_engine <- .resolve_default(engine, def, "engine")
+  resolved_iter_warmup <- as.integer(.resolve_default(iter_warmup, def, "iter_warmup"))
+  resolved_iter_sampling <- as.integer(.resolve_default(iter_sampling, def, "iter_sampling"))
+  resolved_thin <- as.integer(.resolve_default(thin, def, "thin"))
+  resolved_save_warmup <- isTRUE(save_warmup)
+
+  if (resolved_iter_warmup < 0 || resolved_iter_sampling < 0) {
+    stop("num_warmup and num_samples must be non-negative.", call. = FALSE)
+  }
+  if (resolved_thin < 1L) {
+    stop("thin must be at least 1.", call. = FALSE)
+  }
+  # Calculate in double precision so adding two valid integer iteration counts
+  # cannot overflow to NA before the explicit R-size guard below.
+  num_saved_draws <- ceiling(as.double(resolved_iter_sampling) / as.double(resolved_thin))
+  if (resolved_save_warmup) {
+    num_saved_draws <- num_saved_draws +
+      ceiling(as.double(resolved_iter_warmup) / as.double(resolved_thin))
+  }
+  if (num_saved_draws > .Machine$integer.max) {
+    stop("Requested number of saved draws is too large.", call. = FALSE)
+  }
+
+  if (!resolved_adapt_engaged && !resolved_fixed_param &&
+      resolved_iter_warmup == 0L) {
     stop("`iter_warmup` must be > 0 when `adapt_engaged` is TRUE.",
          call. = FALSE)
   }
 
-  if (!isTRUE(fixed_param) && engine == "static" && chains > 1L) {
+  if (!resolved_fixed_param && resolved_engine == "static" && chains > 1L) {
     stop("Static HMC only supports a single chain. Set `chains` = 1.",
          call. = FALSE)
   }
+
+  # Normalize inv_metric: validate and wrap for native consumption
+  inv_metric <- .newstan_normalize_inv_metric(
+    inv_metric = inv_metric,
+    metric = resolved_metric,
+    adapt_engaged = resolved_adapt_engaged,
+    chains = chains
+  )
 
   list(
     data = data %||% list(),
@@ -184,28 +219,61 @@
     chain_ids = chain_ids,
     parallel_chains = parallel_chains,
     threads_per_chain = threads_per_chain,
-    iter_warmup = as.integer(.resolve_default(iter_warmup, def, "iter_warmup")),
-    iter_sampling = as.integer(.resolve_default(iter_sampling, def, "iter_sampling")),
-    save_warmup = isTRUE(save_warmup),
-    thin = as.integer(.resolve_default(thin, def, "thin")),
+    iter_warmup = resolved_iter_warmup,
+    iter_sampling = resolved_iter_sampling,
+    save_warmup = resolved_save_warmup,
+    thin = resolved_thin,
     max_treedepth = as.integer(.resolve_default(max_treedepth, def, "max_treedepth")),
-    adapt_engaged = isTRUE(adapt_engaged),
+    adapt_engaged = resolved_adapt_engaged,
     adapt_delta = .resolve_default(adapt_delta, def, "adapt_delta"),
     step_size = .resolve_default(step_size, def, "step_size"),
-    metric = .resolve_default(metric, def, "metric"),
+    metric = resolved_metric,
+    inv_metric = inv_metric,
     init_buffer = as.integer(.resolve_default(init_buffer, def, "init_buffer")),
     term_buffer = as.integer(.resolve_default(term_buffer, def, "term_buffer")),
     window = as.integer(.resolve_default(window, def, "window")),
-    fixed_param = isTRUE(fixed_param),
+    fixed_param = resolved_fixed_param,
     show_messages = isTRUE(show_messages),
     show_exceptions = isTRUE(show_exceptions),
-    engine = .resolve_default(engine, def, "engine"),
+    engine = resolved_engine,
     int_time = .resolve_default(int_time, def, "int_time"),
     step_size_jitter = .resolve_default(step_size_jitter, def, "step_size_jitter"),
     adapt_gamma = .resolve_default(adapt_gamma, def, "adapt_gamma"),
     adapt_kappa = .resolve_default(adapt_kappa, def, "adapt_kappa"),
     adapt_t0 = .resolve_default(adapt_t0, def, "adapt_t0")
   )
+}
+
+
+#' Validate and normalize inv_metric for sampling
+#'
+#' Wraps a single metric in a list (recycled across chains) or validates
+#' a per-chain list. Issues a warning if inv_metric is supplied with unit_e.
+#'
+#' @noRd
+.newstan_normalize_inv_metric <- function(inv_metric, metric, adapt_engaged, chains) {
+  if (is.null(inv_metric)) return(NULL)
+
+  if (metric == "unit_e") {
+    warning("inv_metric is ignored when metric = 'unit_e'", call. = FALSE)
+    return(NULL)
+  }
+
+  # Wrap single metric in list for recycling across chains
+  if (!is.list(inv_metric)) {
+    inv_metric <- list(inv_metric)
+  }
+
+  # Validate per-chain length
+  if (length(inv_metric) > 1L && length(inv_metric) != chains) {
+    stop(
+      "inv_metric must be a single metric or a list of length ",
+      chains, " (one per chain).",
+      call. = FALSE
+    )
+  }
+
+  inv_metric
 }
 
 
