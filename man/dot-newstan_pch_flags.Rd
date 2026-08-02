@@ -2,11 +2,52 @@
 % Please edit documentation in R/pch.R
 \name{.newstan_pch_flags}
 \alias{.newstan_pch_flags}
-\title{Return flags that make sourceCpp use a cached Stan PCH.}
+\title{Return flags that make sourceCpp use a cached model PCH.}
 \usage{
 .newstan_pch_flags(cppflags, verbose = FALSE, rebuild = FALSE)
 }
 \description{
-Return flags that make sourceCpp use a cached Stan PCH.
+Precompiles \code{newstan/model_pch.hpp} (\code{src/include/model_pch.hpp}, mirrored
+to the installed package as \code{inst/include/newstan/model_pch.hpp}), which
+transitively covers \code{stan/model/model_header.hpp}, \code{Rcpp.h}, and the
+newstan wrapper headers -- the full cold-compiled preamble of an assembled
+model translation unit (\code{inst/stan_model.cpp}).
+}
+\details{
+The entire resolved flag string is memoized for the life of the R
+session, keyed on \code{digest::digest(list(cppflags, rebuild = FALSE))} (the
+key always uses \code{rebuild = FALSE}: the memo represents the steady-state
+resolved flags, and \code{rebuild = TRUE} calls bypass the memo lookup
+entirely, then refresh the memo entry on success). On a memo hit,
+\code{file.exists()} is still checked for the associated PCH file before
+returning it -- the user could have cleared the cache dir mid-session --
+and a missing file falls through to full recomputation instead of
+returning stale flags. The \code{make}-based compiler probe this function runs
+is likewise memoized (single key: it depends only on the session-stable
+toolchain), while the actual PCH-build \code{make} invocation is not (it has
+real side effects -- writing the \code{.gch} file -- and is already gated by
+\code{file.exists(pch)} checks).
+
+The two compiler families use different discovery mechanisms:
+\itemize{
+\item clang: \verb{-include-pch <pch>} names the compiled \code{.gch}/\code{.pch} file
+directly, so it can live anywhere (here, the user cache dir) with an
+arbitrary name.
+\item GCC: only supports \verb{-include <file>}, which acts as if \verb{#include "<file>"} were the first line of the translation unit, and -- per
+\url{https://gcc.gnu.org/onlinedocs/gcc/Precompiled-Headers.html} -- GCC
+automatically substitutes \verb{<file>.gch} for \verb{<file>} "if suitable" when
+such a sibling file exists. Because \verb{<file>} here is the exact
+(absolute) path given to \code{-include}, not a path resolved by searching
+\code{-I} directories, this sibling lookup happens beside whatever path we
+pass -- so a symlink to the installed header placed inside the user
+cache dir, together with a \code{.gch} built beside that symlink, is
+sufficient. Older versions of this function instead relied on
+\emph{implicit} inclusion (the TU's own \verb{#include <stan/model/...>} line
+resolving via \code{-I} search order to a symlink overlay reproducing the
+installed include-tree layout, with a \code{.gch} hidden beside it there);
+\code{-include} supersedes that entirely, since GCC's sibling-\code{.gch} lookup
+only cares about the literal path handed to \code{-include}, not about how
+(or whether) anything on the include-search path resolves it.
+}
 }
 \keyword{internal}

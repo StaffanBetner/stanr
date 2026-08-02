@@ -7,6 +7,11 @@
 .newstan_dependency_cppflags()
 }
 \description{
-Compiler flags injected by sourceCpp's dependency attributes.
+Memoized for the life of the R session (single key, this function takes
+no arguments): the installed package versions and \code{RcppParallel::CxxFlags()}
+output are session-stable. \code{RcppParallel::CxxFlags()} is captured
+in-process (mirroring \code{RcppParallel::RcppParallelLibs()} in
+\code{.compile_stan_model_environment()}, R/stan_model.R) instead of shelling
+out to \code{Rscript}.
 }
 \keyword{internal}

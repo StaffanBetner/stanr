@@ -21,10 +21,9 @@ test_that("seed validation rejects an invalid seed", {
 })
 
 
-test_that("common normalization resolves NULL seed", {
-  args <- newstan:::.newstan_normalize_common()
+test_that("seed resolution resolves NULL seed", {
+  seed <- newstan:::.newstan_seed(NULL)
 
-  expect_true(is.integer(args$seed))
-  expect_true(args$seed >= 1 && args$seed <= .Machine$integer.max)
-  expect_equal(args$data, list())
+  expect_true(is.integer(seed))
+  expect_true(seed >= 1 && seed <= .Machine$integer.max)
 })

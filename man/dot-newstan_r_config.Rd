@@ -7,6 +7,8 @@
 .newstan_r_config(variable)
 }
 \description{
-Return the compiler configuration value used by R's build system.
+Memoized for the life of the R session: \verb{R CMD config <variable>} is
+session-stable, so the underlying subprocess only ever runs once per
+\code{variable}.
 }
 \keyword{internal}

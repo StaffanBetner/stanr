@@ -197,6 +197,84 @@ test_that("StanModel$variables() works with stan_file", {
   expect_named(vars$parameters, "theta")
 })
 
+test_that("StanModel resolves includes identically regardless of compile()/variables() order", {
+  # $compile() first, then $variables()
+  mod_compile_first <- stan_model(
+    stan_file = test_path("test-models/include_model.stan"),
+    include_paths = test_path("test-models/includes"),
+    compile = FALSE
+  )
+  mod_compile_first$compile()
+  vars_compile_first <- mod_compile_first$variables()
+
+  # $variables() first, then $compile()
+  mod_variables_first <- stan_model(
+    stan_file = test_path("test-models/include_model.stan"),
+    include_paths = test_path("test-models/includes"),
+    compile = FALSE
+  )
+  vars_variables_first <- mod_variables_first$variables()
+  mod_variables_first$compile()
+
+  expect_true(mod_compile_first$is_compiled())
+  expect_true(mod_variables_first$is_compiled())
+  expect_identical(vars_compile_first, vars_variables_first)
+  expect_named(vars_compile_first$data, "y")
+  expect_named(vars_compile_first$parameters, "mu")
+})
+
+test_that("StanModel caches resolved #include code between $compile() and $variables()", {
+  # `resolve_stan_includes()` is called both by our own caching wrapper
+  # (`resolved_code()`) and, redundantly but harmlessly, by `stanc()` /
+  # `model_variables()` themselves (they always call it, but hit the
+  # fast-path no-op return when there's nothing left to resolve -- see
+  # R/stanc.R). So the *total* call count isn't a reliable signal by itself;
+  # what matters is that no call after the first actually does resolution
+  # work, i.e. is ever invoked with code that still contains "#include".
+  real_resolve <- newstan:::resolve_stan_includes
+  work_call_count <- 0
+  total_call_count <- 0
+  testthat::local_mocked_bindings(
+    resolve_stan_includes = function(model_code, ...) {
+      total_call_count <<- total_call_count + 1
+      if (grepl("#include", model_code, fixed = TRUE)) {
+        work_call_count <<- work_call_count + 1
+      }
+      real_resolve(model_code, ...)
+    },
+    .package = "newstan"
+  )
+
+  mod <- stan_model(
+    stan_file = test_path("test-models/include_model.stan"),
+    include_paths = test_path("test-models/includes"),
+    compile = FALSE
+  )
+  expect_equal(total_call_count, 0)
+
+  mod$compile()
+  # The fixture's #include chain (include_model -> nested_helpers ->
+  # normal_helpers) requires resolving 2 levels of `#include` lines -- this
+  # is the only real resolution work performed across the model's whole
+  # lifetime.
+  expect_equal(work_call_count, 2)
+  expect_gt(total_call_count, 0)
+
+  vars <- mod$variables()
+  # $variables() reuses the cached resolved code from $compile(): no
+  # additional #include resolution work happens, whatever fast-path
+  # passthrough calls `model_variables()` makes internally.
+  expect_equal(work_call_count, 2)
+  expect_named(vars$parameters, "mu")
+
+  # Repeat calls to $variables() are already cached on their own (via
+  # `variables_`), independent of this change -- no more calls at all.
+  total_after_variables <- total_call_count
+  mod$variables()
+  expect_equal(total_call_count, total_after_variables)
+  expect_equal(work_call_count, 2)
+})
+
 test_that("StanModel$variables() works with external_cpp", {
   code <- paste(
     "functions { real external_mean(real x); }",

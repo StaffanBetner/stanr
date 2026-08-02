@@ -59,6 +59,14 @@ generated model code. Useful for defining custom functions.}
 }
 \value{
 A \code{\link{StanModel}} object.
+
+Compiled models are cached persistently on disk (keyed on a hash of the
+generated C++, so the cache is reused across R sessions as long as the
+Stan program, \code{include_paths}, \code{external_cpp}, and installed newstan/Stan
+versions are unchanged) under \code{getOption("newstan_cache_dir")}, which
+defaults to a subdirectory of \code{\link[tools:R_user_dir]{tools::R_user_dir()}}. Use
+\code{\link[=newstan_clear_cache]{newstan_clear_cache()}} to remove the cached models and precompiled
+headers.
 }
 \description{
 Create a new \code{\link{StanModel}} object from a Stan program file or
@@ -93,5 +101,5 @@ fit$summary()
 }
 \seealso{
 \code{\link{StanModel}}, \code{\link[=model-method-compile]{$compile()}},
-\code{\link[=model-method-sample]{$sample()}}
+\code{\link[=model-method-sample]{$sample()}}, \code{\link[=newstan_clear_cache]{newstan_clear_cache()}}
 }

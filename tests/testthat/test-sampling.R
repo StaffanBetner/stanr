@@ -528,3 +528,128 @@ test_that("sampling with an invalid engine errors before reaching C++", {
     "`engine` must be one of"
   )
 })
+
+# ---------------------------------------------------------------------------
+# $diagnostic_summary() method
+# ---------------------------------------------------------------------------
+
+test_that("diagnostic_summary() returns one row per chain with expected columns", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 3,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  summary_df <- result$diagnostic_summary()
+
+  expect_true(is.data.frame(summary_df))
+  expect_equal(
+    colnames(summary_df),
+    c("chain", "num_divergent", "num_max_treedepth")
+  )
+  expect_equal(nrow(summary_df), 3L)
+  expect_equal(summary_df$chain, 1:3)
+  expect_type(summary_df$num_divergent, "integer")
+  expect_type(summary_df$num_max_treedepth, "integer")
+
+  # Cross-check against the old whole-run-total behavior: summing the
+  # per-chain counts must equal counting divergences/treedepth hits across
+  # the combined draws_matrix (what the previous implementation returned).
+  diagnostics <- result$sampler_diagnostics(format = "draws_matrix")
+  expect_equal(
+    sum(summary_df$num_divergent),
+    sum(diagnostics[, "divergent__"] > 0)
+  )
+  expect_equal(
+    sum(summary_df$num_max_treedepth),
+    sum(diagnostics[, "treedepth__"] >= 10L)
+  )
+
+  # `sampler_diagnostics()` itself must be unaffected by this change.
+  expect_s3_class(result$sampler_diagnostics(), "draws_array")
+  expect_s3_class(
+    result$sampler_diagnostics(format = "draws_matrix"),
+    "draws_matrix"
+  )
+})
+
+test_that("diagnostic_summary() chain column reflects supplied chain_ids", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 20,
+    iter_sampling = 20,
+    chains = 2,
+    chain_ids = 5:6,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  summary_df <- result$diagnostic_summary()
+  expect_equal(summary_df$chain, 5:6)
+})
+
+test_that("diagnostic_summary() returns NA_integer_ per row for fixed_param runs", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 10,
+    iter_sampling = 20,
+    chains = 2,
+    fixed_param = TRUE,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  summary_df <- result$diagnostic_summary()
+  expect_equal(nrow(summary_df), 2L)
+  expect_true(all(is.na(summary_df$num_divergent)))
+  expect_true(all(is.na(summary_df$num_max_treedepth)))
+  expect_type(summary_df$num_divergent, "integer")
+  expect_type(summary_df$num_max_treedepth, "integer")
+})
+
+test_that("diagnostic_summary() counts per-chain divergences for a pathological model", {
+  funnel_code <- "
+    parameters {
+      real y;
+      vector[30] x;
+    }
+    model {
+      y ~ normal(0, 3);
+      x ~ normal(0, exp(y / 2));
+    }
+  "
+  mod <- stan_model(code = funnel_code, model_name = "funnel_diagnostic_summary")
+
+  # Neal's funnel with a short warmup and a low adapt_delta reliably
+  # triggers divergent transitions (verified across several seeds).
+  result <- mod$sample(
+    iter_warmup = 15,
+    iter_sampling = 200,
+    chains = 3,
+    adapt_delta = 0.6,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  summary_df <- result$diagnostic_summary()
+  expect_equal(nrow(summary_df), 3L)
+  # Neal's funnel reliably produces some divergences under default tuning;
+  # the point of this test is that divergences are actually counted (not
+  # just that the structural NA/zero cases work), not exactly how many.
+  expect_true(sum(summary_df$num_divergent) > 0)
+})

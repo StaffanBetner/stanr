@@ -347,3 +347,75 @@ test_that("serialized fits lazily rebuild data-bound model methods", {
     tolerance = 1e-10
   )
 })
+
+test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on a live fit", {
+  # A fresh (uncached) model/fit pair, so forcing a recompile here doesn't
+  # perturb the shared `.newstan_model_method_fit()` state used elsewhere in
+  # this file.
+  mod <- stan_model(
+    stan_file = test_path("test-models/model_methods.stan"),
+    quiet = TRUE
+  )
+  fit <- mod$optimize(
+    data = .newstan_model_method_data(),
+    seed = 2468,
+    init = list(theta = 0.5, beta = c(0.5, -0.5)),
+    iter = 50,
+    refresh = 0,
+    show_messages = FALSE,
+    show_exceptions = FALSE
+  )
+  upars <- c(0.2, -0.3, 0.4)
+  expected_lp <- fit$log_prob(upars)
+
+  # Directly recompile the fit's underlying model while the fit is still
+  # alive and holding a `model_ptr_` built against the *old* compiled
+  # artifact -- this is the "generation changed mid-session" path from
+  # `ensure_native()`, distinct from the readRDS/stale-XPtr path exercised
+  # above.
+  mod$compile(force_recompile = TRUE, quiet = TRUE)
+
+  expect_equal(fit$log_prob(upars), expected_lp, tolerance = 1e-10)
+})
+
+test_that("ensure_native()'s probe is invoked exactly once across N consecutive native calls", {
+  mod <- stan_model(
+    stan_file = test_path("test-models/model_methods.stan"),
+    quiet = TRUE
+  )
+  fit <- mod$optimize(
+    data = .newstan_model_method_data(),
+    seed = 2468,
+    init = list(theta = 0.5, beta = c(0.5, -0.5)),
+    iter = 50,
+    refresh = 0,
+    show_messages = FALSE,
+    show_exceptions = FALSE
+  )
+  upars <- c(0.2, -0.3, 0.4)
+
+  # `model_num_upars` is the native probe `ensure_native()` calls to check
+  # pointer validity. There's no package-level function to intercept with
+  # `local_mocked_bindings()` here (the probe is a closure pulled out of the
+  # model's private `compiled_env_`), so instrument the exact call site
+  # directly: wrap the real probe in a counting proxy and splice it into the
+  # model's private compiled environment, mirroring how `test-pch.R`'s
+  # ".newstan_system2 call count" test intercepts a seam to count
+  # invocations without relying on timing. This is on a fresh fit/model
+  # pair (never native-called before), so the first of the N calls below
+  # must take the one-time slow path.
+  model_private <- mod$.__enclos_env__$private
+  real_probe <- model_private$compiled_env_$model_num_upars
+  call_count <- 0
+  model_private$compiled_env_$model_num_upars <- function(...) {
+    call_count <<- call_count + 1
+    real_probe(...)
+  }
+  withr::defer(model_private$compiled_env_$model_num_upars <- real_probe)
+
+  for (i in 1:5) {
+    fit$log_prob(upars)
+  }
+
+  expect_equal(call_count, 1)
+})

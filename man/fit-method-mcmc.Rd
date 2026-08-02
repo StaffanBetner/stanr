@@ -14,8 +14,13 @@ metric, the matrix is always returned and \code{matrix = FALSE} is an error.}
 \item \verb{$sampler_diagnostics()} returns sampler diagnostics (e.g., \code{divergent__},
 \code{treedepth__}, \code{accept__}) as a posterior draws object.
 \item \verb{$num_chains()} returns the number of MCMC chains.
-\item \verb{$diagnostic_summary()} returns a data frame with counts of divergent
-transitions and max treedepth warnings.
+\item \verb{$diagnostic_summary()} returns a data frame with one row per chain and
+columns \code{chain} (the chain identifier), \code{num_divergent} (count of
+divergent transitions), and \code{num_max_treedepth} (count of iterations
+that hit the max treedepth) for that chain. Either count column is
+\code{NA_integer_} for every row if the corresponding diagnostic was not
+collected (e.g. \code{divergent__}/\code{treedepth__} are unavailable for the
+\code{static} engine, or are all-\code{NA} for \code{fixed_param} runs).
 \item \verb{$inv_metric()} returns a list (one element per chain) of the inverse
 mass matrix adapted during sampling. Errors if the fit was not sampled
 with adaptation.

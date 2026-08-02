@@ -2,11 +2,8 @@
 # method definitions attached via $set().
 private <- self <- NULL
 
-.onLoad <- function(libname, pkgname) {
-  assign("stanc_context", QuickJSR::JSContext$new(), envir = topenv())
-  stanc_context$source(system.file(
-    "stanc.js",
-    package = "newstan",
-    mustWork = TRUE
-  ))
-}
+# Package-local memo environment. Holds session-lifetime caches for values
+# that depend only on session-stable inputs (installed package versions,
+# toolchain configuration, etc.) -- never on anything that can change within
+# a session, such as file contents covered by the PCH fingerprint.
+.newstan_memo <- new.env(parent = emptyenv())

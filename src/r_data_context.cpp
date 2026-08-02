@@ -38,19 +38,16 @@ r_data_context::r_data_context(Rcpp::List list) {
     if (Rf_isInteger(value)) {
       Rcpp::IntegerVector input(value);
       std::vector<int> ints(input.size());
-      std::vector<double> reals(input.size());
       for (R_xlen_t j = 0; j < input.size(); ++j) {
         if (input[j] == NA_INTEGER) {
           Rcpp::stop("Integer variable '" + name + "' contains NA.");
         }
         ints[j] = input[j];
-        reals[j] = static_cast<double>(input[j]);
       }
-      values_.emplace(name, value_entry{std::move(reals), {},
+      values_.emplace(name, value_entry{{}, {},
                                         std::move(ints), std::move(dims)});
     } else if (Rf_isNumeric(value)) {
       Rcpp::NumericVector input(value);
-      std::vector<double> reals(input.begin(), input.end());
       std::vector<int> ints;
       ints.reserve(input.size());
       bool is_integer_valued = true;
@@ -64,14 +61,14 @@ r_data_context::r_data_context(Rcpp::List list) {
         }
         ints.push_back(static_cast<int>(element));
       }
-      values_.emplace(name,
-                      value_entry{std::move(reals),
-                                  {},
-                                  is_integer_valued
-                                      ? std::optional<std::vector<int>>(
-                                            std::move(ints))
-                                      : std::nullopt,
-                                  std::move(dims)});
+      if (is_integer_valued) {
+        values_.emplace(name, value_entry{{}, {}, std::move(ints),
+                                          std::move(dims)});
+      } else {
+        std::vector<double> reals(input.begin(), input.end());
+        values_.emplace(name, value_entry{std::move(reals), {}, std::nullopt,
+                                          std::move(dims)});
+      }
     } else if (Rf_isComplex(value)) {
       Rcpp::ComplexVector input(value);
       std::vector<std::complex<double>> complexes;
@@ -105,7 +102,12 @@ bool r_data_context::contains_r(const std::string& name) const {
 
 std::vector<double> r_data_context::vals_r(const std::string& name) const {
   const auto it = values_.find(name);
-  return it == values_.end() ? std::vector<double>() : it->second.reals;
+  if (it == values_.end()) return std::vector<double>();
+  if (it->second.ints) {
+    const auto& ints = *it->second.ints;
+    return std::vector<double>(ints.begin(), ints.end());
+  }
+  return it->second.reals;
 }
 
 std::vector<std::complex<double>> r_data_context::vals_c(

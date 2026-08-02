@@ -1,3 +1,20 @@
+#' Return the (lazily created) QuickJSR context hosting `stanc.js`.
+#'
+#' Sourcing `stanc.js` is expensive (a 3.1 MB script) and is only needed by
+#' sessions that actually call into stanc, so the context is created on first
+#' use rather than at package load, then memoized for the life of the
+#' session.
+#'
+#' @keywords internal
+stanc_ctx <- function() {
+  if (is.null(.newstan_memo$stanc_context)) {
+    ctx <- QuickJSR::JSContext$new()
+    ctx$source(system.file("stanc.js", package = "newstan", mustWork = TRUE))
+    .newstan_memo$stanc_context <- ctx
+  }
+  .newstan_memo$stanc_context
+}
+
 #' Resolve Stan `#include` directives
 #'
 #' @param model_code A Stan program as a single string.
@@ -13,64 +30,76 @@ resolve_stan_includes <- function(
 ) {
   lines <- strsplit(model_code, "\n", fixed = TRUE)[[1]]
 
-  resolved_lines <- vapply(
-    lines,
-    function(line) {
-      match <- regexec(
-        "^[[:space:]]*#include[[:space:]]+(.+?)[[:space:]]*$",
-        line,
-        perl = TRUE
+  candidates <- grepl("#include", lines, fixed = TRUE)
+  if (!any(candidates)) {
+    return(model_code)
+  }
+
+  resolve_line <- function(line) {
+    match <- regexec(
+      "^[[:space:]]*#include[[:space:]]+(.+?)[[:space:]]*$",
+      line,
+      perl = TRUE
+    )
+    parts <- regmatches(line, match)[[1]]
+    if (length(parts) == 0) {
+      return(line)
+    }
+
+    include_name <- trimws(sub("[[:space:]]*//.*$", "", parts[2]))
+    include_name <- sub('^"([^"]+)"$', "\\1", include_name)
+    include_name <- sub("^<([^>]+)>$", "\\1", include_name)
+    if (include_name == "" || grepl("[[:space:]]", include_name)) {
+      return(line)
+    }
+
+    include_candidates <- file.path(include_directories, include_name)
+    match_index <- which(
+      file.exists(include_candidates) & !dir.exists(include_candidates)
+    )[1]
+    if (is.na(match_index)) {
+      searched <- if (length(include_directories) == 0) {
+        "no include directories"
+      } else {
+        paste(shQuote(include_directories), collapse = ", ")
+      }
+      stop(
+        "Could not find Stan include file '",
+        include_name,
+        "'. Searched ",
+        searched,
+        ".",
+        call. = FALSE
       )
-      parts <- regmatches(line, match)[[1]]
-      if (length(parts) == 0) {
-        return(line)
-      }
+    }
 
-      include_name <- trimws(sub("[[:space:]]*//.*$", "", parts[2]))
-      include_name <- sub('^"([^"]+)"$', "\\1", include_name)
-      include_name <- sub("^<([^>]+)>$", "\\1", include_name)
-      if (include_name == "" || grepl("[[:space:]]", include_name)) {
-        return(line)
-      }
-
-      candidates <- file.path(include_directories, include_name)
-      match_index <- which(file.exists(candidates) & !dir.exists(candidates))[1]
-      if (is.na(match_index)) {
-        searched <- if (length(include_directories) == 0) {
-          "no include directories"
-        } else {
-          paste(shQuote(include_directories), collapse = ", ")
-        }
-        stop(
-          "Could not find Stan include file '",
-          include_name,
-          "'. Searched ",
-          searched,
-          ".",
-          call. = FALSE
-        )
-      }
-
-      include_path <- normalizePath(candidates[match_index], mustWork = TRUE)
-      if (include_path %in% include_stack) {
-        stop(
-          "Circular Stan include detected: ",
-          paste(c(include_stack, include_path), collapse = " -> "),
-          call. = FALSE
-        )
-      }
-
-      resolve_stan_includes(
-        paste(readLines(include_path, warn = FALSE), collapse = "\n"),
-        include_directories = include_directories,
-        include_stack = c(include_stack, include_path)
+    include_path <- normalizePath(
+      include_candidates[match_index],
+      mustWork = TRUE
+    )
+    if (include_path %in% include_stack) {
+      stop(
+        "Circular Stan include detected: ",
+        paste(c(include_stack, include_path), collapse = " -> "),
+        call. = FALSE
       )
-    },
+    }
+
+    resolve_stan_includes(
+      paste(readLines(include_path, warn = FALSE), collapse = "\n"),
+      include_directories = include_directories,
+      include_stack = c(include_stack, include_path)
+    )
+  }
+
+  lines[candidates] <- vapply(
+    lines[candidates],
+    resolve_line,
     character(1),
     USE.NAMES = FALSE
   )
 
-  paste(resolved_lines, collapse = "\n")
+  paste(lines, collapse = "\n")
 }
 
 #' Compile Stan code to C++
@@ -179,7 +208,7 @@ stanc <- function(
     if (warn_uninitialized) "warn-uninitialized"
   )
 
-  res <- stanc_context$call(
+  res <- stanc_ctx()$call(
     "stanc",
     "model",
     model_code,
@@ -225,7 +254,7 @@ model_variables <- function(
     if (allow_undefined) "allow-undefined"
   )
 
-  res <- stanc_context$call(
+  res <- stanc_ctx()$call(
     "stanc",
     "model",
     model_code,

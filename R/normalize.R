@@ -1,32 +1,9 @@
 # Shared normalization layer for CmdStanR-aligned API.
 #
-# This module holds the normalized internal argument schema shared across
-# StanModel service methods. Bundled Stan defaults live directly in each
-# service method's own signature.
-
-#' Validate and resolve common arguments shared across services
-#'
-#' @noRd
-.newstan_normalize_common <- function(
-  data = list(),
-  seed = NULL,
-  refresh = 100L,
-  init = 2,
-  show_messages = TRUE,
-  show_exceptions = TRUE
-) {
-  seed <- .newstan_seed(seed)
-
-  list(
-    data = data,
-    seed = seed,
-    refresh = as.integer(refresh),
-    init = init,
-    show_messages = isTRUE(show_messages),
-    show_exceptions = isTRUE(show_exceptions)
-  )
-}
-
+# This module holds normalization helpers shared across StanModel service
+# methods that aren't part of the single shared execution path in
+# `.newstan_run_service()` (see R/classes-model.R). Bundled Stan defaults
+# live directly in each service method's own signature.
 
 #' Validate and resolve chain count/IDs for sampling
 #'

@@ -51,35 +51,78 @@
   }
 }
 
-.newstan_elapsed <- function(expr) {
+# Shared execution path for all StanModel service methods: seed resolution,
+# native model construction, service dispatch, timing, and payload assembly.
+.newstan_run_service <- function(
+  self,
+  data,
+  seed,
+  init = NULL,               # NULL when native_args don't need init (laplace, generate_quantities)
+  native_args_fn,            # function(seed, resolved_init, model) -> list
+  payload_fn,                # function(result) -> list of method-specific fields
+  classes                    # e.g. c("StanSample", "StanService", "list"); NULL leaves payload unclassed
+) {
   started <- proc.time()[["elapsed"]]
-  value <- force(expr)
-  list(value = value, elapsed = unname(proc.time()[["elapsed"]] - started))
+  seed <- .newstan_seed(seed)
+  resolved_init <- if (!is.null(init)) resolve_init(init)
+  model <- self$new_model(data, seed)
+  native_args <- native_args_fn(seed, resolved_init, model)
+  result <- self$run_model(model, native_args)
+  payload <- structure(
+    c(
+      payload_fn(result),
+      list(
+        return_code = result$return_code,
+        args = service_args(native_args),
+        output = result$output %||% character(),
+        model_ptr = model
+      )
+    ),
+    class = classes
+  )
+  list(
+    payload = payload,
+    seed = seed,
+    elapsed = unname(proc.time()[["elapsed"]] - started)
+  )
 }
 
+#' Return the bundled Stan library version.
+#'
+#' Memoized for the life of the R session (single key, this function takes
+#' no arguments): the bundled header cannot change within a session.
+#'
+#' @keywords internal
 .newstan_stan_version <- function() {
+  cached <- .newstan_memo$stan_version
+  if (!is.null(cached)) {
+    return(cached)
+  }
   header <- system.file("include", "stan", "version.hpp", package = "newstan")
-  if (!nzchar(header) || !file.exists(header)) {
-    return(NA_character_)
-  }
-  lines <- readLines(header, warn = FALSE)
-  value <- function(macro) {
-    line <- grep(
-      paste0("^#define[[:space:]]+", macro, "[[:space:]]+"),
-      lines,
-      value = TRUE
-    )
-    if (!length(line)) {
-      return(NA_character_)
+  value <- if (!nzchar(header) || !file.exists(header)) {
+    NA_character_
+  } else {
+    lines <- readLines(header, warn = FALSE)
+    macro_value <- function(macro) {
+      line <- grep(
+        paste0("^#define[[:space:]]+", macro, "[[:space:]]+"),
+        lines,
+        value = TRUE
+      )
+      if (!length(line)) {
+        return(NA_character_)
+      }
+      sub(paste0("^#define[[:space:]]+", macro, "[[:space:]]+"), "", line[[1]])
     }
-    sub(paste0("^#define[[:space:]]+", macro, "[[:space:]]+"), "", line[[1]])
+    paste(
+      macro_value("STAN_MAJOR"),
+      macro_value("STAN_MINOR"),
+      macro_value("STAN_PATCH"),
+      sep = "."
+    )
   }
-  paste(
-    value("STAN_MAJOR"),
-    value("STAN_MINOR"),
-    value("STAN_PATCH"),
-    sep = "."
-  )
+  .newstan_memo$stan_version <- value
+  value
 }
 
 # StanModel class definition ---------------------------------------------------
@@ -153,7 +196,7 @@ StanModel <- R6Class(
       user_header = NULL,
       cpp_options = list(),
       stanc_options = list(),
-      force_recompile = FALSE,
+      force_recompile = getOption("newstan_force_recompile", FALSE),
       precompiled_headers = TRUE,
       quiet = TRUE,
       external_cpp = NULL
@@ -257,12 +300,28 @@ StanModel <- R6Class(
     quiet_ = TRUE,
     external_cpp_ = NULL,
     compiled_env_ = NULL,
+    compile_generation_ = 0L,
     variables_ = NULL,
+    resolved_code_ = NULL,
     ensure_compiled = function() {
       if (is.null(private$compiled_env_)) {
         self$compile()
       }
       invisible(NULL)
+    },
+    # `code_` is immutable after `initialize()` (never reassigned), so this
+    # needs no invalidation logic: once resolved, it is valid for the
+    # object's whole lifetime. Shared between `$compile()` and `$variables()`
+    # so `#include` resolution -- a recursive file-system walk -- happens at
+    # most once per model, however many times either method is called.
+    resolved_code = function() {
+      if (is.null(private$resolved_code_)) {
+        private$resolved_code_ <- resolve_stan_includes(
+          private$code_,
+          private$include_paths_
+        )
+      }
+      private$resolved_code_
     }
   ),
   cloneable = FALSE
@@ -338,6 +397,9 @@ StanModel$set("public", "stan_version", stan_model_stan_version)
 stan_model_is_compiled <- function() !is.null(private$compiled_env_)
 StanModel$set("public", "is_compiled", stan_model_is_compiled)
 
+stan_model_compile_generation <- function() private$compile_generation_
+StanModel$set("public", "compile_generation", stan_model_compile_generation)
+
 stan_model_cpp_options <- function() private$cpp_options_
 StanModel$set("public", "cpp_options", stan_model_cpp_options)
 
@@ -397,8 +459,8 @@ NULL
 stan_model_variables <- function() {
   if (is.null(private$variables_)) {
     private$variables_ <- model_variables(
-      model_code = private$code_,
-      include_directories = private$include_paths_,
+      model_code = private$resolved_code(),
+      include_directories = character(),
       allow_undefined = length(private$external_cpp_) > 0
     )
   }
@@ -437,10 +499,16 @@ stan_model_compile <- function(
 ) {
   force_recompile <- .newstan_flag(force_recompile, "force_recompile")
   quiet <- .newstan_flag(quiet, "quiet")
+  # Incremented unconditionally, before compilation runs, so the generation
+  # always reflects "a compile was attempted" -- fits use this (via
+  # `$compile_generation()`) to know whether their cached native pointer
+  # might now be stale, even if `.compile_stan_model_environment()` below
+  # throws partway through.
+  private$compile_generation_ <- private$compile_generation_ + 1L
   private$compiled_env_ <- .compile_stan_model_environment(
-    code = private$code_,
+    code = private$resolved_code(),
     model_name = private$model_name_,
-    include_directories = private$include_paths_,
+    include_directories = character(),
     external_cpp = private$external_cpp_,
     verbose = !quiet,
     precompiled_headers = private$precompiled_headers_,
@@ -610,30 +678,21 @@ stan_model_sample <- function(
       call. = FALSE
     )
   }
+  inv_metric <- .newstan_normalize_inv_metric(
+    inv_metric = inv_metric,
+    metric = metric,
+    chains = chains
+  )
+  refresh <- as.integer(refresh)
 
-  call <- .newstan_elapsed({
-    common <- .newstan_normalize_common(
-      data = data,
-      seed = seed,
-      refresh = refresh,
-      init = init,
-      show_messages = show_messages,
-      show_exceptions = show_exceptions
-    )
-    inv_metric <- .newstan_normalize_inv_metric(
-      inv_metric = inv_metric,
-      metric = metric,
-      chains = chains
-    )
-    resolved_init <- resolve_init(common$init)
-
-    native_args <- list(
+  native_args_fn <- function(seed, resolved_init, model) {
+    list(
       method = "sample",
       algorithm = if (fixed_param) "fixed_param" else "hmc",
       engine = if (fixed_param) "nuts" else engine,
       metric = metric,
       adapt_engaged = as.logical(adapt_engaged),
-      seed = as.integer(common$seed),
+      seed = as.integer(seed),
       id = as.integer(chain_ids[[1]]),
       num_chains = as.integer(chains),
       init_radius = resolved_init$radius,
@@ -641,7 +700,7 @@ stan_model_sample <- function(
       num_samples = iter_sampling,
       thin = thin,
       save_warmup = as.logical(save_warmup),
-      refresh = as.integer(common$refresh),
+      refresh = refresh,
       stepsize = as.double(step_size),
       stepsize_jitter = as.double(step_size_jitter),
       max_depth = as.integer(max_treedepth),
@@ -656,26 +715,15 @@ stan_model_sample <- function(
       init = resolved_init$values,
       inv_metric = inv_metric,
       inv_metric_na = is.null(inv_metric),
-      verbose = as.logical(common$show_messages),
-      show_exceptions = as.logical(common$show_exceptions),
+      verbose = as.logical(show_messages),
+      show_exceptions = as.logical(show_exceptions),
       num_threads = num_threads
     )
+  }
 
-    model <- self$new_model(common$data, common$seed)
-    result <- self$run_model(model, native_args)
-
+  payload_fn <- function(result) {
     if (result$return_code != 0) {
-      structure(
-        list(
-          draws = NULL,
-          diagnostics = NULL,
-          return_code = result$return_code,
-          args = service_args(native_args),
-          output = result$output %||% character(),
-          model_ptr = model
-        ),
-        class = c("StanSample", "StanService", "list")
-      )
+      list(draws = NULL, diagnostics = NULL)
     } else {
       draw_names <- colnames(result$samples)
       if (!fixed_param && engine == "static") {
@@ -702,43 +750,44 @@ stan_model_sample <- function(
           "divergent__" = NA,
           "energy__" = NA
         )
+        draws <- posterior::as_draws_df(result$samples[, par_vars, drop = FALSE])
       } else {
-        draws <- posterior::as_draws_df(result$samples)
-        diagnostics <- posterior::subset_draws(draws, variable = diagnostic_vars)
+        all_draws <- posterior::as_draws_df(result$samples)
+        diagnostics <- posterior::subset_draws(all_draws, variable = diagnostic_vars)
+        draws <- posterior::subset_draws(all_draws, par_vars)
       }
 
-      structure(
-        list(
-          draws = if (fixed_param) {
-            posterior::as_draws_df(result$samples[, par_vars, drop = FALSE])
-          } else {
-            posterior::subset_draws(draws, par_vars)
-          },
-          diagnostics = diagnostics,
-          return_code = result$return_code,
-          args = service_args(native_args),
-          inv_metric = result$inv_metric,
-          step_size = result$step_size,
-          output = result$output %||% character(),
-          model_ptr = model
-        ),
-        class = c("StanSample", "StanService", "list")
+      list(
+        draws = draws,
+        diagnostics = diagnostics,
+        inv_metric = result$inv_metric,
+        step_size = result$step_size
       )
     }
-  })
+  }
+
+  res <- .newstan_run_service(
+    self = self,
+    data = data,
+    seed = seed,
+    init = init,
+    native_args_fn = native_args_fn,
+    payload_fn = payload_fn,
+    classes = c("StanSample", "StanService", "list")
+  )
 
   StanMCMC$new(
-    payload = call$value,
+    payload = res$payload,
     model = self,
     data = data,
-    seed = call$value$args$seed,
+    seed = res$seed,
     init = init,
-    elapsed = call$elapsed,
+    elapsed = res$elapsed,
     metadata = list(
       method = "sample",
       chains = ids$chains,
       chain_ids = ids$chain_ids,
-      num_threads = as.integer(num_threads %||% 1L),
+      num_threads = num_threads,
       show_exceptions = show_exceptions,
       save_warmup = save_warmup
     )
@@ -819,23 +868,14 @@ stan_model_optimize <- function(
     )
   }
 
-  call <- .newstan_elapsed({
-    common <- .newstan_normalize_common(
-      data = data,
-      seed = seed,
-      refresh = refresh,
-      init = init,
-      show_messages = show_messages,
-      show_exceptions = show_exceptions
-    )
-    threads <- as.integer(threads %||% 1L)
+  threads <- as.integer(threads %||% 1L)
+  refresh <- as.integer(refresh)
 
-    resolved_init <- resolve_init(common$init)
-
-    native_args <- list(
+  native_args_fn <- function(seed, resolved_init, model) {
+    list(
       method = "optimize",
       algorithm = algorithm,
-      seed = as.integer(common$seed),
+      seed = as.integer(seed),
       id = 1L,
       init_radius = resolved_init$radius,
       iter = as.integer(iter),
@@ -847,16 +887,15 @@ stan_model_optimize <- function(
       tol_param = as.double(tol_param),
       history_size = as.integer(history_size),
       save_iterations = FALSE,
-      refresh = as.integer(common$refresh),
-      verbose = as.logical(common$show_messages),
-      show_exceptions = as.logical(common$show_exceptions),
+      refresh = refresh,
+      verbose = as.logical(show_messages),
+      show_exceptions = as.logical(show_exceptions),
       num_threads = threads,
       init = resolved_init$values
     )
+  }
 
-    model <- self$new_model(common$data, common$seed)
-    result <- self$run_model(model, native_args)
-
+  payload_fn <- function(result) {
     # Extract parameter values from last row of par matrix
     par_mat <- result$par
     par_vec <- if (is.matrix(par_mat) && nrow(par_mat) > 0) {
@@ -864,31 +903,30 @@ stan_model_optimize <- function(
     } else {
       numeric(0)
     }
+    list(par = par_vec, value = result$value)
+  }
 
-    structure(
-      list(
-        par = par_vec,
-        value = result$value,
-        return_code = result$return_code,
-        args = service_args(native_args),
-        output = result$output %||% character(),
-        model_ptr = model
-      ),
-      class = c("StanOptimize", "StanService", "list")
-    )
-  })
+  res <- .newstan_run_service(
+    self = self,
+    data = data,
+    seed = seed,
+    init = init,
+    native_args_fn = native_args_fn,
+    payload_fn = payload_fn,
+    classes = c("StanOptimize", "StanService", "list")
+  )
 
   StanMLE$new(
-    payload = call$value,
+    payload = res$payload,
     model = self,
     data = data,
-    seed = call$value$args$seed,
+    seed = res$seed,
     init = init,
-    elapsed = call$elapsed,
+    elapsed = res$elapsed,
     metadata = list(
       method = "optimize",
       jacobian = jacobian,
-      threads = as.integer(threads %||% 1L),
+      threads = threads,
       show_exceptions = show_exceptions
     )
   )
@@ -987,74 +1025,69 @@ stan_model_laplace <- function(
     mode_val <- mode
   }
 
-  call <- .newstan_elapsed({
-    common <- .newstan_normalize_common(
-      data = resolved_data,
-      seed = resolved_seed,
-      refresh = refresh,
-      init = resolved_init,
-      show_messages = show_messages,
-      show_exceptions = show_exceptions
+  threads <- as.integer(threads %||% 1L)
+  refresh <- as.integer(refresh)
+
+  # Extract constrained parameter vector from mode result if needed
+  if (is.list(mode_val) && !is.null(mode_val$par)) {
+    mode_val <- mode_val$par
+  }
+  if (!is.numeric(mode_val) || is.null(names(mode_val))) {
+    stop(
+      "mode must be a named numeric vector or an optimization result.",
+      call. = FALSE
     )
-    threads <- as.integer(threads %||% 1L)
+  }
 
-    # Extract constrained parameter vector from mode result if needed
-    if (is.list(mode_val) && !is.null(mode_val$par)) {
-      mode_val <- mode_val$par
-    }
-    if (!is.numeric(mode_val) || is.null(names(mode_val))) {
-      stop(
-        "mode must be a named numeric vector or an optimization result.",
-        call. = FALSE
-      )
-    }
-
-    model <- self$new_model(common$data, common$seed)
+  native_args_fn <- function(seed, resolved_init, model) {
     pars <- self$constrained_param_names(model)
-    mode_val <- mode_val[pars]
+    mode_val <- mode_val[.newstan_bracket_names(pars)]
     if (anyNA(mode_val)) {
       stop("mode must contain every constrained model parameter.", call. = FALSE)
     }
-
-    native_args <- list(
+    list(
       method = "laplace",
       mode = as.double(mode_val),
       jacobian = as.logical(jacobian),
       draws = as.integer(draws),
       calculate_lp = as.logical(calculate_lp),
-      seed = as.integer(common$seed),
-      refresh = as.integer(common$refresh),
-      verbose = as.logical(common$show_messages),
-      show_exceptions = as.logical(common$show_exceptions),
+      seed = as.integer(seed),
+      refresh = refresh,
+      verbose = as.logical(show_messages),
+      show_exceptions = as.logical(show_exceptions),
       num_threads = threads
     )
+  }
 
-    result <- self$run_model(model, native_args)
+  payload_fn <- function(result) {
+    list(draws = posterior::as_draws_df(result$draws))
+  }
 
-    structure(
-      list(
-        draws = posterior::as_draws_df(result$draws),
-        return_code = result$return_code,
-        args = service_args(native_args),
-        output = result$output %||% character(),
-        model_ptr = model
-      ),
-      class = c("StanLaplace", "StanService", "list")
-    )
-  })
+  # `init` is not part of laplace's native_args (the Laplace approximation is
+  # centered at `mode`, not resolved via init), so no `resolve_init()` call is
+  # made here -- pass init = NULL to the shared runner to preserve that.
+  res <- .newstan_run_service(
+    self = self,
+    data = resolved_data,
+    seed = resolved_seed,
+    init = NULL,
+    native_args_fn = native_args_fn,
+    payload_fn = payload_fn,
+    classes = c("StanLaplace", "StanService", "list")
+  )
 
   StanLaplace$new(
-    payload = call$value,
+    payload = res$payload,
     model = self,
     data = resolved_data,
     seed = resolved_seed,
     init = resolved_init,
-    elapsed = call$elapsed,
+    elapsed = res$elapsed,
     mode = mode_fit %||% mode,
     metadata = list(
       method = "laplace",
       jacobian = jacobian,
-      threads = as.integer(threads %||% 1L),
+      threads = threads,
       show_exceptions = show_exceptions
     )
   )
@@ -1134,23 +1167,14 @@ stan_model_variational <- function(
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
   }
 
-  call <- .newstan_elapsed({
-    common <- .newstan_normalize_common(
-      data = data,
-      seed = seed,
-      refresh = refresh,
-      init = init,
-      show_messages = show_messages,
-      show_exceptions = show_exceptions
-    )
-    threads <- as.integer(threads %||% 1L)
+  threads <- as.integer(threads %||% 1L)
+  refresh <- as.integer(refresh)
 
-    resolved_init <- resolve_init(common$init)
-
-    native_args <- list(
+  native_args_fn <- function(seed, resolved_init, model) {
+    list(
       method = "variational",
       algorithm = algorithm,
-      seed = as.integer(common$seed),
+      seed = as.integer(seed),
       id = 1L,
       init_radius = resolved_init$radius,
       iter = as.integer(iter),
@@ -1162,50 +1186,39 @@ stan_model_variational <- function(
       adapt_iter = as.integer(adapt_iter),
       eval_elbo = as.integer(eval_elbo),
       output_samples = as.integer(draws),
-      verbose = as.logical(common$show_messages),
-      show_exceptions = as.logical(common$show_exceptions),
+      verbose = as.logical(show_messages),
+      show_exceptions = as.logical(show_exceptions),
       num_threads = threads,
       init = resolved_init$values
     )
+  }
 
-    model <- self$new_model(common$data, common$seed)
-    result <- self$run_model(model, native_args)
+  payload_fn <- function(result) {
+    list(draws = if (result$return_code == 0L) {
+      posterior::as_draws_df(result$draws)
+    })
+  }
 
-    if (result$return_code != 0) {
-      structure(
-        list(
-          draws = NULL,
-          return_code = result$return_code,
-          args = service_args(native_args),
-          output = result$output %||% character(),
-          model_ptr = model
-        ),
-        class = c("StanVariational", "StanService", "list")
-      )
-    } else {
-      structure(
-        list(
-          draws = posterior::as_draws_df(result$draws),
-          return_code = result$return_code,
-          args = service_args(native_args),
-          output = result$output %||% character(),
-          model_ptr = model
-        ),
-        class = c("StanVariational", "StanService", "list")
-      )
-    }
-  })
+  res <- .newstan_run_service(
+    self = self,
+    data = data,
+    seed = seed,
+    init = init,
+    native_args_fn = native_args_fn,
+    payload_fn = payload_fn,
+    classes = c("StanVariational", "StanService", "list")
+  )
 
   StanVB$new(
-    payload = call$value,
+    payload = res$payload,
     model = self,
     data = data,
-    seed = call$value$args$seed,
+    seed = res$seed,
     init = init,
-    elapsed = call$elapsed,
+    elapsed = res$elapsed,
     metadata = list(
       method = "variational",
-      threads = as.integer(threads %||% 1L),
+      threads = threads,
       show_exceptions = show_exceptions
     )
   )
@@ -1282,22 +1295,13 @@ stan_model_pathfinder <- function(
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
 
-  call <- .newstan_elapsed({
-    common <- .newstan_normalize_common(
-      data = data,
-      seed = seed,
-      refresh = refresh,
-      init = init,
-      show_messages = show_messages,
-      show_exceptions = show_exceptions
-    )
-    threads <- as.integer(threads %||% 1L)
+  threads <- as.integer(threads %||% 1L)
+  refresh <- as.integer(refresh)
 
-    resolved_init <- resolve_init(common$init)
-
-    native_args <- list(
+  native_args_fn <- function(seed, resolved_init, model) {
+    list(
       method = "pathfinder",
-      seed = as.integer(common$seed),
+      seed = as.integer(seed),
       id = 1L,
       init_radius = resolved_init$radius,
       max_lbfgs_iters = as.integer(max_lbfgs_iters),
@@ -1315,27 +1319,17 @@ stan_model_pathfinder <- function(
       save_single_paths = as.logical(save_single_paths),
       psis_resample = as.logical(psis_resample),
       calculate_lp = as.logical(calculate_lp),
-      refresh = as.integer(common$refresh),
-      verbose = as.logical(common$show_messages),
-      show_exceptions = as.logical(common$show_exceptions),
+      refresh = refresh,
+      verbose = as.logical(show_messages),
+      show_exceptions = as.logical(show_exceptions),
       num_threads = threads,
       init = resolved_init$values
     )
+  }
 
-    model <- self$new_model(common$data, common$seed)
-    result <- self$run_model(model, native_args)
-
+  payload_fn <- function(result) {
     if (result$return_code != 0) {
-      structure(
-        list(
-          draws = NULL,
-          return_code = result$return_code,
-          args = service_args(native_args),
-          output = result$output %||% character(),
-          model_ptr = model
-        ),
-        class = c("StanPathfinder", "StanService", "list")
-      )
+      list(draws = NULL)
     } else {
       draws_df <- posterior::as_draws_df(result$draws)
 
@@ -1353,31 +1347,31 @@ stan_model_pathfinder <- function(
         diagnostics <- NULL
       }
 
-      structure(
-        list(
-          draws = draws_df,
-          diagnostics = diagnostics,
-          return_code = result$return_code,
-          args = service_args(native_args),
-          output = result$output %||% character(),
-          model_ptr = model
-        ),
-        class = c("StanPathfinder", "StanService", "list")
-      )
+      list(draws = draws_df, diagnostics = diagnostics)
     }
-  })
+  }
+
+  res <- .newstan_run_service(
+    self = self,
+    data = data,
+    seed = seed,
+    init = init,
+    native_args_fn = native_args_fn,
+    payload_fn = payload_fn,
+    classes = c("StanPathfinder", "StanService", "list")
+  )
 
   StanPathfinder$new(
-    payload = call$value,
+    payload = res$payload,
     model = self,
     data = data,
-    seed = call$value$args$seed,
+    seed = res$seed,
     init = init,
-    elapsed = call$elapsed,
+    elapsed = res$elapsed,
     metadata = list(
       method = "pathfinder",
       num_paths = as.integer(num_paths),
-      threads = as.integer(threads %||% 1L),
+      threads = threads,
       show_exceptions = show_exceptions
     )
   )
@@ -1427,22 +1421,15 @@ stan_model_generate_quantities <- function(
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
 
-  call <- .newstan_elapsed({
-    common <- .newstan_normalize_common(
-      data = data,
-      seed = seed,
-      show_messages = show_messages,
-      show_exceptions = show_exceptions
-    )
-    num_threads <- as.integer(num_threads %||% 1L)
+  num_threads <- as.integer(num_threads %||% 1L)
 
-    input <- if (inherits(fitted_params, "StanFit")) {
-      fitted_params$draws(format = "draws_matrix")
-    } else {
-      fitted_params
-    }
+  input <- if (inherits(fitted_params, "StanFit")) {
+    fitted_params$draws(format = "draws_matrix")
+  } else {
+    fitted_params
+  }
 
-    model <- self$new_model(common$data, common$seed)
+  native_args_fn <- function(seed, resolved_init, model) {
     pars <- self$constrained_param_names(model)
 
     # Convert draws to matrix (rows=samples, columns=parameters)
@@ -1455,41 +1442,40 @@ stan_model_generate_quantities <- function(
       as.matrix(input)
     }
 
-    native_args <- list(
+    list(
       method = "generate_quantities",
-      seed = as.integer(common$seed),
-      verbose = as.logical(common$show_messages),
-      show_exceptions = as.logical(common$show_exceptions),
+      seed = as.integer(seed),
+      verbose = as.logical(show_messages),
+      show_exceptions = as.logical(show_exceptions),
       num_threads = num_threads,
       draws = draws_matrix
     )
+  }
 
-    result <- self$run_model(model, native_args)
+  payload_fn <- function(result) {
+    list(draws = posterior::as_draws_df(result$samples))
+  }
 
-    gqs_draws <- posterior::as_draws_df(result$samples)
-
-    structure(
-      list(
-        draws = gqs_draws,
-        return_code = result$return_code,
-        args = service_args(native_args),
-        output = result$output %||% character(),
-        model_ptr = model
-      ),
-      class = c("StanGeneratedQuantities", "StanService", "list")
-    )
-  })
+  res <- .newstan_run_service(
+    self = self,
+    data = data,
+    seed = seed,
+    init = NULL,
+    native_args_fn = native_args_fn,
+    payload_fn = payload_fn,
+    classes = c("StanGeneratedQuantities", "StanService", "list")
+  )
 
   StanGQ$new(
-    payload = call$value,
+    payload = res$payload,
     model = self,
     data = data,
-    seed = call$value$args$seed,
+    seed = res$seed,
     init = NULL,
-    elapsed = call$elapsed,
+    elapsed = res$elapsed,
     metadata = list(
       method = "generate_quantities",
-      num_threads = as.integer(num_threads %||% 1L),
+      num_threads = num_threads,
       show_exceptions = show_exceptions
     )
   )
@@ -1526,38 +1512,32 @@ stan_model_diagnose <- function(
 ) {
   .newstan_reject_backend_files(output_dir, output_basename)
 
-  call <- .newstan_elapsed({
-    common <- .newstan_normalize_common(data = data, seed = seed, init = init)
+  if (!is.numeric(epsilon) || length(epsilon) != 1L || epsilon <= 0) {
+    stop("`epsilon` must be a positive number.", call. = FALSE)
+  }
+  if (!is.numeric(error) || length(error) != 1L || error <= 0) {
+    stop("`error` must be a positive number.", call. = FALSE)
+  }
 
-    if (!is.numeric(epsilon) || length(epsilon) != 1L || epsilon <= 0) {
-      stop("`epsilon` must be a positive number.", call. = FALSE)
-    }
-    if (!is.numeric(error) || length(error) != 1L || error <= 0) {
-      stop("`error` must be a positive number.", call. = FALSE)
-    }
-
-    resolved_init <- resolve_init(common$init)
-
-    native_args <- list(
+  native_args_fn <- function(seed, resolved_init, model) {
+    list(
       method = "diagnose",
       epsilon = as.double(epsilon),
       error = as.double(error),
-      seed = as.integer(common$seed),
+      seed = as.integer(seed),
       id = 1L,
       init_radius = resolved_init$radius,
       verbose = TRUE,
       num_threads = 1L,
       init = resolved_init$values
     )
+  }
 
-    model <- self$new_model(common$data, common$seed)
-    result <- self$run_model(model, native_args)
-
+  payload_fn <- function(result) {
     n_failed <- as.integer(result$num_failed)
-    output_lines <- result$output
 
     # Parse output messages from Stan's test_gradients()
-    parsed <- .newstan_parse_diagnose_output(output_lines)
+    parsed <- .newstan_parse_diagnose_output(result$output)
 
     if (n_failed == 0L) {
       message("[newstan] All gradient tests passed.")
@@ -1570,21 +1550,31 @@ stan_model_diagnose <- function(
 
     list(
       num_failed = n_failed,
-      return_code = result$return_code,
       gradients = parsed$gradients,
-      lp = parsed$lp,
-      output = output_lines,
-      args = service_args(native_args),
-      model_ptr = model
+      lp = parsed$lp
     )
-  })
+  }
+
+  # `diagnose` historically returns a plain, unclassed list payload; passing
+  # classes = NULL to the shared runner preserves that (no class attribute
+  # is attached).
+  res <- .newstan_run_service(
+    self = self,
+    data = data,
+    seed = seed,
+    init = init,
+    native_args_fn = native_args_fn,
+    payload_fn = payload_fn,
+    classes = NULL
+  )
+
   StanDiagnose$new(
-    payload = call$value,
+    payload = res$payload,
     model = self,
     data = data,
-    seed = call$value$args$seed,
+    seed = res$seed,
     init = init,
-    elapsed = call$elapsed,
+    elapsed = res$elapsed,
     metadata = list(
       method = "diagnose",
       epsilon = epsilon,
