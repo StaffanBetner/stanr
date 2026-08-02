@@ -860,19 +860,20 @@ StanMCMC <- R6Class(
   cloneable = FALSE
 )
 
-#' MCMC sampler diagnostics
+#' MCMC-specific methods
 #'
 #' @name fit-method-mcmc
 #' @family StanFit methods
 #'
 #' @description Methods specific to [`StanMCMC`] objects for accessing sampler
-#'   diagnostics and chain information.
+#'   diagnostics, chain information, and model evaluation.
 #'
 #'   ```
 #'   sampler_diagnostics(inc_warmup = FALSE, format = "draws_array")
 #'   num_chains()
 #'   diagnostic_summary()
 #'   inv_metric(matrix = TRUE)
+#'   loo(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, ...)
 #'   ```
 #'
 #'
@@ -883,8 +884,9 @@ StanMCMC <- R6Class(
 #' * `$diagnostic_summary()` returns a data frame with counts of divergent
 #'   transitions and max treedepth warnings.
 #' * `$inv_metric()` returns the inverse mass matrix used during sampling.
+#' * `$loo()` returns a LOO-CV object from the \pkg{loo} package.
 #'
-#' @seealso [`$draws()`][fit-method-draws]
+#' @seealso [`$draws()`][fit-method-draws], [`$loo()`][fit-method-loo]
 #'
 NULL
 
@@ -944,6 +946,122 @@ mcmc_inv_metric <- function(matrix = TRUE) {
   metric
 }
 StanMCMC$set("public", "inv_metric", mcmc_inv_metric)
+
+#' Leave-one-out cross-validation (LOO-CV)
+#'
+#' @name fit-method-loo
+#' @aliases loo
+#' @family StanFit methods
+#'
+#' @description The `$loo()` method computes approximate LOO-CV using the
+#'   \pkg{loo} package. In order to use this method you must compute and save
+#'   the pointwise log-likelihood in your Stan program. See [loo::loo.array()]
+#'   and the \pkg{loo} package [vignettes](https://mc-stan.org/loo/articles/)
+#'   for details.
+#'
+#' @param variables (string) The name of the variable in the Stan program
+#'   containing the pointwise log-likelihood. The default is to look for
+#'   `"log_lik"`. This argument is passed to the [`$draws()`][fit-method-draws]
+#'   method.
+#' @param r_eff (multiple options) How to handle the `r_eff` argument for
+#'   `loo()`. `r_eff` measures the amount of autocorrelation in MCMC draws, and
+#'   is used to compute more accurate ESS and MCSE estimates for pointwise and
+#'   total ELPDs.
+#'   * `TRUE` will call [loo::relative_eff()] to compute the `r_eff`
+#'   argument to pass to [loo::loo.array()].
+#'   * `FALSE` (the default) or `NULL` will avoid computing `r_eff`,
+#'   which can be very slow. The reported ESS and MCSE estimates may be
+#'   over-optimistic if the posterior draws are far from independent.
+#'   * If `r_eff` is anything else, that object will be passed as the `r_eff`
+#'   argument to [loo::loo.array()].
+#' @param moment_match (logical) Whether to use a
+#'   [moment-matching][loo::loo_moment_match()] correction for problematic
+#'   observations. The default is `FALSE`. Using `moment_match = TRUE` will
+#'   result in compiling the additional methods described in
+#'   [fit-method-init_model_methods]. This allows newstan to automatically
+#'   supply the functions for the `log_lik_i`, `unconstrain_pars`,
+#'   `log_prob_upars`, and `log_lik_i_upars` arguments to
+#'   [loo::loo_moment_match()].
+#' @param ... Other arguments (e.g., `cores`, `save_psis`, etc.) passed to
+#'   [loo::loo.array()] or [loo::loo_moment_match.default()]
+#'   (if `moment_match = TRUE` is set).
+#'
+#' @return The object returned by [loo::loo.array()] or
+#'   [loo::loo_moment_match.default()].
+#'
+#' @references
+#' * Vehtari, A., Gelman, A., and Gabry, J. (2017). Practical Bayesian model
+#'   evaluation using leave-one-out cross-validation and WAIC.
+#'   *Statistics and Computing*, 27(5), 1413-1432.
+#'   doi:10.1007/s11222-016-9696-4.
+#' * Vehtari, A., Simpson, D., Gelman, A., Yao, Y., and Gabry, J. (2024).
+#'   Pareto smoothed importance sampling.
+#'   *Journal of Machine Learning Research*, 25(72), 1-58.
+#' * Paananen, T., Piironen, J., Buerkner, P.-C., and Vehtari, A. (2021).
+#'   Implicitly adaptive importance sampling.
+#'   *Statistics and Computing*, 31, 16. doi:10.1007/s11222-020-09982-2
+#'   (for `moment_match = TRUE`).
+#'
+#' @seealso The \pkg{loo} package website with
+#'   [documentation](https://mc-stan.org/loo/reference/index.html) and
+#'   [vignettes](https://mc-stan.org/loo/articles/).
+#'
+NULL
+
+fit_loo <- function(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, ...) {
+  if (!requireNamespace("loo", quietly = TRUE)) {
+    stop("The `loo` package is required!", call. = FALSE)
+  }
+  if (length(variables) != 1) {
+    stop("Only a single variable name is allowed for the 'variables' argument.", call. = FALSE)
+  }
+  LLarray <- self$draws(variables, format = "draws_array")
+  if (is.logical(r_eff)) {
+    if (isTRUE(r_eff)) {
+      r_eff_cores <- getOption("mc.cores", 1)
+      r_eff <- loo::relative_eff(
+        exp(sweep(LLarray, 3, apply(LLarray, 3, max), FUN = "-")),
+        cores = r_eff_cores
+      )
+    } else {
+      r_eff <- NULL
+    }
+  }
+
+  if (isTRUE(moment_match)) {
+    suppressWarnings(loo_result <- loo::loo.array(LLarray, r_eff = r_eff, ...))
+
+    log_lik_i <- function(x, i, parameter_name = "log_lik", ...) {
+      ll_array <- x$draws(variables = parameter_name, format = "draws_array")[, , i]
+      attr(ll_array, "dim") <- attributes(ll_array)$dim[1:2]
+      ll_array
+    }
+
+    log_lik_i_upars <- function(x, upars, i, parameter_name = "log_lik", ...) {
+      apply(upars, 1, function(up_i) {
+        x$constrain_variables(up_i)[[parameter_name]][i]
+      })
+    }
+
+    loo::loo_moment_match.default(
+      x = self,
+      loo = loo_result,
+      post_draws = function(x, ...) { x$draws(format = "draws_matrix") },
+      log_lik_i = log_lik_i,
+      unconstrain_pars = function(x, pars, ...) {
+        x$unconstrain_draws(format = "draws_matrix")
+      },
+      log_prob_upars = function(x, upars, ...) {
+        apply(upars, 1, x$log_prob)
+      },
+      log_lik_i_upars = log_lik_i_upars,
+      ...
+    )
+  } else {
+    loo::loo.array(LLarray, r_eff = r_eff, ...)
+  }
+}
+StanMCMC$set("public", "loo", fit_loo)
 
 # StanMLE class ----------------------------------------------------------------
 

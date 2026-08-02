@@ -28,6 +28,8 @@ LinkingTo:
     RcppParallel
 Suggests:
     testthat (>= 3.0.0),
+    parallel,
+    loo,
     BH,
     RcppEigen
 Config/testthat/edition: 3
