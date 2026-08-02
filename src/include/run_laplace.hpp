@@ -37,10 +37,12 @@ namespace newstan {
           sample_writer, hessian_writer);
     }
     logger.flush();
+    Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
     return Rcpp::List::create(
       Rcpp::_["draws"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "laplace"
+      Rcpp::_["method"] = "laplace",
+      Rcpp::_["output"] = output
     );
   }
 }

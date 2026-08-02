@@ -5,19 +5,12 @@
 #include <stan/services/pathfinder/single.hpp>
 #include <stan/services/pathfinder/multi.hpp>
 #include <stan/callbacks/json_writer.hpp>
-#include <stan/math/rev/core/chainablestack.hpp>
-#include <stan/math/rev/core/init_chainablestack.hpp>
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <exception>
-#include <mutex>
 #include <sstream>
-#include <thread>
 #include <vector>
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
+#include "r_worker.hpp"
 #include <newstan/r_data_context.hpp>
 
 namespace newstan {
@@ -56,6 +49,11 @@ namespace newstan {
     if (num_paths <= 1) {
       // Single pathfinder
       newstan::r_data_context init_ctx(init_list);
+      // stan::services::util::initialize() writes the unconstrained initial
+      // values to init_writer as a raw numeric row with no preceding
+      // column-name header, before the algorithm ever touches
+      // parameter_writer; this package doesn't use them.
+      newstan::r_discard_writer init_writer;
       newstan::r_sample_writer sample_writer(num_draws);
       stan::callbacks::json_writer<std::ostringstream> metric_writer(
           std::make_unique<std::ostringstream>());
@@ -67,15 +65,17 @@ namespace newstan {
           max_lbfgs_iters, num_elbo_draws, num_draws, save_single_paths,
           refresh,
           interrupt, logger,
-          sample_writer, sample_writer,
+          init_writer, sample_writer,
           metric_writer,
           calculate_lp);
 
       logger.flush();
+      Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
       return Rcpp::List::create(
         Rcpp::_["return_code"] = return_code,
         Rcpp::_["method"] = "pathfinder",
-        Rcpp::_["draws"] = sample_writer.to_r_matrix()
+        Rcpp::_["draws"] = sample_writer.to_r_matrix(),
+        Rcpp::_["output"] = output
       );
     } else {
       // Multi-path Pathfinder runs in a coordinator std::thread. All data
@@ -104,66 +104,25 @@ namespace newstan {
       // Init writers (one per path, for writing initial values)
       std::vector<stan::callbacks::writer> init_writers(num_paths);
 
-      std::atomic<bool> cancel_requested{false};
-      newstan::r_interrupt worker_interrupt(&cancel_requested);
-      std::atomic<bool> finished{false};
-      std::mutex completion_mutex;
-      std::condition_variable completion_cv;
-      std::exception_ptr worker_error;
+      return_code = newstan::run_on_worker_thread(
+          logger, "Pathfinder", "Pathfinder",
+          [&](newstan::r_interrupt& worker_interrupt) -> int {
+            return stan::services::pathfinder::pathfinder_lbfgs_multi(
+                model, std::move(init_ctxs), seed, chain_id, init_radius,
+                history_size, init_alpha,
+                tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
+                max_lbfgs_iters, num_elbo_draws, num_draws, num_psis_draws,
+                num_paths, save_single_paths, refresh, worker_interrupt, logger,
+                init_writers, single_param_writers, single_diag_writers,
+                param_writer, diag_writer, calculate_lp, psis_resample);
+          });
 
-      std::thread worker([&] {
-        // The coordinator is not a TBB worker, so it needs an AD stack for
-        // Pathfinder's serial setup. The observer installs one per TBB path.
-        stan::math::ChainableStack autodiff_stack;
-        stan::math::ad_tape_observer autodiff_observer;
-        try {
-          return_code = stan::services::pathfinder::pathfinder_lbfgs_multi(
-              model, std::move(init_ctxs), seed, chain_id, init_radius,
-              history_size, init_alpha,
-              tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
-              max_lbfgs_iters, num_elbo_draws, num_draws, num_psis_draws,
-              num_paths, save_single_paths, refresh, worker_interrupt, logger,
-              init_writers, single_param_writers, single_diag_writers,
-              param_writer, diag_writer, calculate_lp, psis_resample);
-        } catch (...) {
-          worker_error = std::current_exception();
-        }
-        finished.store(true, std::memory_order_release);
-        completion_cv.notify_one();
-      });
-
-      bool interrupted = false;
-      while (!finished.load(std::memory_order_acquire)) {
-        // Deliberately uses the package's normal logger flush; callers that
-        // need a non-R console route may configure that separately.
-        logger.flush();
-        if (!interrupted && user_interrupt_pending()) {
-          interrupted = true;
-          cancel_requested.store(true, std::memory_order_release);
-        }
-        std::unique_lock<std::mutex> lock(completion_mutex);
-        completion_cv.wait_for(lock, std::chrono::milliseconds(50), [&] {
-          return finished.load(std::memory_order_acquire);
-        });
-      }
-      worker.join();
-      logger.flush();
-
-      if (worker_error) {
-        try {
-          std::rethrow_exception(worker_error);
-        } catch (const std::exception& e) {
-          Rcpp::stop(e.what());
-        } catch (...) {
-          Rcpp::stop("Unknown exception in Pathfinder worker.");
-        }
-      }
-      if (interrupted) Rcpp::stop("Pathfinder interrupted.");
-
+      Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
       return Rcpp::List::create(
         Rcpp::_["return_code"] = return_code,
         Rcpp::_["method"] = "pathfinder",
-        Rcpp::_["draws"] = param_writer.to_r_matrix()
+        Rcpp::_["draws"] = param_writer.to_r_matrix(),
+        Rcpp::_["output"] = output
       );
     }
   }

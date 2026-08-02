@@ -26,9 +26,8 @@ argument to \code{\link[loo:loo.array]{loo::loo.array()}}.
 
 \item{moment_match}{(logical) Whether to use a
 \link[loo:loo_moment_match]{moment-matching} correction for problematic
-observations. The default is \code{FALSE}. Using \code{moment_match = TRUE} will
-result in compiling the additional methods described in
-\link{fit-method-init_model_methods}. This allows newstan to automatically
+observations. The default is \code{FALSE}. Using \code{moment_match = TRUE} uses
+the fit's model methods (see \link{fit-method-model-methods}) to automatically
 supply the functions for the \code{log_lik_i}, \code{unconstrain_pars},
 \code{log_prob_upars}, and \code{log_lik_i_upars} arguments to
 \code{\link[loo:loo_moment_match]{loo::loo_moment_match()}}.}
@@ -73,7 +72,6 @@ Other StanFit methods:
 \code{\link{fit-method-draws}},
 \code{\link{fit-method-fit-info}},
 \code{\link{fit-method-gq}},
-\code{\link{fit-method-init_model_methods}},
 \code{\link{fit-method-laplace-mode}},
 \code{\link{fit-method-lp}},
 \code{\link{fit-method-mcmc}},

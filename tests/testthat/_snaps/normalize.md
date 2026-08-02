@@ -1,26 +1,24 @@
-# sample normalization rejects invalid chains
+# chain validation rejects invalid chains
 
     Code
-      newstan:::.newstan_normalize_sample(seed = 42L, chains = 0, chain_ids = integer())
+      newstan:::.newstan_validate_chains(chains = 0, chain_ids = integer())
     Condition
       Error:
       ! `chains` must be a positive integer.
 
-# sample normalization rejects non-consecutive chain_ids
+# chain validation rejects non-consecutive chain_ids
 
     Code
-      newstan:::.newstan_normalize_sample(seed = 42L, chains = 2, chain_ids = c(1L,
-        3L))
+      newstan:::.newstan_validate_chains(chains = 2, chain_ids = c(1L, 3L))
     Condition
       Error:
       ! The current backend requires `chain_ids` to be unique consecutive integers.
 
-# laplace normalization rejects mode and opt_args together
+# seed validation rejects an invalid seed
 
     Code
-      newstan:::.newstan_normalize_laplace(seed = 42L, mode = c(theta = 0.5),
-      opt_args = list(iter = 100L))
+      newstan:::.newstan_seed(-1)
     Condition
       Error:
-      ! `mode` and `opt_args` cannot both be supplied.
+      ! `seed` must be NULL or a single integer between 0 and 2^31 - 1.
 

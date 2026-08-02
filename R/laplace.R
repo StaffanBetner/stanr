@@ -1,10 +1,33 @@
-# Internal helper for Laplace approximation.
-# Accepts pre-normalized arguments from .newstan_normalize_laplace().
-# The `mode` value (constrained parameter vector) is passed separately
-# since it may come from an optimization result or user input.
+# The `mode` value (constrained parameter vector) is passed in already
+# resolved by stan_model_laplace(), since it may come from an internal
+# optimization run, a user-supplied StanMLE, or a raw numeric vector.
 
 #' @noRd
-.newstan_run_laplace <- function(stanmod, args, mode) {
+.newstan_run_laplace <- function(
+  stanmod,
+  mode,
+  data = NULL,
+  seed = NULL,
+  refresh = NULL,
+  init = NULL,
+  threads = NULL,
+  jacobian = TRUE,
+  draws = NULL,
+  calculate_lp = TRUE,
+  show_messages = TRUE,
+  show_exceptions = TRUE
+) {
+  common <- .newstan_normalize_common(
+    data = data,
+    seed = seed,
+    refresh = refresh,
+    init = init,
+    show_messages = show_messages,
+    show_exceptions = show_exceptions
+  )
+  def <- .newstan_defaults$laplace
+  threads <- as.integer(threads %||% 1L)
+
   # Extract constrained parameter vector from mode result if needed
   if (is.list(mode) && !is.null(mode$par)) {
     mode <- mode$par
@@ -16,8 +39,8 @@
     )
   }
 
-  model_instance <- new_model_instance(stanmod, args$data, args$seed)
-  pars <- stanmod$constrained_param_names(model_instance$model)
+  model <- stanmod$new_model(common$data, common$seed)
+  pars <- stanmod$constrained_param_names(model)
   mode <- mode[pars]
   if (anyNA(mode)) {
     stop("mode must contain every constrained model parameter.", call. = FALSE)
@@ -26,25 +49,27 @@
   native_args <- list(
     method = "laplace",
     mode = as.double(mode),
-    jacobian = as.logical(args$jacobian),
-    draws = as.integer(args$draws),
-    calculate_lp = as.logical(args$calculate_lp),
-    seed = as.integer(args$seed),
-    refresh = as.integer(args$refresh),
-    verbose = as.logical(args$show_messages),
-    num_threads = as.integer(args$threads)
+    jacobian = as.logical(jacobian),
+    draws = as.integer(draws %||% def$draws),
+    calculate_lp = as.logical(calculate_lp),
+    seed = as.integer(common$seed),
+    refresh = as.integer(common$refresh),
+    verbose = as.logical(common$show_messages),
+    num_threads = threads
   )
 
   withr::with_envvar(
-    c(STAN_NUM_THREADS = args$threads),
-    result <- stanmod$run_model(model_instance$model, native_args)
+    c(STAN_NUM_THREADS = threads),
+    result <- stanmod$run_model(model, native_args)
   )
 
   structure(
     list(
       draws = posterior::as_draws_df(result$draws),
       return_code = result$return_code,
-      args = service_args(native_args)
+      args = service_args(native_args),
+      output = result$output %||% character(),
+      model_ptr = model
     ),
     class = c("StanLaplace", "StanService", "list")
   )

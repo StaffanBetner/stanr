@@ -8,9 +8,7 @@
 \item{fitted_params}{A \code{\link{StanFit}} object or a draws matrix containing
 parameter values to use for the generated quantities block.}
 
-\item{parallel_chains}{(integer) The number of chains to run in parallel.}
-
-\item{threads_per_chain}{(integer) The number of threads per chain.}
+\item{num_threads}{(integer) The total number of threads to use.}
 }
 \value{
 A \code{\link{StanGQ}} object containing the generated quantities.

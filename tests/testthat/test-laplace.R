@@ -18,3 +18,20 @@ test_that("laplace evaluates model-side gradients in the generated model library
   expect_s3_class(result$summary(), "draws_summary")
   expect_equal(posterior::ndraws(result$draws()), 2L)
 })
+
+test_that("laplace rejects mode and opt_args together", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  expect_error(
+    mod$laplace(
+      data = data,
+      mode = c(theta = 0.5),
+      opt_args = list(iter = 100L),
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "`mode` and `opt_args` cannot both be supplied"
+  )
+})

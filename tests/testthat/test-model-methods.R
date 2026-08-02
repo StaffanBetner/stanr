@@ -44,7 +44,7 @@
       seed = 1357,
       init = list(theta = 0.5, beta = c(0.5, -0.5)),
       chains = 2,
-      parallel_chains = 2,
+      num_threads = 2,
       iter_warmup = 2,
       iter_sampling = 3,
       save_warmup = TRUE,
@@ -81,7 +81,7 @@ test_that("log probability, gradient, and Hessian match analytical values", {
   expected_hessian <- diag(c(-1.5, -1, -1))
   expected_hessian_no_jacobian <- diag(c(-1, -1, -1))
 
-  # Calling a method before init_model_methods() must initialize lazily.
+  # Calling a model method must initialize the native pointer lazily.
   expect_equal(fit$log_prob(upars), expected_lp, tolerance = 1e-10)
   expect_equal(
     fit$log_prob(upars, jacobian = FALSE),
@@ -184,18 +184,13 @@ test_that("constraining and unconstraining preserve structure and values", {
   )
 })
 
-test_that("model-method RNG is fit-local, advances, and can be reset", {
+test_that("model-method RNG is fit-local and advances across calls", {
   fit <- .newstan_model_method_fit()
   upars <- c(0, 0.5, -0.5)
 
-  fit$init_model_methods(seed = 901)
   first <- fit$constrain_variables(upars)$stochastic_gq
   second <- fit$constrain_variables(upars)$stochastic_gq
   expect_false(isTRUE(all.equal(first, second)))
-
-  fit$init_model_methods(seed = 901)
-  replay <- fit$constrain_variables(upars)$stochastic_gq
-  expect_equal(replay, first, tolerance = 0)
 })
 
 test_that("model methods reject malformed or non-finite inputs", {

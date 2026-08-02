@@ -6,7 +6,7 @@ test_that("reduce_sum model runs with a configured TBB thread pool", {
     iter_warmup = 10,
     iter_sampling = 10,
     chains = 1,
-    threads_per_chain = 2,
+    num_threads = 2,
     seed = 123,
     show_messages = FALSE
   )

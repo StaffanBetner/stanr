@@ -38,3 +38,14 @@ test_that("optimizing finds reasonable theta for bernoulli", {
   expect_true(result$mle("theta") > 0.3)
   expect_true(result$mle("theta") < 0.7)
 })
+
+test_that("optimizing output() returns non-empty Stan log messages", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+
+  expect_type(result$output(), "character")
+  expect_true(length(result$output()) > 0)
+})

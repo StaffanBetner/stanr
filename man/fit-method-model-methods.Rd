@@ -8,7 +8,7 @@
 values at which to evaluate the function.}
 
 \item{jacobian}{(logical) Should the log density be adjusted by the
-abs-determinant of the Jacob of the inverse transformation?}
+abs-determinant of the Jacobian of the inverse transformation?}
 
 \item{variables}{(named list) Constrained parameter values to unconstrain.}
 
@@ -42,8 +42,8 @@ constrained parameter space.
 \description{
 These methods compute the log probability, gradients, Hessians,
 and parameter transformations using the compiled Stan model. They require
-the model to be available and initialized via
-\code{\link[=fit-method-init_model_methods]{$init_model_methods()}}.
+the model to be available, and lazily initialize the native model pointer
+on first use.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{log_prob(unconstrained_variables, jacobian = TRUE)
 grad_log_prob(unconstrained_variables, jacobian = TRUE)
@@ -58,14 +58,11 @@ variable_skeleton(transformed_parameters = TRUE,
 }\if{html}{\out{</div>}}
 }
 \seealso{
-\code{\link[=fit-method-init_model_methods]{$init_model_methods()}}
-
 Other StanFit methods:
 \code{\link{fit-method-diagnose}},
 \code{\link{fit-method-draws}},
 \code{\link{fit-method-fit-info}},
 \code{\link{fit-method-gq}},
-\code{\link{fit-method-init_model_methods}},
 \code{\link{fit-method-laplace-mode}},
 \code{\link{fit-method-loo}},
 \code{\link{fit-method-lp}},

@@ -6,7 +6,9 @@
 \alias{newstan}
 \title{The newstan package.}
 \description{
-ToDO
+A modern, simpler R interface for Stan. Bundles all required
+Stan headers internally, depending only on BH (Boost), RcppEigen
+(Eigen), and RcppParallel (TBB) for external dependencies.
 }
 \author{
 \strong{Maintainer}: Andrew R. Johnson \email{andrew.johnson@arjohnsonau.com} (\href{https://orcid.org/0000-0001-7000-8065}{ORCID})

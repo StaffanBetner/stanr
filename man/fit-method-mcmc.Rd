@@ -3,6 +3,12 @@
 \name{fit-method-mcmc}
 \alias{fit-method-mcmc}
 \title{MCMC-specific methods}
+\arguments{
+\item{matrix}{(logical) For \verb{$inv_metric()}: return each chain's inverse
+metric as a matrix? For a diagonal metric, \code{TRUE} (the default) wraps the
+adapted diagonal in \code{diag()}; \code{FALSE} returns it as a vector. For a dense
+metric, the matrix is always returned and \code{matrix = FALSE} is an error.}
+}
 \value{
 \itemize{
 \item \verb{$sampler_diagnostics()} returns sampler diagnostics (e.g., \code{divergent__},
@@ -10,7 +16,9 @@
 \item \verb{$num_chains()} returns the number of MCMC chains.
 \item \verb{$diagnostic_summary()} returns a data frame with counts of divergent
 transitions and max treedepth warnings.
-\item \verb{$inv_metric()} returns the inverse mass matrix used during sampling.
+\item \verb{$inv_metric()} returns a list (one element per chain) of the inverse
+mass matrix adapted during sampling. Errors if the fit was not sampled
+with adaptation.
 \item \verb{$loo()} returns a LOO-CV object from the \pkg{loo} package.
 }
 }
@@ -33,7 +41,6 @@ Other StanFit methods:
 \code{\link{fit-method-draws}},
 \code{\link{fit-method-fit-info}},
 \code{\link{fit-method-gq}},
-\code{\link{fit-method-init_model_methods}},
 \code{\link{fit-method-laplace-mode}},
 \code{\link{fit-method-loo}},
 \code{\link{fit-method-lp}},

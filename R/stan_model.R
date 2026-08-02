@@ -1,45 +1,12 @@
 .compile_stan_model_environment <- function(
-  file = NULL,
-  code = NULL,
-  model_name = NULL,
+  code,
+  model_name,
   include_directories = character(),
   external_cpp = NULL,
   verbose = FALSE,
   precompiled_headers = TRUE,
   force_recompile = FALSE
 ) {
-  # Validate inputs
-  if (is.null(file) && is.null(code)) {
-    stop("Either 'file' or 'code' must be provided.")
-  }
-  if (!is.null(file) && !is.null(code)) {
-    stop("Provide either 'file' or 'code', not both.")
-  }
-  if (
-    !is.logical(precompiled_headers) ||
-      length(precompiled_headers) != 1 ||
-      is.na(precompiled_headers)
-  ) {
-    stop("`precompiled_headers` must be TRUE or FALSE.", call. = FALSE)
-  }
-
-  # Read Stan code
-  if (!is.null(file)) {
-    if (!file.exists(file)) {
-      stop("File not found: ", file)
-    }
-    code <- paste(readLines(file, warn = FALSE), collapse = "\n")
-  }
-
-  # Determine model name
-  if (is.null(model_name)) {
-    if (!is.null(file)) {
-      model_name <- sub("\\.stan$", "", basename(file))
-    } else {
-      model_name <- "model"
-    }
-  }
-
   if (verbose) {
     message("[newstan] Compiling '", model_name, "'...")
   }
@@ -51,14 +18,16 @@
     external_cpp = external_cpp
   )
   # The generated wrapper is part of the translation unit.  Include it in the
-  # cache key so changes to the native runner/model bridge cannot reuse a
-  # sourceCpp artifact compiled against an older wrapper.
+  # cache key so changes to the native runner/model bridge (including
+  # dev-time edits to inst/stan_model.cpp) cannot reuse a sourceCpp artifact
+  # compiled against an older wrapper.
   model_support <- readLines(
     system.file("stan_model.cpp", package = "newstan", mustWork = TRUE)
   )
   model_hash <- digest::digest(
     c(
       cpp_code,
+      model_support,
       as.character(utils::packageVersion("newstan")),
       .newstan_stan_version()
     ),

@@ -25,6 +25,11 @@ namespace newstan {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
+    // stan::services::util::initialize() writes the unconstrained initial
+    // values to init_writer as a raw numeric row with no preceding
+    // column-name header, before the algorithm ever touches parameter_writer;
+    // this package doesn't use them.
+    newstan::r_discard_writer init_writer;
     // With saved iterations Stan writes the initial point plus at most iter
     // updates; otherwise it writes only the final point.
     newstan::r_sample_writer sample_writer(save_iterations ? iter + 1 : 1);
@@ -38,7 +43,7 @@ namespace newstan {
           model, init_ctx, seed, chain_id, init_radius,
           iter, save_iterations,
           interrupt, logger,
-          sample_writer, sample_writer);
+          init_writer, sample_writer);
     } else if (algorithm == "bfgs") {
       const double init_alpha = Rcpp::as<double>(args["init_alpha"]);
       const double tol_obj = Rcpp::as<double>(args["tol_obj"]);
@@ -53,7 +58,7 @@ namespace newstan {
           init_alpha, tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
           iter, save_iterations, refresh,
           interrupt, logger,
-          sample_writer, sample_writer);
+          init_writer, sample_writer);
     } else if (algorithm == "lbfgs") {
       const double init_alpha = Rcpp::as<double>(args["init_alpha"]);
       const double tol_obj = Rcpp::as<double>(args["tol_obj"]);
@@ -69,7 +74,7 @@ namespace newstan {
           history_size, init_alpha, tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
           iter, save_iterations, refresh,
           interrupt, logger,
-          sample_writer, sample_writer);
+          init_writer, sample_writer);
     } else {
       std::ostringstream msg;
       msg << "Unknown optimization algorithm: " << algorithm;
@@ -95,12 +100,14 @@ namespace newstan {
     }
 
     logger.flush();
+    Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
     return Rcpp::List::create(
       Rcpp::_["par"] = mat,
       Rcpp::_["value"] = lp_val,
       Rcpp::_["return_code"] = return_code,
       Rcpp::_["method"] = "optimize",
-      Rcpp::_["algorithm"] = algorithm
+      Rcpp::_["algorithm"] = algorithm,
+      Rcpp::_["output"] = output
     );
   }
 }

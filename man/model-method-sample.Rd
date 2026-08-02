@@ -18,11 +18,10 @@ a list of lists (one per chain), or a function that takes an optional
 
 \item{chains}{(integer) The number of MCMC chains.}
 
-\item{parallel_chains}{(integer) The number of chains to run in parallel.}
-
 \item{chain_ids}{(integer vector) The IDs for each chain.}
 
-\item{threads_per_chain}{(integer) The number of threads per chain.}
+\item{num_threads}{(integer) The total number of threads to use across all
+chains.}
 
 \item{iter_warmup}{(integer) The number of warmup iterations.}
 
@@ -57,19 +56,22 @@ a list of lists (one per chain), or a function that takes an optional
 
 \item{show_exceptions}{(logical) Should Stan exceptions be shown?}
 
-\item{diagnostics}{(character vector) Which diagnostics to compute.}
+\item{engine}{(string) The sampling engine: \code{"nuts"} or \code{"static"}. Defaults
+to \code{"nuts"}.}
 
-\item{engine}{(string) The sampling engine: \code{"nuts"} or \code{"static"}.}
+\item{int_time}{(number) Integration time for static HMC. Defaults to \code{2 * pi}.}
 
-\item{int_time}{(number) Integration time for static HMC.}
+\item{step_size_jitter}{(number) Jitter for step size after adaptation.
+Defaults to \code{0}.}
 
-\item{step_size_jitter}{(number) Jitter for step size after adaptation.}
+\item{adapt_gamma}{(number) Adaptation hyperparameter for dual averaging.
+Defaults to \code{0.05}.}
 
-\item{adapt_gamma}{(number) Adaptation hyperparameter for dual averaging.}
+\item{adapt_kappa}{(number) Adaptation hyperparameter for dual averaging.
+Defaults to \code{0.75}.}
 
-\item{adapt_kappa}{(number) Adaptation hyperparameter for dual averaging.}
-
-\item{adapt_t0}{(number) Adaptation hyperparameter for dual averaging.}
+\item{adapt_t0}{(number) Adaptation hyperparameter for dual averaging.
+Defaults to \code{10}.}
 }
 \value{
 A \code{\link{StanMCMC}} object containing posterior draws and diagnostics.

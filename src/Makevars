@@ -47,6 +47,7 @@ package:
 	@cp -Rf math/stan/. ../inst/include/stan
 	@cp -Rf math/lib/sundials_*/include/* ../inst/include/
 	@cp -Rf math/lib/sundials_*/src/sundials .
+	@rm -rf ../inst/include/newstan
 	@cp -Rf include/. ../inst/include/newstan
 
 static: $(OBJECTS) $(SUNDIALS_OBJECTS)

@@ -20,7 +20,7 @@ bernoulli_data <- list(N = 10, y = c(0, 1, 1, 0, 1, 0, 1, 1, 1, 0))
 bernoulli_fit <- bernoulli_log_lik_mod$sample(
   data = bernoulli_data,
   chains = 1,
-  parallel_chains = 1,
+  num_threads = 1,
   iter_sampling = 100,
   iter_warmup = 50,
   seed = 1234
@@ -71,7 +71,7 @@ test_that("$loo() errors when log_lik is not in draws", {
   bernoulli_no_ll_fit <- bernoulli_no_ll_mod$sample(
     data = bernoulli_data,
     chains = 1,
-    parallel_chains = 1,
+    num_threads = 1,
     iter_sampling = 50,
     iter_warmup = 25,
     seed = 1234

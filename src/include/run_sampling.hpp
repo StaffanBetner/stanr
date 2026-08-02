@@ -17,19 +17,14 @@
 #include <stan/services/sample/hmc_static_diag_e_adapt.hpp>
 #include <stan/services/sample/hmc_static_dense_e.hpp>
 #include <stan/services/sample/hmc_static_dense_e_adapt.hpp>
-#include <stan/callbacks/json_writer.hpp>
-#include <stan/math/rev/core/chainablestack.hpp>
-#include <stan/math/rev/core/init_chainablestack.hpp>
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <exception>
-#include <mutex>
+#include <stan/services/util/create_unit_e_diag_inv_metric.hpp>
+#include <stan/services/util/create_unit_e_dense_inv_metric.hpp>
 #include <sstream>
-#include <thread>
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
+#include "r_metric_writer.hpp"
+#include "r_worker.hpp"
 #include <newstan/r_data_context.hpp>
 #include <newstan/r_metric_context.hpp>
 #include "stack_writer_chains.hpp"
@@ -40,12 +35,29 @@ namespace newstan {
   std::vector<std::shared_ptr<stan::io::var_context>> make_metric_contexts(
       Model& model, const Rcpp::List& args, const std::string& metric,
       int num_chains) {
+    if (metric == "unit_e") return {};
     const bool metric_supplied = args.containsElementNamed("inv_metric") &&
         !Rcpp::as<bool>(args["inv_metric_na"]);
-    if (!metric_supplied || metric == "unit_e") return {};
+    const size_t num_params = model.num_params_r();
+
+    if (!metric_supplied) {
+      // Build the same default unit inverse metric that the no-metric
+      // overloads of hmc_nuts_{diag,dense}_e_adapt would otherwise
+      // construct internally, so dispatch can always call the
+      // metric-taking overload.
+      std::shared_ptr<stan::io::var_context> default_ctx =
+          metric == "diag_e"
+              ? std::make_shared<stan::io::array_var_context>(
+                    stan::services::util::create_unit_e_diag_inv_metric(
+                        num_params))
+              : std::make_shared<stan::io::array_var_context>(
+                    stan::services::util::create_unit_e_dense_inv_metric(
+                        num_params));
+      return std::vector<std::shared_ptr<stan::io::var_context>>(num_chains,
+                                                                   default_ctx);
+    }
 
     Rcpp::List inv_metric_list = Rcpp::as<Rcpp::List>(args["inv_metric"]);
-    const size_t num_params = model.num_params_r();
     const bool per_chain =
         inv_metric_list.length() == static_cast<R_xlen_t>(num_chains);
     std::vector<std::shared_ptr<stan::io::var_context>> contexts;
@@ -117,14 +129,17 @@ namespace newstan {
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
-    // ── Build per-chain contexts and writers ────────────────────────
+    // --- Build per-chain contexts and writers ---
     const auto init_ctx = std::make_shared<newstan::r_data_context>(init_list);
     std::vector<std::shared_ptr<newstan::r_data_context>> init_ctxs(
         num_chains, init_ctx);
-    std::vector<newstan::r_sample_writer> init_writers;
+    // init_writers receive the unconstrained initial values as a raw numeric
+    // write with no preceding column-name header (see
+    // stan::services::util::initialize()); this package doesn't use them.
+    std::vector<newstan::r_discard_writer> init_writers;
     std::vector<newstan::r_sample_writer> sample_writers;
     std::vector<newstan::r_discard_writer> diag_writers;
-    std::vector<stan::callbacks::json_writer<std::ostringstream>> metric_writers;
+    std::vector<newstan::r_metric_writer> metric_writers;
 
     init_writers.reserve(num_chains);
     sample_writers.reserve(num_chains);
@@ -132,10 +147,10 @@ namespace newstan {
     metric_writers.reserve(num_chains);
 
     for (int i = 0; i < num_chains; ++i) {
-      init_writers.emplace_back(1);
+      init_writers.emplace_back();
       sample_writers.emplace_back(expected_rows);
       diag_writers.emplace_back();
-      metric_writers.emplace_back(std::make_unique<std::ostringstream>());
+      metric_writers.emplace_back();
     }
 
     const bool metric_supplied = args.containsElementNamed("inv_metric") &&
@@ -143,57 +158,31 @@ namespace newstan {
     auto metric_ctxs = make_metric_contexts(model, args, metric, num_chains);
     const bool multi_chain = num_chains > 1;
 
-    // Sampling runs in a native coordinator thread.  Ctrl-C is observed by
-    // the R thread below and relayed to all Stan/TBB workers through this
-    // native-only callback.
-    std::atomic<bool> cancel_requested{false};
-    newstan::r_interrupt interrupt(&cancel_requested);
-
+    int return_code = newstan::run_on_worker_thread(
+        logger, "Sampling", "sampling",
+        [&](newstan::r_interrupt& interrupt) -> int {
     int return_code = stan::services::error_codes::CONFIG;
-    std::atomic<bool> finished{false};
-    std::mutex completion_mutex;
-    std::condition_variable completion_cv;
-    std::exception_ptr worker_error;
-
-    // Everything in this lambda is restricted to C++/Stan state.  In
-    // particular, it must not allocate R objects or call into Rcpp.
-    std::thread worker([&] {
-    // A raw std::thread is outside TBB's scheduler, and the sampling service
-    // initializes chains before it enters parallel_for.  Its AD stack must be
-    // explicit.  Attach an observer for the lifetime of this job as well: it
-    // initializes a separate AD tape in every TBB worker that executes a
-    // chain.
-    stan::math::ChainableStack autodiff_stack;
-    stan::math::ad_tape_observer autodiff_observer;
-    try {
-    // ── Validation & dispatch ───────────────────────────────────────
+    // --- Validation & dispatch ---
     if (algorithm == "hmc" && adapt_engaged && num_warmup == 0) {
       std::ostringstream msg;
       msg << "num_warmup must be > 0 when adapt_engaged is TRUE.";
       logger.error(msg.str());
       // return_code remains CONFIG
 
-    // ── Dispatch: fixed_param ───────────────────────────────────────
+    // --- Dispatch: fixed_param ---
     } else if (algorithm == "fixed_param") {
-      if (multi_chain) {
-        return_code = stan::services::sample::fixed_param(
-            model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-            init_radius, num_samples, num_thin, refresh,
-            interrupt, logger, init_writers, sample_writers, diag_writers);
-      } else {
-        return_code = stan::services::sample::fixed_param(
-            model, *init_ctxs[0], seed, chain_id, init_radius,
-            num_samples, num_thin, refresh,
-            interrupt, logger, init_writers[0],
-            sample_writers[0], diag_writers[0]);
-      }
+      // The multi-chain overload accepts num_chains == 1 fine, so it is
+      // always used regardless of chain count.
+      return_code = stan::services::sample::fixed_param(
+          model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
+          init_radius, num_samples, num_thin, refresh,
+          interrupt, logger, init_writers, sample_writers, diag_writers);
 
-    // ── Dispatch: HMC + NUTS ────────────────────────────────────────
+    // --- Dispatch: HMC + NUTS ---
     } else if (algorithm == "hmc" && engine == "nuts") {
 
       if (adapt_engaged) {
-        // ── NUTS with adaptation ────────────────────────────────────
-
+        // --- NUTS with adaptation ---
         if (metric == "unit_e") {
           return_code = stan::services::sample::hmc_nuts_unit_e_adapt(
               model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
@@ -205,70 +194,41 @@ namespace newstan {
               metric_writers);
 
         } else if (metric == "diag_e") {
-          if (metric_supplied) {
-            return_code = stan::services::sample::hmc_nuts_diag_e_adapt(
-                model, static_cast<size_t>(num_chains), init_ctxs, metric_ctxs,
-                seed, chain_id, init_radius, num_warmup, num_samples, num_thin,
-                save_warmup, refresh, stepsize, stepsize_jitter, max_depth,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger,
-                init_writers, sample_writers, diag_writers,
-                metric_writers);
-          } else {
-            return_code = stan::services::sample::hmc_nuts_diag_e_adapt(
-                model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-                init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, max_depth,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger,
-                init_writers, sample_writers, diag_writers,
-                metric_writers);
-          }
+          // make_metric_contexts() fills metric_ctxs with a default unit
+          // metric when none was supplied, so the metric-taking overload
+          // is always used.
+          return_code = stan::services::sample::hmc_nuts_diag_e_adapt(
+              model, static_cast<size_t>(num_chains), init_ctxs, metric_ctxs,
+              seed, chain_id, init_radius, num_warmup, num_samples, num_thin,
+              save_warmup, refresh, stepsize, stepsize_jitter, max_depth,
+              delta, gamma, kappa, t0,
+              init_buffer, term_buffer, window,
+              interrupt, logger,
+              init_writers, sample_writers, diag_writers,
+              metric_writers);
 
         } else if (metric == "dense_e") {
-          if (metric_supplied) {
-            return_code = stan::services::sample::hmc_nuts_dense_e_adapt(
-                model, static_cast<size_t>(num_chains), init_ctxs, metric_ctxs,
-                seed, chain_id, init_radius, num_warmup, num_samples, num_thin,
-                save_warmup, refresh, stepsize, stepsize_jitter, max_depth,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger,
-                init_writers, sample_writers, diag_writers,
-                metric_writers);
-          } else {
-            return_code = stan::services::sample::hmc_nuts_dense_e_adapt(
-                model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-                init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, max_depth,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger,
-                init_writers, sample_writers, diag_writers,
-                metric_writers);
-          }
+          return_code = stan::services::sample::hmc_nuts_dense_e_adapt(
+              model, static_cast<size_t>(num_chains), init_ctxs, metric_ctxs,
+              seed, chain_id, init_radius, num_warmup, num_samples, num_thin,
+              save_warmup, refresh, stepsize, stepsize_jitter, max_depth,
+              delta, gamma, kappa, t0,
+              init_buffer, term_buffer, window,
+              interrupt, logger,
+              init_writers, sample_writers, diag_writers,
+              metric_writers);
         }
 
       } else {
-        // ── NUTS without adaptation (fixed stepsize) ────────────────
-
+        // --- NUTS without adaptation (fixed stepsize) ---
         if (metric == "unit_e") {
-          if (multi_chain) {
-            return_code = stan::services::sample::hmc_nuts_unit_e(
-                model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-                init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, max_depth,
-                interrupt, logger, init_writers, sample_writers, diag_writers);
-          } else {
-            return_code = stan::services::sample::hmc_nuts_unit_e(
-                model, *init_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, max_depth,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          }
+          // The multi-chain overload accepts num_chains == 1 fine, so it is
+          // always used regardless of chain count.
+          return_code = stan::services::sample::hmc_nuts_unit_e(
+              model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
+              init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
+              stepsize, stepsize_jitter, max_depth,
+              interrupt, logger, init_writers, sample_writers, diag_writers);
         } else if (metric_supplied && multi_chain) {
           std::ostringstream msg;
           msg << "inv_metric with non-adaptive " << metric
@@ -278,56 +238,41 @@ namespace newstan {
           return_code = stan::services::error_codes::CONFIG;
         } else if (metric == "diag_e") {
           if (metric_supplied) {
-              return_code = stan::services::sample::hmc_nuts_diag_e(
-                  model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
-                  num_warmup, num_samples, num_thin, save_warmup, refresh,
-                  stepsize, stepsize_jitter, max_depth,
-                  interrupt, logger, init_writers[0],
-                  sample_writers[0], diag_writers[0]);
+            // Guaranteed single-chain by the metric_supplied && multi_chain
+            // guard above; there is no metric-taking multi-chain overload
+            // for non-adaptive NUTS.
+            return_code = stan::services::sample::hmc_nuts_diag_e(
+                model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
+                num_warmup, num_samples, num_thin, save_warmup, refresh,
+                stepsize, stepsize_jitter, max_depth,
+                interrupt, logger, init_writers[0],
+                sample_writers[0], diag_writers[0]);
           } else {
-            if (multi_chain) {
-              return_code = stan::services::sample::hmc_nuts_diag_e(
-                  model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-                  init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
-                  stepsize, stepsize_jitter, max_depth,
-                  interrupt, logger, init_writers, sample_writers, diag_writers);
-            } else {
-              return_code = stan::services::sample::hmc_nuts_diag_e(
-                  model, *init_ctxs[0], seed, chain_id, init_radius,
-                  num_warmup, num_samples, num_thin, save_warmup, refresh,
-                  stepsize, stepsize_jitter, max_depth,
-                  interrupt, logger, init_writers[0],
-                  sample_writers[0], diag_writers[0]);
-            }
+            return_code = stan::services::sample::hmc_nuts_diag_e(
+                model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
+                init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
+                stepsize, stepsize_jitter, max_depth,
+                interrupt, logger, init_writers, sample_writers, diag_writers);
           }
         } else if (metric == "dense_e") {
           if (metric_supplied) {
-              return_code = stan::services::sample::hmc_nuts_dense_e(
-                  model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
-                  num_warmup, num_samples, num_thin, save_warmup, refresh,
-                  stepsize, stepsize_jitter, max_depth,
-                  interrupt, logger, init_writers[0],
-                  sample_writers[0], diag_writers[0]);
+            return_code = stan::services::sample::hmc_nuts_dense_e(
+                model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
+                num_warmup, num_samples, num_thin, save_warmup, refresh,
+                stepsize, stepsize_jitter, max_depth,
+                interrupt, logger, init_writers[0],
+                sample_writers[0], diag_writers[0]);
           } else {
-            if (multi_chain) {
-              return_code = stan::services::sample::hmc_nuts_dense_e(
-                  model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
-                  init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
-                  stepsize, stepsize_jitter, max_depth,
-                  interrupt, logger, init_writers, sample_writers, diag_writers);
-            } else {
-              return_code = stan::services::sample::hmc_nuts_dense_e(
-                  model, *init_ctxs[0], seed, chain_id, init_radius,
-                  num_warmup, num_samples, num_thin, save_warmup, refresh,
-                  stepsize, stepsize_jitter, max_depth,
-                  interrupt, logger, init_writers[0],
-                  sample_writers[0], diag_writers[0]);
-            }
+            return_code = stan::services::sample::hmc_nuts_dense_e(
+                model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
+                init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,
+                stepsize, stepsize_jitter, max_depth,
+                interrupt, logger, init_writers, sample_writers, diag_writers);
           }
         }
       }
 
-    // ── Dispatch: HMC + static ───────────────────────────────────────
+    // --- Dispatch: HMC + static ---
     } else if (algorithm == "hmc" && engine == "static") {
       // Static HMC is single-chain only (no multi-chain overloads in Stan)
       if (multi_chain) {
@@ -342,8 +287,7 @@ namespace newstan {
         return_code = stan::services::error_codes::CONFIG;
 
       } else if (adapt_engaged) {
-        // ── Static HMC with adaptation ──────────────────────────────
-
+        // --- Static HMC with adaptation ---
         if (metric == "unit_e") {
           return_code = stan::services::sample::hmc_static_unit_e_adapt(
               model, *init_ctxs[0], seed, chain_id, init_radius,
@@ -397,8 +341,7 @@ namespace newstan {
         }
 
       } else {
-        // ── Static HMC without adaptation (fixed stepsize) ──────────
-
+        // --- Static HMC without adaptation (fixed stepsize) ---
         if (metric == "unit_e") {
           return_code = stan::services::sample::hmc_static_unit_e(
               model, *init_ctxs[0], seed, chain_id, init_radius,
@@ -443,65 +386,57 @@ namespace newstan {
         }
       }
 
-    // ── Unknown algorithm ───────────────────────────────────────────
+    // --- Unknown algorithm ---
     } else {
       std::ostringstream msg;
       msg << "Unknown sampling algorithm: " << algorithm;
       logger.error(msg.str());
       return_code = stan::services::error_codes::CONFIG;
     }
+    return return_code;
+        });
 
-    } catch (...) {
-      worker_error = std::current_exception();
-    }
-    finished.store(true, std::memory_order_release);
-    completion_cv.notify_one();
-    });
-
-    // Keep the original R thread responsive for console output and Ctrl-C.
-    // Rcpp protects this interrupt probe from R's longjmp; on Ctrl-C we first
-    // cancel and join the worker before propagating the interrupt to R.
-    bool interrupted = false;
-    while (!finished.load(std::memory_order_acquire)) {
-      logger.flush();
-      if (!interrupted && user_interrupt_pending()) {
-        interrupted = true;
-        cancel_requested.store(true, std::memory_order_release);
-      }
-
-      std::unique_lock<std::mutex> lock(completion_mutex);
-      completion_cv.wait_for(lock, std::chrono::milliseconds(50), [&] {
-        return finished.load(std::memory_order_acquire);
-      });
-    }
-    worker.join();
-    logger.flush();
-
-    if (worker_error) {
-      try {
-        std::rethrow_exception(worker_error);
-      } catch (const std::exception& e) {
-        Rcpp::stop(e.what());
-      } catch (...) {
-        Rcpp::stop("Unknown exception in sampling worker.");
-      }
-    }
-    if (interrupted) {
-      Rcpp::stop("Sampling interrupted.");
-    }
-
-    // ─── Combine results (R thread only) ────────────────────────────
-
+    // --- Combine results (R thread only) ---
     Rcpp::List combined = stack_writer_chains(sample_writers, num_chains);
+    Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
 
-    return Rcpp::List::create(
+    bool metric_captured = false;
+    for (int i = 0; i < num_chains; ++i) {
+      if (metric_writers[i].has_metric()) {
+        metric_captured = true;
+        break;
+      }
+    }
+
+    Rcpp::List result = Rcpp::List::create(
       Rcpp::_["samples"] = combined,
       Rcpp::_["return_code"] = return_code,
       Rcpp::_["method"] = "sample",
       Rcpp::_["algorithm"] = algorithm,
       Rcpp::_["engine"] = engine,
-      Rcpp::_["metric"] = metric
+      Rcpp::_["metric"] = metric,
+      Rcpp::_["inv_metric"] = R_NilValue,
+      Rcpp::_["step_size"] = R_NilValue,
+      Rcpp::_["output"] = output
     );
+
+    if (metric_captured) {
+      Rcpp::List inv_metric(num_chains);
+      Rcpp::NumericVector step_size(num_chains);
+      for (int i = 0; i < num_chains; ++i) {
+        const newstan::r_metric_writer& w = metric_writers[i];
+        step_size[i] = w.stepsize();
+        if (w.is_dense()) {
+          inv_metric[i] = w.inv_metric_matrix();
+        } else {
+          inv_metric[i] = w.inv_metric_vector();
+        }
+      }
+      result["inv_metric"] = inv_metric;
+      result["step_size"] = step_size;
+    }
+
+    return result;
   }
 }
 

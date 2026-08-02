@@ -31,6 +31,11 @@ namespace newstan {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
+    // stan::services::util::initialize() writes the unconstrained initial
+    // values to init_writer as a raw numeric row with no preceding
+    // column-name header, before the algorithm ever touches parameter_writer;
+    // this package doesn't use them.
+    newstan::r_discard_writer init_writer;
     // Stan writes the posterior mean followed by output_samples draws.
     newstan::r_sample_writer sample_writer(output_samples + 1);
     newstan::r_discard_writer diagnostic_writer;
@@ -45,7 +50,7 @@ namespace newstan {
           grad_samples, elbo_samples, iter, tol_rel_obj, eta,
           adapt_engaged, adapt_iter, eval_elbo, output_samples,
           interrupt, logger,
-          sample_writer, sample_writer,
+          init_writer, sample_writer,
           diagnostic_writer);
     } else if (algorithm == "meanfield") {
       return_code = stan::services::experimental::advi::meanfield(
@@ -53,16 +58,18 @@ namespace newstan {
           grad_samples, elbo_samples, iter, tol_rel_obj, eta,
           adapt_engaged, adapt_iter, eval_elbo, output_samples,
           interrupt, logger,
-          sample_writer, sample_writer,
+          init_writer, sample_writer,
           diagnostic_writer);
     }
 
     logger.flush();
+    Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
     return Rcpp::List::create(
       Rcpp::_["draws"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
       Rcpp::_["method"] = "variational",
-      Rcpp::_["algorithm"] = algorithm
+      Rcpp::_["algorithm"] = algorithm,
+      Rcpp::_["output"] = output
     );
   }
 }

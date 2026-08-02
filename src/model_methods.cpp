@@ -1,6 +1,3 @@
-#ifndef NEWSTAN_MODEL_METHODS_HPP
-#define NEWSTAN_MODEL_METHODS_HPP
-
 #include <newstan/r_data_context.hpp>
 #include <stan/math/rev/functor/gradient.hpp>
 #include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>
@@ -54,17 +51,14 @@ Eigen::VectorXd checked_unconstrained_values(
 
 Rcpp::NumericVector eigen_to_numeric(const Eigen::VectorXd& values) {
   Rcpp::NumericVector result(values.size());
-  for (Eigen::Index i = 0; i < values.size(); ++i) result[i] = values[i];
+  Eigen::Map<Eigen::VectorXd>(result.begin(), values.size()) = values;
   return result;
 }
 
 Rcpp::NumericMatrix eigen_to_numeric(const Eigen::MatrixXd& values) {
   Rcpp::NumericMatrix result(values.rows(), values.cols());
-  for (Eigen::Index column = 0; column < values.cols(); ++column) {
-    for (Eigen::Index row = 0; row < values.rows(); ++row) {
-      result(row, column) = values(row, column);
-    }
-  }
+  Eigen::Map<Eigen::MatrixXd>(result.begin(), values.rows(), values.cols()) =
+      values;
   return result;
 }
 
@@ -355,5 +349,3 @@ Rcpp::CharacterVector model_compile_info(
 }
 
 }  // namespace newstan
-
-#endif  // NEWSTAN_MODEL_METHODS_HPP

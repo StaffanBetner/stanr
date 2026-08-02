@@ -22,6 +22,85 @@ test_that("sampling returns expected structure", {
     c("init", "inv_metric") %in%
       names(result$metadata()$arguments)
   ))
+  expect_false("save_metric" %in% names(result$metadata()))
+})
+
+test_that("sampling rejects a non-logical flag argument", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 20,
+      iter_sampling = 20,
+      chains = 1,
+      seed = 42,
+      show_messages = "yes"
+    ),
+    "`show_messages` must be TRUE or FALSE"
+  )
+})
+
+test_that("sampling output() returns non-empty Stan log messages", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 20,
+    iter_sampling = 20,
+    chains = 1,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_type(result$output(), "character")
+  expect_true(length(result$output()) > 0)
+})
+
+test_that("show_messages = FALSE silences the console but output() still works", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- expect_silent(
+    mod$sample(
+      data = data,
+      iter_warmup = 20,
+      iter_sampling = 20,
+      chains = 1,
+      seed = 42,
+      show_messages = FALSE
+    )
+  )
+
+  expect_true(length(result$output()) > 0)
+})
+
+test_that("sampling respects explicit tuning values instead of defaults", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 20,
+    iter_sampling = 20,
+    chains = 1,
+    adapt_delta = 0.95,
+    max_treedepth = 15L,
+    metric = "dense_e",
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  args <- result$metadata()$arguments
+  expect_equal(args$delta, 0.95)
+  expect_equal(args$max_depth, 15L)
+  expect_equal(args$metric, "dense_e")
 })
 
 test_that("sampling with multiple chains works", {
@@ -140,6 +219,78 @@ test_that("sampling with inv_metric (diag_e) works", {
   expect_true(posterior::ndraws(result$draws()) > 0)
 })
 
+test_that("fit$inv_metric() returns per-chain matrices for a diag_e adaptive fit", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 2,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  metric <- result$inv_metric()
+  expect_length(metric, 2)
+  for (m in metric) {
+    expect_true(is.matrix(m))
+    expect_equal(dim(m), c(1, 1))
+  }
+
+  metric_vec <- result$inv_metric(matrix = FALSE)
+  expect_length(metric_vec, 2)
+  for (v in metric_vec) {
+    expect_false(is.matrix(v))
+    expect_length(v, 1)
+  }
+})
+
+test_that("fit$inv_metric() returns dense matrices for metric = 'dense_e' and errors on matrix = FALSE", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 1,
+    engine = "nuts",
+    metric = "dense_e",
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  metric <- result$inv_metric()
+  expect_length(metric, 1)
+  expect_true(is.matrix(metric[[1]]))
+  expect_equal(dim(metric[[1]]), c(1, 1))
+
+  expect_error(result$inv_metric(matrix = FALSE), "only available for diagonal metrics")
+})
+
+test_that("fit$inv_metric() errors when sampling ran without adaptation", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 0,
+    iter_sampling = 50,
+    chains = 1,
+    adapt_engaged = FALSE,
+    step_size = 1,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_error(result$inv_metric(), "no adapted metric is available")
+})
+
 test_that("sampling with save_warmup increases draws", {
   path <- test_path("test-models/bernoulli.stan")
   mod <- stan_model(stan_file = path)
@@ -165,9 +316,9 @@ test_that("sampling with save_warmup increases draws", {
     show_messages = FALSE
   )
 
-  expect_equal(
-    posterior::ndraws(result_no_warmup$draws(inc_warmup = TRUE)),
-    posterior::ndraws(result_no_warmup$draws())
+  expect_error(
+    result_no_warmup$draws(inc_warmup = TRUE),
+    "warmup draws were not saved"
   )
   expect_gt(
     posterior::ndraws(result_warmup$draws(inc_warmup = TRUE)),

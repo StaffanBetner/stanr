@@ -7,6 +7,10 @@
   x
 }
 
+.newstan_flag_or_null <- function(x, name) {
+  if (is.null(x)) x else .newstan_flag(x, name)
+}
+
 .newstan_seed <- function(seed) {
   if (is.null(seed)) {
     seed <- as.integer(stats::runif(1, 1, .Machine$integer.max))
@@ -435,15 +439,16 @@ stan_model_compile <- function(
   force_recompile = private$force_recompile_,
   quiet = private$quiet_
 ) {
+  force_recompile <- .newstan_flag(force_recompile, "force_recompile")
+  quiet <- .newstan_flag(quiet, "quiet")
   private$compiled_env_ <- .compile_stan_model_environment(
-    file = private$stan_file_,
-    code = if (is.null(private$stan_file_)) private$code_ else NULL,
+    code = private$code_,
     model_name = private$model_name_,
     include_directories = private$include_paths_,
     external_cpp = private$external_cpp_,
-    verbose = !isTRUE(quiet),
+    verbose = !quiet,
     precompiled_headers = private$precompiled_headers_,
-    force_recompile = isTRUE(force_recompile)
+    force_recompile = force_recompile
   )
   invisible(self)
 }
@@ -470,9 +475,9 @@ StanModel$set("public", "compile", stan_model_compile)
 #'   a list of lists (one per chain), or a function that takes an optional
 #'   `chain_id` argument and returns a list.
 #' @param chains (integer) The number of MCMC chains.
-#' @param parallel_chains (integer) The number of chains to run in parallel.
 #' @param chain_ids (integer vector) The IDs for each chain.
-#' @param threads_per_chain (integer) The number of threads per chain.
+#' @param num_threads (integer) The total number of threads to use across all
+#'   chains.
 #' @param iter_warmup (integer) The number of warmup iterations.
 #' @param iter_sampling (integer) The number of sampling iterations.
 #' @param save_warmup (logical) Should warmup samples be saved?
@@ -490,13 +495,17 @@ StanModel$set("public", "compile", stan_model_compile)
 #' @param fixed_param (logical) Treat all parameters as fixed (no adaptation).
 #' @param show_messages (logical) Should Stan messages be shown?
 #' @param show_exceptions (logical) Should Stan exceptions be shown?
-#' @param diagnostics (character vector) Which diagnostics to compute.
-#' @param engine (string) The sampling engine: `"nuts"` or `"static"`.
-#' @param int_time (number) Integration time for static HMC.
+#' @param engine (string) The sampling engine: `"nuts"` or `"static"`. Defaults
+#'   to `"nuts"`.
+#' @param int_time (number) Integration time for static HMC. Defaults to `2 * pi`.
 #' @param step_size_jitter (number) Jitter for step size after adaptation.
+#'   Defaults to `0`.
 #' @param adapt_gamma (number) Adaptation hyperparameter for dual averaging.
+#'   Defaults to `0.05`.
 #' @param adapt_kappa (number) Adaptation hyperparameter for dual averaging.
+#'   Defaults to `0.75`.
 #' @param adapt_t0 (number) Adaptation hyperparameter for dual averaging.
+#'   Defaults to `10`.
 #'
 #' @return A [`StanMCMC`] object containing posterior draws and diagnostics.
 #'
@@ -515,9 +524,8 @@ stan_model_sample <- function(
   output_basename = NULL,
   sig_figs = NULL,
   chains = 4,
-  parallel_chains = getOption("mc.cores", 1),
   chain_ids = seq_len(chains),
-  threads_per_chain = NULL,
+  num_threads = getOption("mc.cores", 1),
   opencl_ids = NULL,
   iter_warmup = NULL,
   iter_sampling = NULL,
@@ -536,15 +544,13 @@ stan_model_sample <- function(
   fixed_param = FALSE,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  diagnostics = c("divergences", "treedepth", "ebfmi"),
-  save_metric = getOption("newstan_save_metric", FALSE),
   save_cmdstan_config = getOption("newstan_save_config", FALSE),
-  engine = "nuts",
-  int_time = 2 * pi,
-  step_size_jitter = 0,
-  adapt_gamma = 0.05,
-  adapt_kappa = 0.75,
-  adapt_t0 = 10
+  engine = NULL,
+  int_time = NULL,
+  step_size_jitter = NULL,
+  adapt_gamma = NULL,
+  adapt_kappa = NULL,
+  adapt_t0 = NULL
 ) {
   .newstan_reject_backend_files(
     output_dir,
@@ -553,7 +559,16 @@ stan_model_sample <- function(
     opencl_ids,
     save_cmdstan_config
   )
-  if (isTRUE(save_latent_dynamics)) {
+  save_latent_dynamics <- .newstan_flag(
+    save_latent_dynamics,
+    "save_latent_dynamics"
+  )
+  save_warmup <- .newstan_flag(save_warmup, "save_warmup")
+  adapt_engaged <- .newstan_flag(adapt_engaged, "adapt_engaged")
+  fixed_param <- .newstan_flag(fixed_param, "fixed_param")
+  show_messages <- .newstan_flag(show_messages, "show_messages")
+  show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (save_latent_dynamics) {
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
   }
   if (!is.null(metric_file)) {
@@ -562,15 +577,16 @@ stan_model_sample <- function(
       call. = FALSE
     )
   }
-  args <- .newstan_normalize_sample(
+  ids <- .newstan_validate_chains(chains, chain_ids)
+  call <- .newstan_elapsed(.newstan_run_sampling(
+    self,
     data = data,
     seed = seed,
     refresh = refresh,
     init = init,
     chains = chains,
     chain_ids = chain_ids,
-    parallel_chains = parallel_chains,
-    threads_per_chain = threads_per_chain,
+    num_threads = num_threads,
     iter_warmup = iter_warmup,
     iter_sampling = iter_sampling,
     save_warmup = save_warmup,
@@ -593,25 +609,21 @@ stan_model_sample <- function(
     adapt_gamma = adapt_gamma,
     adapt_kappa = adapt_kappa,
     adapt_t0 = adapt_t0
-  )
-  call <- .newstan_elapsed(.newstan_run_sampling(self, args))
+  ))
   StanMCMC$new(
     payload = call$value,
     model = self,
-    data = args$data,
-    seed = args$seed,
-    init = args$init,
+    data = data %||% list(),
+    seed = call$value$args$seed,
+    init = init %||% 2,
     elapsed = call$elapsed,
     metadata = list(
       method = "sample",
-      chains = args$chains,
-      chain_ids = as.integer(args$chain_ids),
-      parallel_chains = args$parallel_chains,
-      threads_per_chain = args$threads_per_chain,
-      diagnostics = diagnostics,
-      save_metric = isTRUE(save_metric),
-      show_exceptions = args$show_exceptions,
-      save_warmup = args$save_warmup
+      chains = ids$chains,
+      chain_ids = ids$chain_ids,
+      num_threads = as.integer(num_threads %||% 1L),
+      show_exceptions = show_exceptions,
+      save_warmup = save_warmup
     )
   )
 }
@@ -630,7 +642,7 @@ StanModel$set("public", "sample", stan_model_sample)
 #' @param algorithm (string) The optimization algorithm: `"lbfgs"`, `"bfgs"`,
 #'   `"newton"`, or `"irr"` (identity rational function).
 #' @param jacobian (logical) Should the log density be adjusted by the
-#'   abs-determinant of the Jacob of the inverse transformation?
+#'   abs-determinant of the Jacobian of the inverse transformation?
 #' @param init_alpha (number) Initial step size for LBFGS.
 #' @param iter (integer) Maximum number of optimization iterations.
 #' @param tol_obj (number) Absolute tolerance for changes in objective value.
@@ -680,13 +692,17 @@ stan_model_optimize <- function(
     opencl_ids,
     save_cmdstan_config
   )
-  if (isTRUE(jacobian)) {
+  jacobian <- .newstan_flag(jacobian, "jacobian")
+  show_messages <- .newstan_flag(show_messages, "show_messages")
+  show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (jacobian) {
     stop(
       "Jacobian-adjusted optimization is not yet supported by the native service.",
       call. = FALSE
     )
   }
-  args <- .newstan_normalize_optimize(
+  call <- .newstan_elapsed(.newstan_run_optimize(
+    self,
     data = data,
     seed = seed,
     refresh = refresh,
@@ -704,20 +720,19 @@ stan_model_optimize <- function(
     history_size = history_size,
     show_messages = show_messages,
     show_exceptions = show_exceptions
-  )
-  call <- .newstan_elapsed(.newstan_run_optimize(self, args))
+  ))
   StanMLE$new(
     payload = call$value,
     model = self,
-    data = args$data,
-    seed = args$seed,
-    init = args$init,
+    data = data %||% list(),
+    seed = call$value$args$seed,
+    init = init %||% 2,
     elapsed = call$elapsed,
     metadata = list(
       method = "optimize",
-      jacobian = args$jacobian,
-      threads = args$threads,
-      show_exceptions = args$show_exceptions
+      jacobian = jacobian,
+      threads = as.integer(threads %||% 1L),
+      show_exceptions = show_exceptions
     )
   )
 }
@@ -738,6 +753,9 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #'   optimization is run first.
 #' @param opt_args (list) Additional arguments to pass to
 #'   [`$optimize()`][model-method-optimize] when finding the mode.
+#' @param jacobian (logical) Should the log density be adjusted by the
+#'   abs-determinant of the Jacobian of the inverse transformation? Defaults
+#'   to `TRUE`.
 #' @param draws (integer) The number of draws from the Laplace approximation.
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
@@ -775,58 +793,70 @@ stan_model_laplace <- function(
     opencl_ids,
     save_cmdstan_config
   )
-  args <- .newstan_normalize_laplace(
-    data = data,
-    seed = seed,
+  if (!is.null(mode) && !is.null(opt_args)) {
+    stop("`mode` and `opt_args` cannot both be supplied.", call. = FALSE)
+  }
+  jacobian <- .newstan_flag(jacobian, "jacobian")
+  calculate_lp <- .newstan_flag(calculate_lp, "calculate_lp")
+  show_messages <- .newstan_flag(show_messages, "show_messages")
+  show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  # Resolved once so the internal mode-finding optimize() run (if any) and
+  # the laplace run itself agree on data/seed/init.
+  resolved_data <- data %||% list()
+  resolved_seed <- .newstan_seed(seed)
+  resolved_init <- init %||% 2
+
+  mode_fit <- NULL
+  if (is.null(mode)) {
+    mode_fit <- do.call(
+      self$optimize,
+      c(
+        list(
+          data = resolved_data,
+          seed = resolved_seed,
+          init = resolved_init,
+          jacobian = jacobian,
+          show_messages = show_messages,
+          show_exceptions = show_exceptions
+        ),
+        opt_args %||% list()
+      )
+    )
+    mode_val <- mode_fit$mle()
+  } else if (inherits(mode, "StanMLE")) {
+    mode_fit <- mode
+    mode_val <- mode_fit$mle()
+  } else {
+    # Numeric mode vector (newstan extension)
+    mode_val <- mode
+  }
+  call <- .newstan_elapsed(.newstan_run_laplace(
+    self,
+    mode = mode_val,
+    data = resolved_data,
+    seed = resolved_seed,
     refresh = refresh,
-    init = init,
+    init = resolved_init,
     threads = threads,
-    mode = mode,
-    opt_args = opt_args,
     jacobian = jacobian,
     draws = draws,
     calculate_lp = calculate_lp,
     show_messages = show_messages,
     show_exceptions = show_exceptions
-  )
-  mode_fit <- NULL
-  if (is.null(args$mode)) {
-    mode_fit <- do.call(
-      self$optimize,
-      c(
-        list(
-          data = args$data,
-          seed = args$seed,
-          init = args$init,
-          jacobian = args$jacobian,
-          show_messages = args$show_messages,
-          show_exceptions = args$show_exceptions
-        ),
-        args$opt_args
-      )
-    )
-    mode_val <- mode_fit$mle()
-  } else if (inherits(args$mode, "StanMLE")) {
-    mode_fit <- args$mode
-    mode_val <- mode_fit$mle()
-  } else {
-    # Numeric mode vector (newstan extension)
-    mode_val <- args$mode
-  }
-  call <- .newstan_elapsed(.newstan_run_laplace(self, args, mode_val))
+  ))
   StanLaplace$new(
     payload = call$value,
     model = self,
-    data = args$data,
-    seed = args$seed,
-    init = args$init,
+    data = resolved_data,
+    seed = resolved_seed,
+    init = resolved_init,
     elapsed = call$elapsed,
-    mode = mode_fit %||% args$mode,
+    mode = mode_fit %||% mode,
     metadata = list(
       method = "laplace",
-      jacobian = args$jacobian,
-      threads = args$threads,
-      show_exceptions = args$show_exceptions
+      jacobian = jacobian,
+      threads = as.integer(threads %||% 1L),
+      show_exceptions = show_exceptions
     )
   )
 }
@@ -894,10 +924,18 @@ stan_model_variational <- function(
     opencl_ids,
     save_cmdstan_config
   )
-  if (isTRUE(save_latent_dynamics)) {
+  save_latent_dynamics <- .newstan_flag(
+    save_latent_dynamics,
+    "save_latent_dynamics"
+  )
+  adapt_engaged <- .newstan_flag_or_null(adapt_engaged, "adapt_engaged")
+  show_messages <- .newstan_flag(show_messages, "show_messages")
+  show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (save_latent_dynamics) {
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
   }
-  args <- .newstan_normalize_variational(
+  call <- .newstan_elapsed(.newstan_run_variational(
+    self,
     data = data,
     seed = seed,
     refresh = refresh,
@@ -915,19 +953,18 @@ stan_model_variational <- function(
     draws = draws,
     show_messages = show_messages,
     show_exceptions = show_exceptions
-  )
-  call <- .newstan_elapsed(.newstan_run_variational(self, args))
+  ))
   StanVB$new(
     payload = call$value,
     model = self,
-    data = args$data,
-    seed = args$seed,
-    init = args$init,
+    data = data %||% list(),
+    seed = call$value$args$seed,
+    init = init %||% 2,
     elapsed = call$elapsed,
     metadata = list(
       method = "variational",
-      threads = args$threads,
-      show_exceptions = args$show_exceptions
+      threads = as.integer(threads %||% 1L),
+      show_exceptions = show_exceptions
     )
   )
 }
@@ -997,7 +1034,13 @@ stan_model_pathfinder <- function(
     opencl_ids,
     save_cmdstan_config
   )
-  args <- .newstan_normalize_pathfinder(
+  save_single_paths <- .newstan_flag_or_null(save_single_paths, "save_single_paths")
+  psis_resample <- .newstan_flag_or_null(psis_resample, "psis_resample")
+  calculate_lp <- .newstan_flag_or_null(calculate_lp, "calculate_lp")
+  show_messages <- .newstan_flag(show_messages, "show_messages")
+  show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  call <- .newstan_elapsed(.newstan_run_pathfinder(
+    self,
     data = data,
     seed = seed,
     refresh = refresh,
@@ -1020,20 +1063,19 @@ stan_model_pathfinder <- function(
     calculate_lp = calculate_lp,
     show_messages = show_messages,
     show_exceptions = show_exceptions
-  )
-  call <- .newstan_elapsed(.newstan_run_pathfinder(self, args))
+  ))
   StanPathfinder$new(
     payload = call$value,
     model = self,
-    data = args$data,
-    seed = args$seed,
-    init = args$init,
+    data = data %||% list(),
+    seed = call$value$args$seed,
+    init = init %||% 2,
     elapsed = call$elapsed,
     metadata = list(
       method = "pathfinder",
-      num_paths = args$num_paths,
-      threads = args$threads,
-      show_exceptions = args$show_exceptions
+      num_paths = as.integer(num_paths),
+      threads = as.integer(threads %||% 1L),
+      show_exceptions = show_exceptions
     )
   )
 }
@@ -1052,8 +1094,7 @@ StanModel$set("public", "pathfinder", stan_model_pathfinder)
 #'
 #' @param fitted_params A [`StanFit`] object or a draws matrix containing
 #'   parameter values to use for the generated quantities block.
-#' @param parallel_chains (integer) The number of chains to run in parallel.
-#' @param threads_per_chain (integer) The number of threads per chain.
+#' @param num_threads (integer) The total number of threads to use.
 #'
 #' @return A [`StanGQ`] object containing the generated quantities.
 #'
@@ -1068,8 +1109,7 @@ stan_model_generate_quantities <- function(
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
   sig_figs = NULL,
-  parallel_chains = getOption("mc.cores", 1),
-  threads_per_chain = NULL,
+  num_threads = getOption("mc.cores", 1),
   opencl_ids = NULL,
   show_messages = TRUE,
   show_exceptions = TRUE
@@ -1081,33 +1121,28 @@ stan_model_generate_quantities <- function(
     opencl_ids,
     FALSE
   )
-  common <- .newstan_normalize_common(data = data, seed = seed)
-  parallel_chains <- as.integer(parallel_chains %||% 1L)
-  threads_per_chain <- as.integer(threads_per_chain %||% 1L)
-  input <- if (inherits(fitted_params, "StanFit")) {
-    fitted_params$draws(format = "draws_matrix")
-  } else {
-    fitted_params
-  }
+  show_messages <- .newstan_flag(show_messages, "show_messages")
+  show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
   call <- .newstan_elapsed(.newstan_run_generate_quantities(
     self,
-    common,
-    input,
-    parallel_chains,
-    threads_per_chain
+    fitted_params = fitted_params,
+    data = data,
+    seed = seed,
+    num_threads = num_threads,
+    show_messages = show_messages,
+    show_exceptions = show_exceptions
   ))
   StanGQ$new(
     payload = call$value,
     model = self,
-    data = common$data,
-    seed = common$seed,
+    data = data %||% list(),
+    seed = call$value$args$seed,
     init = NULL,
     elapsed = call$elapsed,
     metadata = list(
       method = "generate_quantities",
-      parallel_chains = parallel_chains,
-      threads_per_chain = threads_per_chain,
-      show_exceptions = common$show_exceptions
+      num_threads = as.integer(num_threads %||% 1L),
+      show_exceptions = show_exceptions
     )
   )
 }
@@ -1142,25 +1177,25 @@ stan_model_diagnose <- function(
   error = NULL
 ) {
   .newstan_reject_backend_files(output_dir, output_basename)
-  args <- .newstan_normalize_diagnose(
+  call <- .newstan_elapsed(.newstan_run_diagnose(
+    self,
     data = data,
     seed = seed,
     init = init,
     epsilon = epsilon,
     error = error
-  )
-  call <- .newstan_elapsed(.newstan_run_diagnose(self, args))
+  ))
   StanDiagnose$new(
     payload = call$value,
     model = self,
-    data = args$data,
-    seed = args$seed,
-    init = args$init,
+    data = data %||% list(),
+    seed = call$value$args$seed,
+    init = init %||% 2,
     elapsed = call$elapsed,
     metadata = list(
       method = "diagnose",
-      epsilon = args$epsilon,
-      error = args$error
+      epsilon = epsilon %||% .newstan_defaults$diagnose$epsilon,
+      error = error %||% .newstan_defaults$diagnose$error
     )
   )
 }

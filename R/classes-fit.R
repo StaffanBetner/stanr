@@ -121,7 +121,6 @@
 #'
 #'  |**Method**|**Description**|
 #'  |:----------|:---------------|
-#'  [`$init_model_methods()`][fit-method-init_model_methods] | Initialize model methods for computing log probability and transformations. |
 #'  [`$log_prob()`][fit-method-model-methods] | Compute the log probability. |
 #'  [`$grad_log_prob()`][fit-method-model-methods] | Compute the gradient of the log probability. |
 #'  [`$hessian()`][fit-method-model-methods] | Compute the Hessian of the log probability. |
@@ -156,33 +155,23 @@ StanFit <- R6Class(
       private$data_ <- data
       private$seed_ <- seed
       private$init_ <- init
+      # Reuse the model pointer the run wrapper already constructed (with the
+      # same data/seed) instead of re-running `transformed data` on first use.
+      private$model_ptr_ <- payload$model_ptr
       private$elapsed_ <- elapsed
       private$default_format_ <- default_format
-      private$draws_ <- if (is.list(payload)) {
-        .newstan_normalize_draw_names(payload$draws)
-      } else {
-        NULL
-      }
-      private$diagnostics_ <- if (is.list(payload)) {
-        .newstan_normalize_draw_names(payload$diagnostics)
-      } else {
-        NULL
-      }
-      return_code <- if (is.list(payload)) payload$return_code else NA_integer_
+      private$draws_ <- .newstan_normalize_draw_names(payload$draws)
+      private$diagnostics_ <- .newstan_normalize_draw_names(payload$diagnostics)
       chains <- metadata$chains %||% 1L
       private$return_codes_ <- rep(
-        as.integer(return_code %||% NA_integer_),
+        as.integer(payload$return_code %||% NA_integer_),
         length.out = chains
       )
       private$metadata_ <- utils::modifyList(
         list(
           seed = seed,
           data = data,
-          arguments = if (is.list(payload)) {
-            payload$args %||% list()
-          } else {
-            list()
-          },
+          arguments = payload$args %||% list(),
           model_name = if (inherits(model, "StanModel")) {
             model$model_name()
           } else {
@@ -191,14 +180,7 @@ StanFit <- R6Class(
         ),
         metadata
       )
-      private$output_ <- if (is.list(payload)) {
-        payload$output %||% character()
-      } else {
-        character()
-      }
-      if (inherits(model, "StanModel")) {
-        private$initialize_pointer()
-      }
+      private$output_ <- payload$output %||% character()
       invisible(self)
     }
   ),
@@ -223,15 +205,16 @@ StanFit <- R6Class(
       if (!inherits(private$model_, "StanModel")) {
         return(invisible(NULL))
       }
-      if (!force && !is.null(private$model_ptr_)) {
-        return(invisible(NULL))
+      if (force || is.null(private$model_ptr_)) {
+        private$model_ptr_ <- private$model_$new_model(
+          private$data_,
+          private$seed_
+        )
       }
-      private$model_ptr_ <- private$model_$new_model(
-        private$data_,
-        private$seed_
-      )
-      rng <- private$model_$native_function("new_base_rng", required = FALSE)
-      private$rng_ptr_ <- if (is.null(rng)) NULL else rng(private$seed_)
+      if (force || is.null(private$rng_ptr_)) {
+        rng <- private$model_$native_function("new_base_rng", required = FALSE)
+        private$rng_ptr_ <- if (is.null(rng)) NULL else rng(private$seed_)
+      }
       invisible(NULL)
     },
     ensure_native = function() {
@@ -243,18 +226,22 @@ StanFit <- R6Class(
         "model_num_upars",
         required = FALSE
       )
-      if (!is.null(probe)) {
-        valid <- tryCatch(
-          {
-            probe(private$model_ptr_)
-            TRUE
-          },
-          error = function(e) FALSE
-        )
-        if (!valid) {
-          private$model_$compile(force_recompile = TRUE, quiet = TRUE)
-          private$initialize_pointer(force = TRUE)
-        }
+      if (is.null(probe)) {
+        return(invisible(NULL))
+      }
+      # Fits restored via readRDS() carry a stale external pointer (an Rcpp
+      # XPtr doesn't survive serialization); probing it throws, which signals
+      # a one-time recompile-and-reinitialize.
+      valid <- tryCatch(
+        {
+          probe(private$model_ptr_)
+          TRUE
+        },
+        error = function(e) FALSE
+      )
+      if (!valid) {
+        private$model_$compile(force_recompile = TRUE, quiet = TRUE)
+        private$initialize_pointer(force = TRUE)
       }
       invisible(NULL)
     },
@@ -291,51 +278,17 @@ StanFit <- R6Class(
       transformed_parameters,
       generated_quantities
     ) {
-      if (
-        is.list(metadata) &&
-          all(c("names", "dimensions", "stages") %in% names(metadata))
-      ) {
-        keep <- metadata$stages == "parameter" |
-          (isTRUE(transformed_parameters) &
-            metadata$stages == "transformed_parameter") |
-          (isTRUE(generated_quantities) &
-            metadata$stages == "generated_quantity")
-        result <- lapply(which(keep), function(i) {
-          dims <- metadata$dimensions[[i]]
-          if (!length(dims)) NA_real_ else array(NA_real_, dim = dims)
-        })
-        names(result) <- metadata$names[keep]
-        return(result)
-      }
-      if (is.data.frame(metadata)) {
-        name_col <- intersect(c("name", "variable"), names(metadata))[[1]]
-        dim_col <- intersect(c("dimensions", "dims"), names(metadata))
-        stages <- if ("stage" %in% names(metadata)) {
-          metadata$stage
-        } else {
-          rep("parameter", nrow(metadata))
-        }
-        keep <- stages == "parameter" |
-          (isTRUE(transformed_parameters) & stages == "transformed_parameter") |
-          (isTRUE(generated_quantities) & stages == "generated_quantity")
-        result <- lapply(which(keep), function(i) {
-          dims <- if (length(dim_col)) {
-            metadata[[dim_col[[1]]]][[i]]
-          } else {
-            integer()
-          }
-          if (!length(dims)) NA_real_ else array(NA_real_, dim = dims)
-        })
-        names(result) <- metadata[[name_col]][keep]
-        return(result)
-      }
-      names <- private$model_$native_function("model_constrained_names")(
-        private$model_ptr_,
-        transformed_parameters,
-        generated_quantities
-      )
-      names <- unique(sub("\\[.*$", "", names))
-      stats::setNames(rep(list(NA_real_), length(names)), names)
+      keep <- metadata$stages == "parameter" |
+        (isTRUE(transformed_parameters) &
+          metadata$stages == "transformed_parameter") |
+        (isTRUE(generated_quantities) &
+          metadata$stages == "generated_quantity")
+      result <- lapply(which(keep), function(i) {
+        dims <- metadata$dimensions[[i]]
+        if (!length(dims)) NA_real_ else array(NA_real_, dim = dims)
+      })
+      names(result) <- metadata$names[keep]
+      result
     }
   ),
   cloneable = FALSE
@@ -371,16 +324,24 @@ StanFit <- R6Class(
 NULL
 
 fit_draws <- function(variables = NULL, inc_warmup = FALSE, format = NULL) {
+  inc_warmup <- .newstan_flag(inc_warmup, "inc_warmup")
   if (is.null(private$draws_)) {
     stop("This fit does not contain draws.", call. = FALSE)
   }
   draws <- private$draws_
-  if (isTRUE(inc_warmup) && !is.null(private$warmup_draws_)) {
-    draws <- posterior::bind_draws(
-      private$warmup_draws_,
-      draws,
-      along = "iteration"
-    )
+  if (inc_warmup) {
+    if (!is.null(private$warmup_draws_)) {
+      draws <- posterior::bind_draws(
+        private$warmup_draws_,
+        draws,
+        along = "iteration"
+      )
+    } else if (inherits(self, "StanMCMC")) {
+      stop(
+        "warmup draws were not saved; rerun with `save_warmup = TRUE`",
+        call. = FALSE
+      )
+    }
   }
   draws <- .newstan_select_draws(draws, variables)
   .newstan_as_draws_format(draws, format %||% private$default_format_)
@@ -448,21 +409,20 @@ StanFit$set("public", "print", fit_print)
 #'   ```
 #'   return_codes()
 #'   metadata()
-#'   output(id = NULL)
+#'   output()
 #'   time()
 #'   init()
 #'   code()
 #'   ```
-#'
-#' @param id (integer) Chain or path index for accessing per-chain output.
-#'   If `NULL` (the default), all output is returned.
 #'
 #' @return
 #' * `$return_codes()` returns an integer vector of Stan return codes (one per
 #'   chain or path). A return code of `0` indicates success.
 #' * `$metadata()` returns a named list of fit metadata including the seed,
 #'   data, arguments, and model name.
-#' * `$output()` returns character vector(s) of Stan output messages.
+#' * `$output()` returns a character vector of Stan output messages from the
+#'   run. Messages from all chains or paths are interleaved in one vector;
+#'   per-chain attribution is not available.
 #' * `$time()` returns a list with timing information.
 #' * `$init()` returns the user-specified initial values, or `NULL` if none
 #'   were provided.
@@ -479,13 +439,7 @@ StanFit$set("public", "return_codes", fit_return_codes)
 fit_metadata <- function() private$metadata_
 StanFit$set("public", "metadata", fit_metadata)
 
-fit_output <- function(id = NULL) {
-  if (is.null(id)) {
-    return(private$output_)
-  }
-  if (is.list(private$output_)) {
-    return(private$output_[[id]])
-  }
+fit_output <- function() {
   private$output_
 }
 StanFit$set("public", "output", fit_output)
@@ -563,33 +517,6 @@ StanFit$set("public", "save_object", fit_save_object)
 
 # StanFit model methods --------------------------------------------------------
 
-#' Initialize model methods
-#'
-#' @name fit-method-init_model_methods
-#' @aliases init_model_methods
-#' @family StanFit methods
-#'
-#' @description Initialize the model pointer for computing log probability,
-#'   gradients, Hessians, and parameter transformations. This is called
-#'   automatically when the fit object is created if the model is available.
-#'
-#' @param seed (integer) The random seed for initializing the model.
-#' @param verbose (logical) Whether to show verbose output.
-#'
-#' @return The fitted model object, invisibly.
-#'
-#' @seealso [`$log_prob()`][fit-method-model-methods],
-#'   [`$constrain_variables()`][fit-method-model-methods]
-#'
-NULL
-
-fit_init_model_methods <- function(seed = 1, verbose = FALSE) {
-  private$seed_ <- .newstan_seed(seed)
-  private$initialize_pointer(force = TRUE)
-  invisible(self)
-}
-StanFit$set("public", "init_model_methods", fit_init_model_methods)
-
 #' Compute log probability and transformations
 #'
 #' @name fit-method-model-methods
@@ -597,8 +524,8 @@ StanFit$set("public", "init_model_methods", fit_init_model_methods)
 #'
 #' @description These methods compute the log probability, gradients, Hessians,
 #'   and parameter transformations using the compiled Stan model. They require
-#'   the model to be available and initialized via
-#'   [`$init_model_methods()`][fit-method-init_model_methods].
+#'   the model to be available, and lazily initialize the native model pointer
+#'   on first use.
 #'
 #'   ```
 #'   log_prob(unconstrained_variables, jacobian = TRUE)
@@ -616,7 +543,7 @@ StanFit$set("public", "init_model_methods", fit_init_model_methods)
 #' @param unconstrained_variables (numeric vector) The unconstrained parameter
 #'   values at which to evaluate the function.
 #' @param jacobian (logical) Should the log density be adjusted by the
-#'   abs-determinant of the Jacob of the inverse transformation?
+#'   abs-determinant of the Jacobian of the inverse transformation?
 #' @param variables (named list) Constrained parameter values to unconstrain.
 #' @param draws A posterior draws object, or `NULL` to use the fit's draws.
 #' @param format (string) The output format from the \pkg{posterior} package.
@@ -638,8 +565,6 @@ StanFit$set("public", "init_model_methods", fit_init_model_methods)
 #'   parameter values.
 #' * `$variable_skeleton()` returns a named list with the structure of the
 #'   constrained parameter space.
-#'
-#' @seealso [`$init_model_methods()`][fit-method-init_model_methods]
 #'
 NULL
 
@@ -678,6 +603,14 @@ fit_constrain_variables <- function(
   transformed_parameters = TRUE,
   generated_quantities = TRUE
 ) {
+  transformed_parameters <- .newstan_flag(
+    transformed_parameters,
+    "transformed_parameters"
+  )
+  generated_quantities <- .newstan_flag(
+    generated_quantities,
+    "generated_quantities"
+  )
   private$ensure_native()
   flat <- private$model_$native_function("model_constrain")(
     private$model_ptr_,
@@ -720,6 +653,7 @@ fit_unconstrain_draws <- function(
   format = getOption("newstan_draws_format", "draws_array"),
   inc_warmup = FALSE
 ) {
+  inc_warmup <- .newstan_flag(inc_warmup, "inc_warmup")
   source <- draws %||%
     self$draws(
       inc_warmup = inc_warmup,
@@ -763,6 +697,14 @@ fit_variable_skeleton <- function(
   transformed_parameters = TRUE,
   generated_quantities = TRUE
 ) {
+  transformed_parameters <- .newstan_flag(
+    transformed_parameters,
+    "transformed_parameters"
+  )
+  generated_quantities <- .newstan_flag(
+    generated_quantities,
+    "generated_quantities"
+  )
   metadata <- private$native_call("model_param_metadata")
   private$metadata_skeleton(
     metadata,
@@ -876,6 +818,10 @@ StanMCMC <- R6Class(
 #'   loo(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, ...)
 #'   ```
 #'
+#' @param matrix (logical) For `$inv_metric()`: return each chain's inverse
+#'   metric as a matrix? For a diagonal metric, `TRUE` (the default) wraps the
+#'   adapted diagonal in `diag()`; `FALSE` returns it as a vector. For a dense
+#'   metric, the matrix is always returned and `matrix = FALSE` is an error.
 #'
 #' @return
 #' * `$sampler_diagnostics()` returns sampler diagnostics (e.g., `divergent__`,
@@ -883,7 +829,9 @@ StanMCMC <- R6Class(
 #' * `$num_chains()` returns the number of MCMC chains.
 #' * `$diagnostic_summary()` returns a data frame with counts of divergent
 #'   transitions and max treedepth warnings.
-#' * `$inv_metric()` returns the inverse mass matrix used during sampling.
+#' * `$inv_metric()` returns a list (one element per chain) of the inverse
+#'   mass matrix adapted during sampling. Errors if the fit was not sampled
+#'   with adaptation.
 #' * `$loo()` returns a LOO-CV object from the \pkg{loo} package.
 #'
 #' @seealso [`$draws()`][fit-method-draws], [`$loo()`][fit-method-loo]
@@ -894,11 +842,12 @@ mcmc_sampler_diagnostics <- function(
   inc_warmup = FALSE,
   format = "draws_array"
 ) {
+  inc_warmup <- .newstan_flag(inc_warmup, "inc_warmup")
   diagnostics <- private$diagnostics_
   if (is.null(diagnostics)) {
     stop("This fit does not contain sampler diagnostics.", call. = FALSE)
   }
-  if (isTRUE(inc_warmup) && !is.null(private$warmup_diagnostics_)) {
+  if (inc_warmup && !is.null(private$warmup_diagnostics_)) {
     diagnostics <- posterior::bind_draws(
       private$warmup_diagnostics_,
       diagnostics,
@@ -936,14 +885,27 @@ mcmc_diagnostic_summary <- function() {
 StanMCMC$set("public", "diagnostic_summary", mcmc_diagnostic_summary)
 
 mcmc_inv_metric <- function(matrix = TRUE) {
+  matrix <- .newstan_flag(matrix, "matrix")
   metric <- private$payload_$inv_metric
   if (is.null(metric)) {
     stop(
-      "The native service did not retain an inverse metric.",
+      "no adapted metric is available; the metric is only captured when ",
+      "sampling runs with adaptation",
       call. = FALSE
     )
   }
-  metric
+  dense <- is.matrix(metric[[1]])
+  if (dense) {
+    if (!matrix) {
+      stop("`matrix = FALSE` is only available for diagonal metrics.", call. = FALSE)
+    }
+    return(metric)
+  }
+  if (matrix) {
+    lapply(metric, function(v) diag(v, nrow = length(v)))
+  } else {
+    metric
+  }
 }
 StanMCMC$set("public", "inv_metric", mcmc_inv_metric)
 
@@ -976,9 +938,8 @@ StanMCMC$set("public", "inv_metric", mcmc_inv_metric)
 #'   argument to [loo::loo.array()].
 #' @param moment_match (logical) Whether to use a
 #'   [moment-matching][loo::loo_moment_match()] correction for problematic
-#'   observations. The default is `FALSE`. Using `moment_match = TRUE` will
-#'   result in compiling the additional methods described in
-#'   [fit-method-init_model_methods]. This allows newstan to automatically
+#'   observations. The default is `FALSE`. Using `moment_match = TRUE` uses
+#'   the fit's model methods (see [fit-method-model-methods]) to automatically
 #'   supply the functions for the `log_lik_i`, `unconstrain_pars`,
 #'   `log_prob_upars`, and `log_lik_i_upars` arguments to
 #'   [loo::loo_moment_match()].
@@ -1017,6 +978,7 @@ fit_loo <- function(
   if (!requireNamespace("loo", quietly = TRUE)) {
     stop("The `loo` package is required!", call. = FALSE)
   }
+  moment_match <- .newstan_flag(moment_match, "moment_match")
   if (length(variables) != 1) {
     stop(
       "Only a single variable name is allowed for the 'variables' argument.",
@@ -1036,7 +998,7 @@ fit_loo <- function(
     }
   }
 
-  if (isTRUE(moment_match)) {
+  if (moment_match) {
     suppressWarnings(loo_result <- loo::loo.array(LLarray, r_eff = r_eff, ...))
 
     log_lik_i <- function(x, i, parameter_name = "log_lik", ...) {
@@ -1161,7 +1123,7 @@ mle_mle <- function(variables = NULL) {
 }
 StanMLE$set("public", "mle", mle_mle)
 
-mle_summary <- function(variables = NULL, ...) {
+mle_summary <- function(variables = NULL) {
   value <- self$mle(variables)
   data.frame(
     variable = names(value),
@@ -1272,11 +1234,16 @@ StanVB <- R6Class(
       }
       draws <- .newstan_rename_draw_columns(draws)
       requested <- payload$args$output_samples %||% NULL
+      # ADVI writes the posterior mean as the first row before the requested
+      # draws; drop it when present so draw counts match what was requested.
       if (
         !is.null(draws) && !is.null(requested) && nrow(draws) == requested + 1L
       ) {
         draws <- draws[-1L, , drop = FALSE]
       }
+      # The ADVI writer emits an `lp__` column of placeholder zeros/NAs
+      # (variational inference doesn't track a per-draw log density); drop it
+      # rather than presenting a meaningless constant column.
       if (
         !is.null(draws) &&
           "lp__" %in% colnames(draws) &&
@@ -1443,29 +1410,15 @@ StanDiagnose <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      private$gradients_ <- if (is.list(payload)) {
-        payload$gradients %||% data.frame()
-      } else {
-        data.frame()
-      }
-      private$lp_ <- if (is.list(payload)) {
-        payload$lp %||% NA_real_
-      } else {
-        NA_real_
-      }
-      private$num_failed_ <- if (is.list(payload)) {
-        as.integer(payload$num_failed %||% NA_integer_)
-      } else {
-        as.integer(payload)
-      }
+      private$gradients_ <- payload$gradients %||% data.frame()
+      private$lp_ <- payload$lp %||% NA_real_
+      private$num_failed_ <- as.integer(payload$num_failed %||% NA_integer_)
       metadata$num_failed <- private$num_failed_
       super$initialize(
         list(
-          return_code = if (is.list(payload)) {
-            payload$return_code %||% 0L
-          } else {
-            0L
-          }
+          return_code = payload$return_code %||% 0L,
+          output = payload$output %||% character(),
+          model_ptr = payload$model_ptr
         ),
         model,
         data,

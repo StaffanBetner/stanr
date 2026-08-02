@@ -1,25 +1,41 @@
-# Internal helper for gradient diagnostics.
-# Accepts pre-normalized arguments from .newstan_normalize_diagnose().
-
 #' @noRd
-.newstan_run_diagnose <- function(stanmod, args) {
+.newstan_run_diagnose <- function(
+  stanmod,
+  data = NULL,
+  seed = NULL,
+  init = NULL,
+  epsilon = NULL,
+  error = NULL
+) {
+  common <- .newstan_normalize_common(data = data, seed = seed, init = init)
+  def <- .newstan_defaults$diagnose
+  epsilon <- epsilon %||% def$epsilon
+  error <- error %||% def$error
+
+  if (!is.numeric(epsilon) || length(epsilon) != 1L || epsilon <= 0) {
+    stop("`epsilon` must be a positive number.", call. = FALSE)
+  }
+  if (!is.numeric(error) || length(error) != 1L || error <= 0) {
+    stop("`error` must be a positive number.", call. = FALSE)
+  }
+
   native_args <- list(
     method = "diagnose",
-    epsilon = as.double(args$epsilon),
-    error = as.double(args$error),
-    seed = as.integer(args$seed),
+    epsilon = as.double(epsilon),
+    error = as.double(error),
+    seed = as.integer(common$seed),
     id = 1L,
-    init_radius = init_radius(args$init),
+    init_radius = init_radius(common$init),
     verbose = TRUE,
     num_threads = 1L,
-    init = normalize_init(args$init)
+    init = normalize_init(common$init)
   )
 
-  model_instance <- new_model_instance(stanmod, args$data, args$seed)
+  model <- stanmod$new_model(common$data, common$seed)
 
   withr::with_envvar(
     c(STAN_NUM_THREADS = 1),
-    result <- stanmod$run_model(model_instance$model, native_args)
+    result <- stanmod$run_model(model, native_args)
   )
 
   n_failed <- as.integer(result$num_failed)
@@ -41,7 +57,10 @@
     num_failed = n_failed,
     return_code = if (n_failed == 0L) 0L else 1L,
     gradients = parsed$gradients,
-    lp = parsed$lp
+    lp = parsed$lp,
+    output = output_lines,
+    args = service_args(native_args),
+    model_ptr = model
   )
 }
 

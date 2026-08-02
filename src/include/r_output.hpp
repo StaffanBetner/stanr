@@ -10,17 +10,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <stdexcept>
 #include <vector>
 #include <string>
 
 namespace newstan {
 
-// ===================================================================
-// Sample writer — collects parameter samples using Eigen::MatrixXd
-// for cache-friendly, vectorized storage. Thread-safe for single-writer
+// Collects parameter samples into an Eigen::MatrixXd. Safe for single-writer
 // access per chain during parallel (multi-chain) sampling.
-// ===================================================================
-
 class r_sample_writer : public stan::callbacks::writer {
  private:
   std::vector<std::string> colnames_;
@@ -43,7 +40,11 @@ class r_sample_writer : public stan::callbacks::writer {
   template <typename RowType>
   void append_row(const RowType& row) {
     int n = static_cast<int>(row.size());
-    if (n_cols_ != 0 && n != n_cols_) return;
+    if (n_cols_ != 0 && n != n_cols_) {
+      throw std::runtime_error(
+          "r_sample_writer: row has " + std::to_string(n) +
+          " columns, expected " + std::to_string(n_cols_) + ".");
+    }
     if (n_cols_ == 0) {
       n_cols_ = n;
       if (expected_rows_ > 0) {
@@ -66,6 +67,13 @@ class r_sample_writer : public stan::callbacks::writer {
     n_rows_++;
   }
 
+  void check_initialized() const {
+    if (!initialized_) {
+      throw std::runtime_error(
+          "r_sample_writer: received a value row before the column names.");
+    }
+  }
+
  public:
 
   void operator()(const std::vector<std::string>& names) override {
@@ -79,7 +87,7 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   void operator()(const std::vector<double>& state) override {
-    if (!initialized_) return;
+    check_initialized();
     this->append_row(Eigen::Map<const Eigen::RowVectorXd>(
       state.data(), static_cast<Eigen::Index>(state.size())));
   }
@@ -94,7 +102,7 @@ class r_sample_writer : public stan::callbacks::writer {
 
   void operator()(const Eigen::MatrixXd& values) override {
     // Handle matrix outputs. Each row is treated as a sample.
-    if (!initialized_) return;
+    check_initialized();
     for (Eigen::Index i = 0; i < values.rows(); ++i) {
       this->append_row(values.row(i));
     }
@@ -102,13 +110,13 @@ class r_sample_writer : public stan::callbacks::writer {
 
   void operator()(const Eigen::Matrix<double, -1, 1>& values) override {
     // Column vector — treat as a single row sample (transposed)
-    if (!initialized_) return;
+    check_initialized();
     this->append_row(values.transpose());
   }
 
   void operator()(const Eigen::Matrix<double, 1, -1>& values) override {
     // Row vector — treat as a single row sample (used by pathfinder)
-    if (!initialized_) return;
+    check_initialized();
     this->append_row(values);
   }
 
@@ -154,15 +162,10 @@ class r_sample_writer : public stan::callbacks::writer {
   bool is_valid() const noexcept override { return true; }
 };
 
-// ===================================================================
-// Diagnostic writer — collects diagnostic columns (energy__, divergent__, etc.)
-// Uses Eigen::MatrixXd for cache-friendly storage during parallel sampling.
-// ===================================================================
-
-// The Stan sampler writes diagnostics to a separate callback even though the
-// sample callback already receives the sampler columns.  Sampling currently
-// exposes one combined sample data frame, so retaining a second matrix only
-// duplicates memory and work.
+// The Stan sampler writes diagnostics (energy__, divergent__, etc.) to a
+// separate callback even though the sample callback already receives the
+// sampler columns.  Sampling currently exposes one combined sample data
+// frame, so retaining a second matrix only duplicates memory and work.
 class r_discard_writer : public stan::callbacks::writer {
  public:
   void operator()(const std::vector<std::string>&) override {}

@@ -3,7 +3,6 @@
 #include <Rcpp.h>
 #include <RcppEigen.h>
 
-#include <stan/services/error_codes.hpp>
 #include <stan/model/model_base.hpp>
 
 #include "include/run_advi.hpp"
@@ -24,8 +23,6 @@ Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
   // Extract method from args
   std::string method = Rcpp::as<std::string>(args["method"]);
 
-  int return_code = stan::services::error_codes::CONFIG;
-
   if (method == "sample") {
     return newstan::run_sampling(model, args);
   } else if (method == "optimize") {
@@ -41,16 +38,7 @@ Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
   } else if (method == "laplace") {
     return newstan::run_laplace(model, args);
   } else {
-    std::ostringstream msg;
-    msg << "Unknown method: " << method;
-    Rcpp::Rcout << msg.str() << std::endl;
-    return_code = stan::services::error_codes::CONFIG;
+    Rcpp::stop("Unknown method: " + method);
   }
-
-  // Fallback: build minimal result list
-  return Rcpp::List::create(
-    Rcpp::_["return_code"] = return_code,
-    Rcpp::_["method"] = method
-  );
 }
 }  // namespace newstan

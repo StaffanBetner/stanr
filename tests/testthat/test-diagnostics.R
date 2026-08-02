@@ -100,6 +100,18 @@ test_that("$lp() returns different values for different seeds", {
 })
 
 # ---------------------------------------------------------------------------
+# $output() method
+# ---------------------------------------------------------------------------
+
+test_that("$output() returns the gradient-table lines", {
+  mod <- get_bernoulli_model()
+  result <- suppressMessages(mod$diagnose(data = bernoulli_data, seed = 42))
+
+  expect_true(is.character(result$output()))
+  expect_gt(length(result$output()), 0)
+})
+
+# ---------------------------------------------------------------------------
 # Argument handling
 # ---------------------------------------------------------------------------
 

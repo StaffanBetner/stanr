@@ -45,13 +45,6 @@ init_radius <- function(init) {
   2
 }
 
-# Construct the concrete model in its generated shared library. The wrapper
-# constructs the data context locally, so no R external pointer crosses into
-# the model implementation.
-new_model_instance <- function(stanmod, data, seed) {
-  list(model = stanmod$new_model(data, seed))
-}
-
 # Keep service results small: data, initialization values, draws, and metrics can
 # be large and are inputs rather than service configuration.
 service_args <- function(args) {

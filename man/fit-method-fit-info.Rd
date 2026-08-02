@@ -3,17 +3,15 @@
 \name{fit-method-fit-info}
 \alias{fit-method-fit-info}
 \title{Access fit information}
-\arguments{
-\item{id}{(integer) Chain or path index for accessing per-chain output.
-If \code{NULL} (the default), all output is returned.}
-}
 \value{
 \itemize{
 \item \verb{$return_codes()} returns an integer vector of Stan return codes (one per
 chain or path). A return code of \code{0} indicates success.
 \item \verb{$metadata()} returns a named list of fit metadata including the seed,
 data, arguments, and model name.
-\item \verb{$output()} returns character vector(s) of Stan output messages.
+\item \verb{$output()} returns a character vector of Stan output messages from the
+run. Messages from all chains or paths are interleaved in one vector;
+per-chain attribution is not available.
 \item \verb{$time()} returns a list with timing information.
 \item \verb{$init()} returns the user-specified initial values, or \code{NULL} if none
 were provided.
@@ -26,7 +24,7 @@ These methods access information stored in a \code{\link{StanFit}} object.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{return_codes()
 metadata()
-output(id = NULL)
+output()
 time()
 init()
 code()
@@ -39,7 +37,6 @@ Other StanFit methods:
 \code{\link{fit-method-diagnose}},
 \code{\link{fit-method-draws}},
 \code{\link{fit-method-gq}},
-\code{\link{fit-method-init_model_methods}},
 \code{\link{fit-method-laplace-mode}},
 \code{\link{fit-method-loo}},
 \code{\link{fit-method-lp}},

@@ -44,7 +44,6 @@ approximation), \code{\link{StanVB}} (variational inference), \code{\link{StanPa
 
 \subsection{Model methods}{\tabular{ll}{
    \strong{Method} \tab \strong{Description} \cr
-   \code{\link[=fit-method-init_model_methods]{$init_model_methods()}} \tab Initialize model methods for computing log probability and transformations. \cr
    \code{\link[=fit-method-model-methods]{$log_prob()}} \tab Compute the log probability. \cr
    \code{\link[=fit-method-model-methods]{$grad_log_prob()}} \tab Compute the gradient of the log probability. \cr
    \code{\link[=fit-method-model-methods]{$hessian()}} \tab Compute the Hessian of the log probability. \cr

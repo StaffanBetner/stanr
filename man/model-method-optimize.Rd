@@ -9,7 +9,7 @@
 \code{"newton"}, or \code{"irr"} (identity rational function).}
 
 \item{jacobian}{(logical) Should the log density be adjusted by the
-abs-determinant of the Jacob of the inverse transformation?}
+abs-determinant of the Jacobian of the inverse transformation?}
 
 \item{init_alpha}{(number) Initial step size for LBFGS.}
 
