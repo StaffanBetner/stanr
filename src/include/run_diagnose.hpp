@@ -21,7 +21,8 @@ namespace newstan {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
-    newstan::r_sample_writer sample_writer;
+    newstan::r_sample_writer init_writer;
+    newstan::r_sample_writer param_writer;
     newstan::r_logger logger(verbose);
     newstan::r_interrupt interrupt;
 
@@ -30,13 +31,21 @@ namespace newstan {
         model, init_ctx, seed, chain_id, init_radius,
         epsilon, error_thresh,
         interrupt, logger,
-        sample_writer, sample_writer);
+        init_writer, param_writer);
 
     logger.flush();
+
+    // Return raw output messages for parsing in R, along with n_failed
+    Rcpp::CharacterVector messages(
+        param_writer.messages().begin(),
+        param_writer.messages().end()
+    );
+
     return Rcpp::List::create(
       Rcpp::_["num_failed"] = n_failed,
       Rcpp::_["return_code"] = n_failed == 0 ? 0 : 1,
-      Rcpp::_["method"] = "diagnose"
+      Rcpp::_["method"] = "diagnose",
+      Rcpp::_["output"] = messages
     );
   }
 }

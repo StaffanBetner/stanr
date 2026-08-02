@@ -1,47 +1,51 @@
+---
+output: github_document
+---
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
+
+
 
 # newstan
 
 <!-- badges: start -->
-
 <!-- badges: end -->
 
 `newstan` is an R interface for compiling Stan programs and running Stan
 services directly from R. It uses an R6-based API similar to `cmdstanr`:
-`stan_model()` returns a \[`StanModel`\] object, and inference methods
-(`$sample()`, `$optimize()`, `$variational()`, etc.) return R6 fit
-objects with methods for extracting draws, summaries, and diagnostics.
-Results use `posterior` draw objects where possible.
+`stan_model()` returns a [`StanModel`] object, and inference methods
+(`$sample()`, `$optimize()`, `$variational()`, etc.) return R6 fit objects
+with methods for extracting draws, summaries, and diagnostics. Results use
+`posterior` draw objects where possible.
 
 ## Inference Methods
 
 | Method | Purpose | Return type |
-|----|----|----|
-| \[`$sample()`\]\[model-method-sample\] | MCMC sampling (HMC/NUTS, static HMC, fixed param) | \[`StanMCMC`\] |
-| \[`$optimize()`\]\[model-method-optimize\] | Posterior mode or maximum likelihood estimate | \[`StanMLE`\] |
-| \[`$laplace()`\]\[model-method-laplace\] | Laplace approximation draws around a mode | \[`StanLaplace`\] |
-| \[`$variational()`\]\[model-method-variational\] | ADVI approximate posterior draws | \[`StanVB`\] |
-| \[`$pathfinder()`\]\[model-method-pathfinder\] | Pathfinder approximate posterior draws | \[`StanPathfinder`\] |
-| \[`$generate_quantities()`\]\[model-method-generate-quantities\] | Generated quantities from existing draws | \[`StanGQ`\] |
-| \[`$diagnose()`\]\[model-method-diagnose\] | Gradient checking diagnostic | \[`StanDiagnose`\] |
+| --- | --- | --- |
+| [`$sample()`][model-method-sample] | MCMC sampling (HMC/NUTS, static HMC, fixed param) | [`StanMCMC`] |
+| [`$optimize()`][model-method-optimize] | Posterior mode or maximum likelihood estimate | [`StanMLE`] |
+| [`$laplace()`][model-method-laplace] | Laplace approximation draws around a mode | [`StanLaplace`] |
+| [`$variational()`][model-method-variational] | ADVI approximate posterior draws | [`StanVB`] |
+| [`$pathfinder()`][model-method-pathfinder] | Pathfinder approximate posterior draws | [`StanPathfinder`] |
+| [`$generate_quantities()`][model-method-generate-quantities] | Generated quantities from existing draws | [`StanGQ`] |
+| [`$diagnose()`][model-method-diagnose] | Gradient checking diagnostic | [`StanDiagnose`] |
 
 ## Fit Object Methods
 
-All fit objects inherit from \[`StanFit`\] and share common methods:
+All fit objects inherit from [`StanFit`] and share common methods:
 
 | Method | Description |
-|----|----|
-| \[`$draws()`\]\[fit-method-draws\] | Extract draws as `posterior` objects |
-| \[`$summary()`\]\[fit-method-summary\] | Summarize draws via `posterior::summarise_draws()` |
-| \[`$print()`\]\[fit-method-print\] | Print a summary table |
-| \[`$return_codes()`\]\[fit-method-fit-info\] | Stan return codes (0 = success) |
-| \[`$metadata()`\]\[fit-method-fit-info\] | Fit metadata (seed, data, arguments) |
-| \[`$time()`\]\[fit-method-fit-info\] | Timing information |
-| \[`$log_prob()`\]\[fit-method-model-methods\] | Evaluate log probability |
-| \[`$constrain_variables()`\]\[fit-method-model-methods\] | Constrain unconstrained parameters |
-| \[`$unconstrain_variables()`\]\[fit-method-model-methods\] | Unconstrain parameters |
-| \[`$save_object()`\]\[fit-method-save\] | Save fit to file |
+| --- | --- |
+| [`$draws()`][fit-method-draws] | Extract draws as `posterior` objects |
+| [`$summary()`][fit-method-summary] | Summarize draws via `posterior::summarise_draws()` |
+| [`$print()`][fit-method-print] | Print a summary table |
+| [`$return_codes()`][fit-method-fit-info] | Stan return codes (0 = success) |
+| [`$metadata()`][fit-method-fit-info] | Fit metadata (seed, data, arguments) |
+| [`$time()`][fit-method-fit-info] | Timing information |
+| [`$log_prob()`][fit-method-model-methods] | Evaluate log probability |
+| [`$constrain_variables()`][fit-method-model-methods] | Constrain unconstrained parameters |
+| [`$unconstrain_variables()`][fit-method-model-methods] | Unconstrain parameters |
+| [`$save_object()`][fit-method-save] | Save fit to file |
 
 ## Installation
 
@@ -55,7 +59,8 @@ pak::pak("andrjohns/newstan")
 ## Compile a Model
 
 Models are compiled from a string or from a `.stan` file. `stan_model()`
-returns a \[`StanModel`\] R6 object.
+returns a [`StanModel`] R6 object.
+
 
 ``` r
 library(newstan)
@@ -86,8 +91,9 @@ data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 
 ## Sampling
 
-Call `$sample()` on a \[`StanModel`\] to run MCMC. The result is a
-\[`StanMCMC`\] object with methods for extracting draws and diagnostics.
+Call `$sample()` on a [`StanModel`] to run MCMC. The result is a
+[`StanMCMC`] object with methods for extracting draws and diagnostics.
+
 
 ``` r
 fit <- mod$sample(
@@ -100,12 +106,12 @@ fit <- mod$sample(
 )
 
 posterior::variables(fit$draws())
-#>  [1] "lp__"        "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]" 
-#>  [6] "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]"  "log_lik[8]" 
-#> [11] "log_lik[9]"  "log_lik[10]"
+#>  [1] "lp__"        "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]"  "log_lik[6]" 
+#>  [9] "log_lik[7]"  "log_lik[8]"  "log_lik[9]"  "log_lik[10]"
 ```
 
 Extract a summary via `$summary()`:
+
 
 ``` r
 fit$summary()
@@ -128,6 +134,7 @@ fit$summary()
 
 Access sampler diagnostics and chain information:
 
+
 ``` r
 list(
   chains = fit$num_chains(),
@@ -148,6 +155,7 @@ list(
 ### Fixed Param
 
 For models without parameters, use `fixed_param = TRUE`:
+
 
 ``` r
 fixed_param_model <- "
@@ -179,11 +187,11 @@ posterior::variables(fixed_fit$draws())
 
 ### Supplying Inverse Metrics
 
-`$sample()` accepts precomputed inverse metric values through
-`inv_metric`.
+`$sample()` accepts precomputed inverse metric values through `inv_metric`.
 
-For a diagonal metric, pass a numeric vector with one value per
-unconstrained parameter:
+For a diagonal metric, pass a numeric vector with one value per unconstrained
+parameter:
+
 
 ``` r
 diag_fit <- mod$sample(
@@ -197,13 +205,13 @@ diag_fit <- mod$sample(
 )
 
 posterior::variables(diag_fit$draws())
-#>  [1] "lp__"        "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]" 
-#>  [6] "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]"  "log_lik[8]" 
-#> [11] "log_lik[9]"  "log_lik[10]"
+#>  [1] "lp__"        "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]"  "log_lik[6]" 
+#>  [9] "log_lik[7]"  "log_lik[8]"  "log_lik[9]"  "log_lik[10]"
 ```
 
-For a dense metric, pass a square matrix. To provide one metric per
-chain, pass a list whose length equals `chains`:
+For a dense metric, pass a square matrix. To provide one metric per chain,
+pass a list whose length equals `chains`:
+
 
 ``` r
 dense_fit <- mod$sample(
@@ -218,14 +226,14 @@ dense_fit <- mod$sample(
 )
 
 posterior::variables(dense_fit$draws())
-#>  [1] "lp__"        "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]" 
-#>  [6] "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]"  "log_lik[8]" 
-#> [11] "log_lik[9]"  "log_lik[10]"
+#>  [1] "lp__"        "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]"  "log_lik[6]" 
+#>  [9] "log_lik[7]"  "log_lik[8]"  "log_lik[9]"  "log_lik[10]"
 ```
 
 ## Pathfinder
 
 Call `$pathfinder()` for an approximate posterior based on L-BFGS paths.
+
 
 ``` r
 pf <- mod$pathfinder(
@@ -238,9 +246,8 @@ pf <- mod$pathfinder(
 )
 
 posterior::variables(pf$draws())
-#>  [1] "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]" 
-#>  [6] "log_lik[5]"  "log_lik[6]"  "log_lik[7]"  "log_lik[8]"  "log_lik[9]" 
-#> [11] "log_lik[10]" "lp_approx__" "lp__"        "path__"
+#>  [1] "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]" 
+#>  [9] "log_lik[8]"  "log_lik[9]"  "log_lik[10]" "lp_approx__" "lp__"        "path__"
 pf$summary()
 #> # A tibble: 14 × 10
 #>    variable      mean median    sd   mad      q5    q95   rhat ess_bulk ess_tail
@@ -263,8 +270,9 @@ pf$summary()
 
 ## Variational Inference
 
-Call `$variational()` for ADVI with either a mean-field or full-rank
-Gaussian family.
+Call `$variational()` for ADVI with either a mean-field or full-rank Gaussian
+family.
+
 
 ``` r
 vb <- mod$variational(
@@ -277,9 +285,8 @@ vb <- mod$variational(
 )
 
 posterior::variables(vb$draws())
-#>  [1] "lp_approx__" "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]" 
-#>  [6] "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]"  "log_lik[8]" 
-#> [11] "log_lik[9]"  "log_lik[10]"
+#>  [1] "lp_approx__" "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]"  "log_lik[6]" 
+#>  [9] "log_lik[7]"  "log_lik[8]"  "log_lik[9]"  "log_lik[10]"
 vb$summary()
 #> # A tibble: 12 × 10
 #>    variable      mean median    sd   mad     q5      q95  rhat ess_bulk ess_tail
@@ -300,8 +307,8 @@ vb$summary()
 
 ## Optimization
 
-Call `$optimize()` to find a posterior mode or maximum likelihood
-estimate.
+Call `$optimize()` to find a posterior mode or maximum likelihood estimate.
+
 
 ``` r
 opt <- mod$optimize(
@@ -312,10 +319,10 @@ opt <- mod$optimize(
 )
 
 opt$mle()
-#> converged__       theta  log_lik[1]  log_lik[2]  log_lik[3]  log_lik[4] 
-#>  31.0000000   0.5000001  -0.6931471  -0.6931473  -0.6931471  -0.6931471 
-#>  log_lik[5]  log_lik[6]  log_lik[7]  log_lik[8]  log_lik[9] log_lik[10] 
-#>  -0.6931473  -0.6931471  -0.6931473  -0.6931473  -0.6931471  -0.6931473
+#> converged__       theta  log_lik[1]  log_lik[2]  log_lik[3]  log_lik[4]  log_lik[5]  log_lik[6]  log_lik[7]  log_lik[8] 
+#>  31.0000000   0.5000001  -0.6931471  -0.6931473  -0.6931471  -0.6931471  -0.6931473  -0.6931471  -0.6931473  -0.6931473 
+#>  log_lik[9] log_lik[10] 
+#>  -0.6931471  -0.6931473
 opt$summary()
 #>       variable   estimate
 #> 1  converged__ 31.0000000
@@ -334,8 +341,9 @@ opt$summary()
 
 ## Laplace Approximation
 
-Call `$laplace()` to draw from a Gaussian approximation around a mode.
-Pass a \[`StanMLE`\] object or let `$laplace()` run optimization first.
+Call `$laplace()` to draw from a Gaussian approximation around a mode. Pass a
+[`StanMLE`] object or let `$laplace()` run optimization first.
+
 
 ``` r
 lap <- mod$laplace(
@@ -347,9 +355,8 @@ lap <- mod$laplace(
 )
 
 posterior::variables(lap$draws())
-#>  [1] "lp__"        "lp_approx__" "theta"       "log_lik[1]"  "log_lik[2]" 
-#>  [6] "log_lik[3]"  "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]" 
-#> [11] "log_lik[8]"  "log_lik[9]"  "log_lik[10]"
+#>  [1] "lp__"        "lp_approx__" "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]" 
+#>  [9] "log_lik[6]"  "log_lik[7]"  "log_lik[8]"  "log_lik[9]"  "log_lik[10]"
 lap$summary()
 #> Warning: The ESS has been capped to avoid unstable estimates.
 #> Warning: The ESS has been capped to avoid unstable estimates.
@@ -382,8 +389,9 @@ lap$summary()
 
 ## Generated Quantities
 
-Call `$generate_quantities()` with a \[`StanFit`\] object or draws
-matrix to evaluate the generated quantities block.
+Call `$generate_quantities()` with a [`StanFit`] object or draws matrix to
+evaluate the generated quantities block.
+
 
 ``` r
 gq <- mod$generate_quantities(
@@ -396,8 +404,8 @@ gq <- mod$generate_quantities(
 #>  Elapsed Time: 0 seconds (Generated Quantities)
 
 posterior::variables(gq$draws())
-#>  [1] "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]" 
-#>  [6] "log_lik[6]"  "log_lik[7]"  "log_lik[8]"  "log_lik[9]"  "log_lik[10]"
+#>  [1] "log_lik[1]"  "log_lik[2]"  "log_lik[3]"  "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]"  "log_lik[8]" 
+#>  [9] "log_lik[9]"  "log_lik[10]"
 gq$summary()
 #> # A tibble: 10 × 10
 #>    variable      mean median    sd   mad    q5    q95  rhat ess_bulk ess_tail
@@ -419,6 +427,7 @@ gq$summary()
 Call `$diagnose()` to compare autodiff gradients with finite-difference
 approximations.
 
+
 ``` r
 diag <- mod$diagnose(
   data = data,
@@ -434,19 +443,25 @@ diag <- mod$diagnose(
 
 list(
   num_failed = diag$num_failed(),
+  lp = diag$lp(),
   gradients = diag$gradients()
 )
 #> $num_failed
 #> [1] 0
 #> 
+#> $lp
+#> [1] -12.776
+#> 
 #> $gradients
-#> data frame with 0 columns and 0 rows
+#>   param_idx   value    model finite_diff       error
+#> 1         0 1.83245 -4.34465    -4.34465 1.38252e-09
 ```
 
 ## Stan Compilation Helpers
 
-`stanc()` compiles Stan code to C++ and returns the generated C++ source
-as a single string.
+`stanc()` compiles Stan code to C++ and returns the generated C++ source as a
+single string.
+
 
 ``` r
 cpp_code <- stanc(bernoulli_model)
@@ -454,6 +469,6 @@ substr(cpp_code, 1, 80)
 #> [1] "// Code generated by stanc 4d256d1\n#include <stan/model/model_header.hpp>\nnamesp"
 ```
 
-`stan_model()` is the higher-level entry point: it calls `stanc()`,
-compiles the generated C++, and returns a \[`StanModel`\] object used by
-all inference methods.
+`stan_model()` is the higher-level entry point: it calls `stanc()`, compiles
+the generated C++, and returns a [`StanModel`] object used by all inference
+methods.

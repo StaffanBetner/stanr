@@ -6,7 +6,10 @@
 \value{
 \itemize{
 \item \verb{$gradients()} returns a data frame with gradient check results for each
-parameter.
+parameter, including columns \code{param_idx}, \code{value}, \code{model}, \code{finite_diff},
+and \code{error}.
+\item \verb{$lp()} returns the log probability evaluated at the initial parameter
+values.
 \item \verb{$num_failed()} returns the number of parameters that failed the gradient
 check.
 }
@@ -15,6 +18,7 @@ check.
 Access gradient checking results from a \code{\link{StanDiagnose}} object.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{gradients()
+lp()
 num_failed()
 }\if{html}{\out{</div>}}
 }

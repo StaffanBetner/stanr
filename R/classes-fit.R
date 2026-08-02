@@ -1294,6 +1294,8 @@ StanGQ$set("public", "num_chains", gq_num_chains)
 #'  |**Method**|**Description**|
 #'  |:----------|:---------------|
 #'  [`$gradients()`][fit-method-diagnose] | Return the gradient check results. |
+#'  [`$lp()`][fit-method-diagnose] | Return the log probability evaluated at the
+#'   initial parameter values. |
 #'  [`$num_failed()`][fit-method-diagnose] | Return the number of failed gradient checks. |
 #'
 NULL
@@ -1303,7 +1305,7 @@ StanDiagnose <- R6Class(
   inherit = StanFit,
   public = list(
     initialize = function(
-      payload = NA_integer_,
+      payload = list(),
       model = NULL,
       data = list(),
       seed = 1L,
@@ -1311,9 +1313,30 @@ StanDiagnose <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      metadata$num_failed <- as.integer(payload)
+      private$gradients_ <- if (is.list(payload)) {
+        payload$gradients %||% data.frame()
+      } else {
+        data.frame()
+      }
+      private$lp_ <- if (is.list(payload)) {
+        payload$lp %||% NA_real_
+      } else {
+        NA_real_
+      }
+      private$num_failed_ <- if (is.list(payload)) {
+        as.integer(payload$num_failed %||% NA_integer_)
+      } else {
+        as.integer(payload)
+      }
+      metadata$num_failed <- private$num_failed_
       super$initialize(
-        list(return_code = 0L, gradients = attr(payload, "gradients")),
+        list(
+          return_code = if (is.list(payload)) {
+            payload$return_code %||% 0L
+          } else {
+            0L
+          }
+        ),
         model,
         data,
         seed,
@@ -1323,6 +1346,11 @@ StanDiagnose <- R6Class(
         default_format = "draws_matrix"
       )
     }
+  ),
+  private = list(
+    gradients_ = NULL,
+    lp_ = NULL,
+    num_failed_ = NULL
   ),
   cloneable = FALSE
 )
@@ -1336,12 +1364,16 @@ StanDiagnose <- R6Class(
 #'
 #'   ```
 #'   gradients()
+#'   lp()
 #'   num_failed()
 #'   ```
 #'
 #' @return
 #' * `$gradients()` returns a data frame with gradient check results for each
-#'   parameter.
+#'   parameter, including columns `param_idx`, `value`, `model`, `finite_diff`,
+#'   and `error`.
+#' * `$lp()` returns the log probability evaluated at the initial parameter
+#'   values.
 #' * `$num_failed()` returns the number of parameters that failed the gradient
 #'   check.
 #'
@@ -1349,8 +1381,11 @@ StanDiagnose <- R6Class(
 #'
 NULL
 
-diagnose_gradients <- function() private$payload_$gradients %||% data.frame()
+diagnose_gradients <- function() private$gradients_
 StanDiagnose$set("public", "gradients", diagnose_gradients)
 
-diagnose_num_failed <- function() private$metadata_$num_failed
+diagnose_lp <- function() as.numeric(private$lp_)
+StanDiagnose$set("public", "lp", diagnose_lp)
+
+diagnose_num_failed <- function() private$num_failed_
 StanDiagnose$set("public", "num_failed", diagnose_num_failed)

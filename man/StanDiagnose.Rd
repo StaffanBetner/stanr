@@ -13,6 +13,8 @@ gradient checking diagnostics.
 \code{StanDiagnose} objects have:\tabular{ll}{
    \strong{Method} \tab \strong{Description} \cr
    \code{\link[=fit-method-diagnose]{$gradients()}} \tab Return the gradient check results. \cr
+   \code{\link[=fit-method-diagnose]{$lp()}} \tab Return the log probability evaluated at the \cr
+   initial parameter values. \tab  \cr
    \code{\link[=fit-method-diagnose]{$num_failed()}} \tab Return the number of failed gradient checks. \cr
 }
 }

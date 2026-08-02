@@ -574,13 +574,22 @@
   error = NULL
 ) {
   def <- .newstan_defaults$diagnose
+  epsilon <- .resolve_default(epsilon, def, "epsilon")
+  error <- .resolve_default(error, def, "error")
+
+  if (!is.numeric(epsilon) || length(epsilon) != 1L || epsilon <= 0) {
+    stop("`epsilon` must be a positive number.", call. = FALSE)
+  }
+  if (!is.numeric(error) || length(error) != 1L || error <= 0) {
+    stop("`error` must be a positive number.", call. = FALSE)
+  }
 
   list(
     data = data %||% list(),
     seed = .newstan_seed(seed),
     init = init %||% 2,
-    epsilon = .resolve_default(epsilon, def, "epsilon"),
-    error = .resolve_default(error, def, "error")
+    epsilon = epsilon,
+    error = error
   )
 }
 

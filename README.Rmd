@@ -300,6 +300,7 @@ diag <- mod$diagnose(
 
 list(
   num_failed = diag$num_failed(),
+  lp = diag$lp(),
   gradients = diag$gradients()
 )
 ```

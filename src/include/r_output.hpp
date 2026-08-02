@@ -24,6 +24,7 @@ namespace newstan {
 class r_sample_writer : public stan::callbacks::writer {
  private:
   std::vector<std::string> colnames_;
+  std::vector<std::string> messages_;  // string messages (e.g., from diagnose)
   Eigen::MatrixXd values_;       // column-major: rows=samples, cols=parameters
   int n_rows_;
   int n_cols_;
@@ -88,7 +89,7 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   void operator()(const std::string& message) override {
-    // Comments from Stan are ignored for in-memory collection
+    messages_.push_back(message);
   }
 
   void operator()(const Eigen::MatrixXd& values) override {
@@ -144,6 +145,7 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   const std::vector<std::string>& colnames() const { return colnames_; }
+  const std::vector<std::string>& messages() const { return messages_; }
   int n_rows() const { return n_rows_; }
   int n_cols() const { return n_cols_; }
 
