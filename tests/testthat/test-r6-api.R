@@ -305,7 +305,6 @@ test_that("StanFit has common accessors and model methods", {
       "output",
       "init",
       "code",
-      "materialize",
       "save_object",
       "init_model_methods",
       "log_prob",
@@ -424,5 +423,4 @@ test_that("model service methods adapt native payloads to R6 fits", {
   expect_false(is.null(names(metadata)))
   expect_s3_class(mcmc$draws(), "draws")
   expect_s3_class(mcmc$summary(), "draws_summary")
-  expect_identical(mcmc$materialize(), mcmc)
 })

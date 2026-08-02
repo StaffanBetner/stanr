@@ -28,7 +28,6 @@ LinkingTo:
     RcppParallel
 Suggests:
     testthat (>= 3.0.0),
-    jsonlite,
     BH,
     RcppEigen
 Config/testthat/edition: 3
