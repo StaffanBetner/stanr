@@ -59,8 +59,7 @@ a list of lists (one per chain), or a function that takes an optional
 
 \item{diagnostics}{(character vector) Which diagnostics to compute.}
 
-\item{engine}{(string) The sampling engine: \code{"nuts"}, \code{"static_hmc"}, or
-\code{"fixed_param"}.}
+\item{engine}{(string) The sampling engine: \code{"nuts"} or \code{"static"}.}
 
 \item{int_time}{(number) Integration time for static HMC.}
 

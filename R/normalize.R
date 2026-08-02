@@ -202,6 +202,12 @@
   resolved_adapt_engaged <- isTRUE(adapt_engaged)
   resolved_fixed_param <- isTRUE(fixed_param)
   resolved_engine <- .resolve_default(engine, def, "engine")
+  if (!resolved_engine %in% c("nuts", "static")) {
+    stop(
+      "`engine` must be one of \"nuts\", \"static\".",
+      call. = FALSE
+    )
+  }
   resolved_iter_warmup <- as.integer(.resolve_default(
     iter_warmup,
     def,
@@ -232,17 +238,6 @@
   }
   if (num_saved_draws > .Machine$integer.max) {
     stop("Requested number of saved draws is too large.", call. = FALSE)
-  }
-
-  if (
-    !resolved_adapt_engaged &&
-      !resolved_fixed_param &&
-      resolved_iter_warmup == 0L
-  ) {
-    stop(
-      "`iter_warmup` must be > 0 when `adapt_engaged` is TRUE.",
-      call. = FALSE
-    )
   }
 
   if (!resolved_fixed_param && resolved_engine == "static" && chains > 1L) {

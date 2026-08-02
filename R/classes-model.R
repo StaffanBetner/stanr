@@ -491,8 +491,7 @@ StanModel$set("public", "compile", stan_model_compile)
 #' @param show_messages (logical) Should Stan messages be shown?
 #' @param show_exceptions (logical) Should Stan exceptions be shown?
 #' @param diagnostics (character vector) Which diagnostics to compute.
-#' @param engine (string) The sampling engine: `"nuts"`, `"static_hmc"`, or
-#'   `"fixed_param"`.
+#' @param engine (string) The sampling engine: `"nuts"` or `"static"`.
 #' @param int_time (number) Integration time for static HMC.
 #' @param step_size_jitter (number) Jitter for step size after adaptation.
 #' @param adapt_gamma (number) Adaptation hyperparameter for dual averaging.

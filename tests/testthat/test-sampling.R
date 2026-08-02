@@ -80,6 +80,43 @@ test_that("sampling with adapt_engaged = FALSE works", {
   expect_equal(result$return_codes(), 0L)
 })
 
+test_that("sampling with adapt_engaged = FALSE and iter_warmup = 0 works", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 0,
+    iter_sampling = 100,
+    chains = 1,
+    adapt_engaged = FALSE,
+    step_size = 1,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_equal(result$return_codes(), 0L)
+})
+
+test_that("sampling with adapt_engaged = TRUE and iter_warmup = 0 fails with a clear message", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 0,
+    iter_sampling = 100,
+    chains = 1,
+    adapt_engaged = TRUE,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_true(all(result$return_codes() != 0L))
+})
+
 test_that("sampling with inv_metric (diag_e) works", {
   path <- test_path("test-models/bernoulli.stan")
   mod <- stan_model(stan_file = path)
@@ -319,5 +356,24 @@ test_that("static HMC with multiple chains throws a configuration error", {
       show_messages = FALSE
     ),
     "Static HMC only supports a single chain"
+  )
+})
+
+test_that("sampling with an invalid engine errors before reaching C++", {
+  path <- test_path("test-models/bernoulli.stan")
+  mod <- stan_model(stan_file = path)
+  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 50,
+      iter_sampling = 50,
+      chains = 1,
+      engine = "typo",
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "`engine` must be one of"
   )
 })
