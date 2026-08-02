@@ -1,0 +1,146 @@
+# Helper: cached model instance to avoid recompilation across test_that()
+# blocks. The model rejects any draw with |x| > 0.5, which reliably triggers
+# both known "exception chatter" sources during a short run with a fixed
+# seed: Metropolis proposal rejections (error-level, stderr) during
+# sampling, and initial-value rejections (warn-level, stdout) during
+# initialization.
+.newstan_show_exceptions_cache <- new.env(parent = emptyenv())
+
+get_rejecting_model <- function() {
+  if (!exists("mod", envir = .newstan_show_exceptions_cache)) {
+    .newstan_show_exceptions_cache$mod <- stan_model(code = "
+      parameters { real x; }
+      model {
+        x ~ normal(0, 1);
+        if (abs(x) > 0.5) reject(\"test rejection\");
+      }
+    ")
+  }
+  .newstan_show_exceptions_cache$mod
+}
+
+# Runs `expr`, capturing Rprintf (stdout) and REprintf (stderr) output
+# separately while preserving the return value. Both r_logger streams route
+# through R's normal output/message connections, so a dual sink captures
+# them without altering behavior.
+run_captured <- function(expr) {
+  stdout_lines <- character()
+  stderr_lines <- character()
+  con_out <- textConnection("stdout_lines", open = "w", local = TRUE)
+  con_err <- textConnection("stderr_lines", open = "w", local = TRUE)
+  sink(con_out, type = "output")
+  sink(con_err, type = "message")
+  on.exit(
+    {
+      sink(type = "message")
+      sink(type = "output")
+      close(con_out)
+      close(con_err)
+    },
+    add = TRUE
+  )
+  result <- expr
+  list(result = result, stdout = stdout_lines, stderr = stderr_lines)
+}
+
+test_that("show_exceptions = TRUE (default) prints Metropolis rejection chatter to stderr", {
+  mod <- get_rejecting_model()
+
+  cap <- run_captured(
+    mod$sample(
+      data = list(),
+      iter_warmup = 30,
+      iter_sampling = 20,
+      chains = 1,
+      seed = 42,
+      refresh = 1,
+      show_messages = TRUE,
+      show_exceptions = TRUE
+    )
+  )
+
+  expect_match(paste(cap$stderr, collapse = "\n"), "Informational Message")
+})
+
+test_that("show_exceptions = FALSE silences exception chatter on both streams but keeps it in output()", {
+  mod <- get_rejecting_model()
+
+  cap <- run_captured(
+    mod$sample(
+      data = list(),
+      iter_warmup = 30,
+      iter_sampling = 20,
+      chains = 1,
+      seed = 42,
+      refresh = 1,
+      show_messages = TRUE,
+      show_exceptions = FALSE
+    )
+  )
+
+  both_streams <- paste(c(cap$stdout, cap$stderr), collapse = "\n")
+  expect_no_match(both_streams, "Informational Message")
+  expect_no_match(both_streams, "test rejection")
+  expect_no_match(both_streams, "Rejecting initial value")
+
+  output <- cap$result$output()
+  expect_match(paste(output, collapse = "\n"), "Informational Message")
+  expect_match(paste(output, collapse = "\n"), "test rejection")
+  expect_match(paste(output, collapse = "\n"), "Rejecting initial value")
+
+  # Progress/informational output is a separate gate (show_messages) and
+  # must still print.
+  expect_match(paste(cap$stdout, collapse = "\n"), "Iteration:")
+})
+
+test_that("show_messages = FALSE silences progress output but show_exceptions = TRUE still prints chatter", {
+  mod <- get_rejecting_model()
+
+  cap <- run_captured(
+    mod$sample(
+      data = list(),
+      iter_warmup = 30,
+      iter_sampling = 20,
+      chains = 1,
+      seed = 42,
+      refresh = 1,
+      show_messages = FALSE,
+      show_exceptions = TRUE
+    )
+  )
+
+  expect_no_match(paste(cap$stdout, collapse = "\n"), "Iteration:")
+  expect_match(paste(cap$stderr, collapse = "\n"), "Informational Message")
+})
+
+test_that("multi-chain run with show_exceptions = FALSE completes and retains chatter in output()", {
+  mod <- get_rejecting_model()
+
+  result <- mod$sample(
+    data = list(),
+    iter_warmup = 30,
+    iter_sampling = 20,
+    chains = 2,
+    seed = 42,
+    refresh = 1,
+    show_exceptions = FALSE
+  )
+
+  expect_true(all(result$return_codes() == 0L))
+  # Best-effort suppression under multi-chain interleaving; console silence
+  # is not asserted here (see SHOW_EXCEPTIONS_PLAN.md section 9), only that
+  # $output() remains complete.
+  expect_match(paste(result$output(), collapse = "\n"), "test rejection")
+})
+
+test_that("show_exceptions wiring also works for a non-sampling service ($optimize)", {
+  mod <- get_rejecting_model()
+
+  expect_no_error(
+    mod$optimize(
+      data = list(),
+      seed = 42,
+      show_exceptions = FALSE
+    )
+  )
+})

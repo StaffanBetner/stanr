@@ -19,11 +19,12 @@ namespace newstan {
     const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
     const int refresh = Rcpp::as<int>(args["refresh"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
+    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
 
     newstan::r_sample_writer sample_writer(draws);
     stan::callbacks::json_writer<std::ostringstream> hessian_writer(
         std::make_unique<std::ostringstream>());
-    newstan::r_logger logger(verbose);
+    newstan::r_logger logger(verbose, show_exceptions);
     newstan::r_interrupt interrupt;
 
     int return_code;

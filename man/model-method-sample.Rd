@@ -39,8 +39,8 @@ chains.}
 
 \item{step_size}{(number) Step size for HMC.}
 
-\item{metric}{Character string indicating the metric to use: \code{"diag_e"} or
-\code{"dense_e"}.}
+\item{metric}{Character string indicating the metric to use: \code{"diag_e"},
+\code{"dense_e"}, or \code{"unit_e"}.}
 
 \item{inv_metric}{(numeric) Initial inverse mass matrix values.}
 
@@ -52,26 +52,28 @@ chains.}
 
 \item{fixed_param}{(logical) Treat all parameters as fixed (no adaptation).}
 
-\item{show_messages}{(logical) Should Stan messages be shown?}
+\item{show_messages}{(logical) When \code{TRUE} (the default), print progress
+and informational output (e.g. iteration and timing messages) to the
+console. Set to \code{FALSE} to silence it. Suppressed output is still
+recorded and available via the fit's \verb{$output()} method.}
 
-\item{show_exceptions}{(logical) Should Stan exceptions be shown?}
+\item{show_exceptions}{(logical) When \code{TRUE} (the default), print
+informational messages about numerical exceptions -- e.g. Metropolis
+proposal rejections and rejected initial values. Set to \code{FALSE} to
+silence them. Suppressed messages are still recorded and available via
+the fit's \verb{$output()} method.}
 
-\item{engine}{(string) The sampling engine: \code{"nuts"} or \code{"static"}. Defaults
-to \code{"nuts"}.}
+\item{engine}{(string) The sampling engine: \code{"nuts"} or \code{"static"}.}
 
-\item{int_time}{(number) Integration time for static HMC. Defaults to \code{2 * pi}.}
+\item{int_time}{(number) Integration time for static HMC.}
 
-\item{step_size_jitter}{(number) Jitter for step size after adaptation.
-Defaults to \code{0}.}
+\item{step_size_jitter}{(number) Jitter for step size after adaptation.}
 
-\item{adapt_gamma}{(number) Adaptation hyperparameter for dual averaging.
-Defaults to \code{0.05}.}
+\item{adapt_gamma}{(number) Adaptation hyperparameter for dual averaging.}
 
-\item{adapt_kappa}{(number) Adaptation hyperparameter for dual averaging.
-Defaults to \code{0.75}.}
+\item{adapt_kappa}{(number) Adaptation hyperparameter for dual averaging.}
 
-\item{adapt_t0}{(number) Adaptation hyperparameter for dual averaging.
-Defaults to \code{10}.}
+\item{adapt_t0}{(number) Adaptation hyperparameter for dual averaging.}
 }
 \value{
 A \code{\link{StanMCMC}} object containing posterior draws and diagnostics.

@@ -13,8 +13,7 @@ optimization is run first.}
 \code{\link[=model-method-optimize]{$optimize()}} when finding the mode.}
 
 \item{jacobian}{(logical) Should the log density be adjusted by the
-abs-determinant of the Jacobian of the inverse transformation? Defaults
-to \code{TRUE}.}
+abs-determinant of the Jacobian of the inverse transformation?}
 
 \item{draws}{(integer) The number of draws from the Laplace approximation.}
 

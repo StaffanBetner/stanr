@@ -27,19 +27,16 @@ namespace newstan {
     const int eval_elbo = Rcpp::as<int>(args["eval_elbo"]);
     const int output_samples = Rcpp::as<int>(args["output_samples"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
+    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
-    // stan::services::util::initialize() writes the unconstrained initial
-    // values to init_writer as a raw numeric row with no preceding
-    // column-name header, before the algorithm ever touches parameter_writer;
-    // this package doesn't use them.
     newstan::r_discard_writer init_writer;
     // Stan writes the posterior mean followed by output_samples draws.
     newstan::r_sample_writer sample_writer(output_samples + 1);
     newstan::r_discard_writer diagnostic_writer;
-    newstan::r_logger logger(verbose);
+    newstan::r_logger logger(verbose, show_exceptions);
     newstan::r_interrupt interrupt;
 
     int return_code = stan::services::error_codes::CONFIG;

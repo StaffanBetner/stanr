@@ -1,3 +1,4 @@
+#include "include/model_methods.hpp"
 #include <newstan/r_data_context.hpp>
 #include <stan/math/rev/functor/gradient.hpp>
 #include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>

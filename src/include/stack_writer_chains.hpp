@@ -12,8 +12,9 @@ namespace newstan {
   // Uses Eigen vertical concatenation for fast, vectorized stacking.
   template <typename Writer>
   inline Rcpp::DataFrame stack_writer_chains(
-    const std::vector<Writer>& writers, int num_chains) {
+    const std::vector<Writer>& writers) {
 
+    const int num_chains = static_cast<int>(writers.size());
     int total_rows = 0;
     int n_cols = 0;
     for (int i = 0; i < num_chains; ++i) {

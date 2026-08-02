@@ -18,46 +18,38 @@
 
 namespace newstan {
 
-// Sampling/pathfinder run their Stan service call on a native coordinator
-// std::thread while the R main thread polls a 50ms loop to flush the
-// buffered logger and check for Ctrl-C.  This exists because Stan's
-// sampling/pathfinder services block synchronously and provide no way to
-// yield to R's event loop mid-run; running them on a separate thread lets
-// the main R thread stay responsive.  Rules that govern the worker lambda
-// passed to run_on_worker_thread():
+// Sampling/pathfinder block synchronously with no way to yield to R's event
+// loop, so their Stan service call runs on a native coordinator std::thread
+// while the R main thread polls every 50ms to flush the buffered logger and
+// check for Ctrl-C. Rules for the worker lambda passed to
+// run_on_worker_thread():
 //
-// 1. Code inside the worker-thread lambda must never touch the R API -- no
-//    Rcpp:: calls, no R allocation, no Rprintf/Rcpp::stop etc.  Only plain
-//    C++/Stan/Eigen/std:: state.  The logger buffers messages behind a
-//    mutex specifically so the worker can log without touching R; flushing
-//    to the console happens only on the main thread's poll loop.
-// 2. A raw std::thread is outside TBB's scheduler, and Stan's multi-chain
-//    services initialize chains before entering tbb::parallel_for.  The
-//    worker lambda must construct stan::math::ChainableStack autodiff_stack;
-//    and stan::math::ad_tape_observer autodiff_observer; at its top, for the
-//    lifetime of the job -- the observer installs a fresh AD tape in every
-//    TBB worker thread that ends up executing a chain.
-// 3. On Ctrl-C, the main thread sets an atomic cancellation flag, waits for
-//    the worker to actually finish/join (never abandon the thread), *then*
-//    raises the R-level interrupt via Rcpp::stop(...).
-// 4. Any exception thrown inside the worker must be captured via
-//    std::exception_ptr inside the lambda's try/catch(...), then rethrown
-//    and converted to Rcpp::stop(...) on the main thread after join() --
-//    never let an exception cross the thread boundary directly, and never
-//    call Rcpp::stop from the worker thread itself.
+// 1. Never touch the R API from the worker thread -- no Rcpp:: calls, no R
+//    allocation, no Rprintf/Rcpp::stop etc. Only plain C++/Stan/Eigen/std::
+//    state. The logger buffers messages behind a mutex for this reason;
+//    flushing to the console happens only on the main thread's poll loop.
+// 2. A raw std::thread sits outside TBB's scheduler, but Stan's multi-chain
+//    services initialize chains before entering tbb::parallel_for. The
+//    lambda must construct stan::math::ChainableStack autodiff_stack; and
+//    stan::math::ad_tape_observer autodiff_observer; at its top, for the
+//    job's lifetime -- the observer installs a fresh AD tape in every TBB
+//    worker thread that ends up executing a chain.
+// 3. On Ctrl-C, the main thread sets an atomic cancellation flag and waits
+//    for the worker to finish/join (never abandoned) before raising the
+//    R-level interrupt via Rcpp::stop(...).
+// 4. Exceptions thrown in the worker must be captured via std::exception_ptr
+//    in the lambda's try/catch(...), then rethrown and converted to
+//    Rcpp::stop(...) on the main thread after join() -- never let one cross
+//    the thread boundary directly, and never call Rcpp::stop from the
+//    worker thread itself.
 //
 // fn's signature is int fn(newstan::r_interrupt& interrupt); it runs
 // entirely on the worker thread and must obey the constraints above.
-// Returns the int fn produced.  `what` is used verbatim in "<what>
-// interrupted."; `unknown_exception_what` is used verbatim in "Unknown
-// exception in <unknown_exception_what> worker." -- these are separate
-// parameters (rather than one reused string) because the two pre-existing
-// call sites disagree on capitalization ("Sampling interrupted." vs.
-// "Unknown exception in sampling worker.", lowercase) and this preserves
-// both exactly.
+// Returns the int fn produced. `what` is used verbatim in both "<what>
+// interrupted." and "Unknown exception in <what> worker.".
 template <class F>
 int run_on_worker_thread(newstan::r_logger& logger, const char* what,
-                          const char* unknown_exception_what, F&& fn) {
+                          F&& fn) {
   std::atomic<bool> cancel_requested{false};
   newstan::r_interrupt interrupt(&cancel_requested);
 
@@ -111,8 +103,7 @@ int run_on_worker_thread(newstan::r_logger& logger, const char* what,
     } catch (const std::exception& e) {
       Rcpp::stop(e.what());
     } catch (...) {
-      Rcpp::stop(std::string("Unknown exception in ") + unknown_exception_what
-                 + " worker.");
+      Rcpp::stop(std::string("Unknown exception in ") + what + " worker.");
     }
   }
   if (interrupted) {

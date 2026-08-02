@@ -36,10 +36,11 @@ namespace newstan {
     const bool calculate_lp = Rcpp::as<bool>(args["calculate_lp"]);
     const int refresh = Rcpp::as<int>(args["refresh"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
+    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
-    newstan::r_logger logger(verbose);
+    newstan::r_logger logger(verbose, show_exceptions);
     // Single-path execution remains on the R thread. Multi-path execution is
     // moved below into a coordinator thread, so it uses an atomic interrupt.
     newstan::r_interrupt interrupt(num_paths <= 1);
@@ -49,10 +50,6 @@ namespace newstan {
     if (num_paths <= 1) {
       // Single pathfinder
       newstan::r_data_context init_ctx(init_list);
-      // stan::services::util::initialize() writes the unconstrained initial
-      // values to init_writer as a raw numeric row with no preceding
-      // column-name header, before the algorithm ever touches
-      // parameter_writer; this package doesn't use them.
       newstan::r_discard_writer init_writer;
       newstan::r_sample_writer sample_writer(num_draws);
       stan::callbacks::json_writer<std::ostringstream> metric_writer(
@@ -105,7 +102,7 @@ namespace newstan {
       std::vector<stan::callbacks::writer> init_writers(num_paths);
 
       return_code = newstan::run_on_worker_thread(
-          logger, "Pathfinder", "Pathfinder",
+          logger, "Pathfinder",
           [&](newstan::r_interrupt& worker_interrupt) -> int {
             return stan::services::pathfinder::pathfinder_lbfgs_multi(
                 model, std::move(init_ctxs), seed, chain_id, init_radius,

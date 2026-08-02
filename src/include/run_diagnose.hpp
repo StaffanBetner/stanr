@@ -21,9 +21,6 @@ namespace newstan {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
-    // init_writer receives the unconstrained initial values as a raw numeric
-    // write with no preceding column-name header (see
-    // stan::services::util::initialize()); this package doesn't use them.
     newstan::r_discard_writer init_writer;
     newstan::r_sample_writer param_writer;
     newstan::r_logger logger(verbose);

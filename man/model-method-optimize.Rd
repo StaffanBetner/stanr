@@ -6,7 +6,7 @@
 \title{Run optimization}
 \arguments{
 \item{algorithm}{(string) The optimization algorithm: \code{"lbfgs"}, \code{"bfgs"},
-\code{"newton"}, or \code{"irr"} (identity rational function).}
+or \code{"newton"}.}
 
 \item{jacobian}{(logical) Should the log density be adjusted by the
 abs-determinant of the Jacobian of the inverse transformation?}

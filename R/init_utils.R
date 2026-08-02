@@ -1,19 +1,21 @@
-# Normalize the public initialization forms to the named list consumed by the
-# native var_context adapter. A scalar is the CmdStan initialization radius.
-normalize_init <- function(init) {
-  if (
-    isTRUE(
-      length(init) == 1L &&
-        is.null(names(init)) &&
-        is.numeric(init) &&
-        !is.na(init) &&
-        init >= 0
-    )
-  ) {
-    return(list())
+# Normalize the public initialization forms to the radius/values pair consumed
+# by the native var_context adapter. A scalar is the CmdStan initialization
+# radius; a list or named numeric vector supplies constrained parameter values
+# (with a default radius of 2, matching CmdStan's default `init` behavior for
+# perturbing any parameters not covered by the supplied values).
+resolve_init <- function(init) {
+  is_radius <- isTRUE(
+    length(init) == 1L &&
+      is.null(names(init)) &&
+      is.numeric(init) &&
+      !is.na(init) &&
+      init >= 0
+  )
+  if (is_radius) {
+    return(list(radius = as.double(init), values = list()))
   }
   if (is.list(init)) {
-    return(init)
+    return(list(radius = 2, values = init))
   }
   if (is.numeric(init)) {
     if (is.null(names(init)) || any(!nzchar(names(init)))) {
@@ -22,27 +24,12 @@ normalize_init <- function(init) {
         call. = FALSE
       )
     }
-    return(as.list(init))
+    return(list(radius = 2, values = as.list(init)))
   }
   stop(
     "init must be a non-negative radius, a named list, or a named numeric vector.",
     call. = FALSE
   )
-}
-
-init_radius <- function(init) {
-  if (
-    isTRUE(
-      length(init) == 1L &&
-        is.null(names(init)) &&
-        is.numeric(init) &&
-        !is.na(init) &&
-        init >= 0
-    )
-  ) {
-    return(as.double(init))
-  }
-  2
 }
 
 # Keep service results small: data, initialization values, draws, and metrics can

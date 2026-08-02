@@ -34,10 +34,8 @@ namespace newstan {
   template <class Model>
   std::vector<std::shared_ptr<stan::io::var_context>> make_metric_contexts(
       Model& model, const Rcpp::List& args, const std::string& metric,
-      int num_chains) {
+      int num_chains, bool metric_supplied) {
     if (metric == "unit_e") return {};
-    const bool metric_supplied = args.containsElementNamed("inv_metric") &&
-        !Rcpp::as<bool>(args["inv_metric_na"]);
     const size_t num_params = model.num_params_r();
 
     if (!metric_supplied) {
@@ -90,6 +88,7 @@ namespace newstan {
     const std::string metric = Rcpp::as<std::string>(args["metric"]);
     const bool adapt_engaged = Rcpp::as<bool>(args["adapt_engaged"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
+    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
 
     const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
     const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
@@ -116,7 +115,7 @@ namespace newstan {
     const int term_buffer_arg = Rcpp::as<int>(args["term_buffer"]);
     const int window_arg = Rcpp::as<int>(args["window"]);
 
-    newstan::r_logger logger(verbose);
+    newstan::r_logger logger(verbose, show_exceptions);
 
     const auto saved_rows = [num_thin](int iterations) {
       return iterations / num_thin + (iterations % num_thin != 0);
@@ -133,9 +132,6 @@ namespace newstan {
     const auto init_ctx = std::make_shared<newstan::r_data_context>(init_list);
     std::vector<std::shared_ptr<newstan::r_data_context>> init_ctxs(
         num_chains, init_ctx);
-    // init_writers receive the unconstrained initial values as a raw numeric
-    // write with no preceding column-name header (see
-    // stan::services::util::initialize()); this package doesn't use them.
     std::vector<newstan::r_discard_writer> init_writers;
     std::vector<newstan::r_sample_writer> sample_writers;
     std::vector<newstan::r_discard_writer> diag_writers;
@@ -155,11 +151,12 @@ namespace newstan {
 
     const bool metric_supplied = args.containsElementNamed("inv_metric") &&
                            !Rcpp::as<bool>(args["inv_metric_na"]);
-    auto metric_ctxs = make_metric_contexts(model, args, metric, num_chains);
+    auto metric_ctxs = make_metric_contexts(model, args, metric, num_chains,
+                                             metric_supplied);
     const bool multi_chain = num_chains > 1;
 
     int return_code = newstan::run_on_worker_thread(
-        logger, "Sampling", "sampling",
+        logger, "Sampling",
         [&](newstan::r_interrupt& interrupt) -> int {
     int return_code = stan::services::error_codes::CONFIG;
     // --- Validation & dispatch ---
@@ -298,46 +295,24 @@ namespace newstan {
               sample_writers[0], diag_writers[0]);
 
         } else if (metric == "diag_e") {
-          if (metric_supplied) {
-            return_code = stan::services::sample::hmc_static_diag_e_adapt(
-                model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          } else {
-            return_code = stan::services::sample::hmc_static_diag_e_adapt(
-                model, *init_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          }
+          return_code = stan::services::sample::hmc_static_diag_e_adapt(
+              model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
+              num_warmup, num_samples, num_thin, save_warmup, refresh,
+              stepsize, stepsize_jitter, int_time,
+              delta, gamma, kappa, t0,
+              init_buffer, term_buffer, window,
+              interrupt, logger, init_writers[0],
+              sample_writers[0], diag_writers[0]);
 
         } else if (metric == "dense_e") {
-          if (metric_supplied) {
-            return_code = stan::services::sample::hmc_static_dense_e_adapt(
-                model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          } else {
-            return_code = stan::services::sample::hmc_static_dense_e_adapt(
-                model, *init_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                delta, gamma, kappa, t0,
-                init_buffer, term_buffer, window,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          }
+          return_code = stan::services::sample::hmc_static_dense_e_adapt(
+              model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
+              num_warmup, num_samples, num_thin, save_warmup, refresh,
+              stepsize, stepsize_jitter, int_time,
+              delta, gamma, kappa, t0,
+              init_buffer, term_buffer, window,
+              interrupt, logger, init_writers[0],
+              sample_writers[0], diag_writers[0]);
         }
 
       } else {
@@ -351,38 +326,20 @@ namespace newstan {
               sample_writers[0], diag_writers[0]);
 
         } else if (metric == "diag_e") {
-          if (metric_supplied) {
-            return_code = stan::services::sample::hmc_static_diag_e(
-                model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          } else {
-            return_code = stan::services::sample::hmc_static_diag_e(
-                model, *init_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          }
+          return_code = stan::services::sample::hmc_static_diag_e(
+              model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
+              num_warmup, num_samples, num_thin, save_warmup, refresh,
+              stepsize, stepsize_jitter, int_time,
+              interrupt, logger, init_writers[0],
+              sample_writers[0], diag_writers[0]);
 
         } else if (metric == "dense_e") {
-          if (metric_supplied) {
-            return_code = stan::services::sample::hmc_static_dense_e(
-                model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          } else {
-            return_code = stan::services::sample::hmc_static_dense_e(
-                model, *init_ctxs[0], seed, chain_id, init_radius,
-                num_warmup, num_samples, num_thin, save_warmup, refresh,
-                stepsize, stepsize_jitter, int_time,
-                interrupt, logger, init_writers[0],
-                sample_writers[0], diag_writers[0]);
-          }
+          return_code = stan::services::sample::hmc_static_dense_e(
+              model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
+              num_warmup, num_samples, num_thin, save_warmup, refresh,
+              stepsize, stepsize_jitter, int_time,
+              interrupt, logger, init_writers[0],
+              sample_writers[0], diag_writers[0]);
         }
       }
 
@@ -397,7 +354,7 @@ namespace newstan {
         });
 
     // --- Combine results (R thread only) ---
-    Rcpp::List combined = stack_writer_chains(sample_writers, num_chains);
+    Rcpp::List combined = stack_writer_chains(sample_writers);
     Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
 
     bool metric_captured = false;

@@ -10,13 +10,6 @@
   )
 }
 
-.newstan_select_draws <- function(x, variables = NULL) {
-  if (is.null(variables)) {
-    return(x)
-  }
-  posterior::subset_draws(x, variable = variables)
-}
-
 .newstan_bracket_names <- function(names) {
   vapply(
     names,
@@ -62,19 +55,6 @@
     colnames(x) <- names
   }
   x
-}
-
-.newstan_merge_payload_draws <- function(payload) {
-  if (is.null(payload$draws) || is.null(payload$diagnostics)) {
-    return(payload)
-  }
-  lhs <- posterior::as_draws_matrix(payload$draws)
-  rhs <- posterior::as_draws_matrix(payload$diagnostics)
-  if (nrow(lhs) == nrow(rhs)) {
-    rhs <- rhs[, setdiff(colnames(rhs), colnames(lhs)), drop = FALSE]
-    payload$draws <- cbind(lhs, rhs)
-  }
-  payload
 }
 
 # StanFit class definition -----------------------------------------------------
@@ -150,7 +130,6 @@ StanFit <- R6Class(
       metadata = list(),
       default_format = "draws_matrix"
     ) {
-      private$payload_ <- payload
       private$model_ <- model
       private$data_ <- data
       private$seed_ <- seed
@@ -162,6 +141,8 @@ StanFit <- R6Class(
       private$default_format_ <- default_format
       private$draws_ <- .newstan_normalize_draw_names(payload$draws)
       private$diagnostics_ <- .newstan_normalize_draw_names(payload$diagnostics)
+      private$inv_metric_ <- payload$inv_metric
+      private$par_ <- payload$par
       chains <- metadata$chains %||% 1L
       private$return_codes_ <- rep(
         as.integer(payload$return_code %||% NA_integer_),
@@ -185,7 +166,6 @@ StanFit <- R6Class(
     }
   ),
   private = list(
-    payload_ = NULL,
     model_ = NULL,
     data_ = NULL,
     seed_ = NULL,
@@ -196,6 +176,8 @@ StanFit <- R6Class(
     warmup_draws_ = NULL,
     diagnostics_ = NULL,
     warmup_diagnostics_ = NULL,
+    inv_metric_ = NULL,
+    par_ = NULL,
     return_codes_ = NULL,
     metadata_ = NULL,
     output_ = NULL,
@@ -343,7 +325,9 @@ fit_draws <- function(variables = NULL, inc_warmup = FALSE, format = NULL) {
       )
     }
   }
-  draws <- .newstan_select_draws(draws, variables)
+  if (!is.null(variables)) {
+    draws <- posterior::subset_draws(draws, variable = variables)
+  }
   .newstan_as_draws_format(draws, format %||% private$default_format_)
 }
 StanFit$set("public", "draws", fit_draws)
@@ -439,9 +423,7 @@ StanFit$set("public", "return_codes", fit_return_codes)
 fit_metadata <- function() private$metadata_
 StanFit$set("public", "metadata", fit_metadata)
 
-fit_output <- function() {
-  private$output_
-}
+fit_output <- function() private$output_
 StanFit$set("public", "output", fit_output)
 
 fit_time <- function() list(total = private$elapsed_)
@@ -886,7 +868,7 @@ StanMCMC$set("public", "diagnostic_summary", mcmc_diagnostic_summary)
 
 mcmc_inv_metric <- function(matrix = TRUE) {
   matrix <- .newstan_flag(matrix, "matrix")
-  metric <- private$payload_$inv_metric
+  metric <- private$inv_metric_
   if (is.null(metric)) {
     stop(
       "no adapted metric is available; the metric is only captured when ",
@@ -1115,7 +1097,7 @@ StanMLE <- R6Class(
 NULL
 
 mle_mle <- function(variables = NULL) {
-  value <- private$payload_$par %||% numeric()
+  value <- private$par_ %||% numeric()
   if (!is.null(variables)) {
     value <- value[variables]
   }
@@ -1233,7 +1215,7 @@ StanVB <- R6Class(
         posterior::as_draws_matrix(payload$draws)
       }
       draws <- .newstan_rename_draw_columns(draws)
-      requested <- payload$args$output_samples %||% NULL
+      requested <- payload$args$output_samples
       # ADVI writes the posterior mean as the first row before the requested
       # draws; drop it when present so draw counts match what was requested.
       if (
@@ -1291,7 +1273,14 @@ StanPathfinder <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      payload <- .newstan_merge_payload_draws(payload)
+      if (!is.null(payload$draws) && !is.null(payload$diagnostics)) {
+        lhs <- posterior::as_draws_matrix(payload$draws)
+        rhs <- posterior::as_draws_matrix(payload$diagnostics)
+        if (nrow(lhs) == nrow(rhs)) {
+          rhs <- rhs[, setdiff(colnames(rhs), colnames(lhs)), drop = FALSE]
+          payload$draws <- cbind(lhs, rhs)
+        }
+      }
       payload$draws <- .newstan_rename_draw_columns(payload$draws)
       super$initialize(
         payload,

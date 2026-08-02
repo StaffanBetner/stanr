@@ -7,10 +7,6 @@
   x
 }
 
-.newstan_flag_or_null <- function(x, name) {
-  if (is.null(x)) x else .newstan_flag(x, name)
-}
-
 .newstan_seed <- function(seed) {
   if (is.null(seed)) {
     seed <- as.integer(stats::runif(1, 1, .Machine$integer.max))
@@ -486,26 +482,28 @@ StanModel$set("public", "compile", stan_model_compile)
 #' @param adapt_engaged (logical) Should step size adaptation be used?
 #' @param adapt_delta (number) Target acceptance statistic for HMC.
 #' @param step_size (number) Step size for HMC.
-#' @param metric Character string indicating the metric to use: `"diag_e"` or
-#'   `"dense_e"`.
+#' @param metric Character string indicating the metric to use: `"diag_e"`,
+#'   `"dense_e"`, or `"unit_e"`.
 #' @param inv_metric (numeric) Initial inverse mass matrix values.
 #' @param init_buffer (integer) Adaptation phase: initial buffer length.
 #' @param term_buffer (integer) Adaptation phase: terminal buffer length.
 #' @param window (integer) Adaptation phase: window length.
 #' @param fixed_param (logical) Treat all parameters as fixed (no adaptation).
-#' @param show_messages (logical) Should Stan messages be shown?
-#' @param show_exceptions (logical) Should Stan exceptions be shown?
-#' @param engine (string) The sampling engine: `"nuts"` or `"static"`. Defaults
-#'   to `"nuts"`.
-#' @param int_time (number) Integration time for static HMC. Defaults to `2 * pi`.
+#' @param show_messages (logical) When `TRUE` (the default), print progress
+#'   and informational output (e.g. iteration and timing messages) to the
+#'   console. Set to `FALSE` to silence it. Suppressed output is still
+#'   recorded and available via the fit's `$output()` method.
+#' @param show_exceptions (logical) When `TRUE` (the default), print
+#'   informational messages about numerical exceptions -- e.g. Metropolis
+#'   proposal rejections and rejected initial values. Set to `FALSE` to
+#'   silence them. Suppressed messages are still recorded and available via
+#'   the fit's `$output()` method.
+#' @param engine (string) The sampling engine: `"nuts"` or `"static"`.
+#' @param int_time (number) Integration time for static HMC.
 #' @param step_size_jitter (number) Jitter for step size after adaptation.
-#'   Defaults to `0`.
 #' @param adapt_gamma (number) Adaptation hyperparameter for dual averaging.
-#'   Defaults to `0.05`.
 #' @param adapt_kappa (number) Adaptation hyperparameter for dual averaging.
-#'   Defaults to `0.75`.
 #' @param adapt_t0 (number) Adaptation hyperparameter for dual averaging.
-#'   Defaults to `10`.
 #'
 #' @return A [`StanMCMC`] object containing posterior draws and diagnostics.
 #'
@@ -515,10 +513,10 @@ StanModel$set("public", "compile", stan_model_compile)
 NULL
 
 stan_model_sample <- function(
-  data = NULL,
+  data = list(),
   seed = NULL,
-  refresh = NULL,
-  init = NULL,
+  refresh = 100L,
+  init = 2,
   save_latent_dynamics = FALSE,
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
@@ -527,30 +525,30 @@ stan_model_sample <- function(
   chain_ids = seq_len(chains),
   num_threads = getOption("mc.cores", 1),
   opencl_ids = NULL,
-  iter_warmup = NULL,
-  iter_sampling = NULL,
+  iter_warmup = 1000L,
+  iter_sampling = 1000L,
   save_warmup = FALSE,
-  thin = NULL,
-  max_treedepth = NULL,
+  thin = 1L,
+  max_treedepth = 10L,
   adapt_engaged = TRUE,
-  adapt_delta = NULL,
-  step_size = NULL,
-  metric = NULL,
+  adapt_delta = 0.8,
+  step_size = 1,
+  metric = "diag_e",
   metric_file = NULL,
   inv_metric = NULL,
-  init_buffer = NULL,
-  term_buffer = NULL,
-  window = NULL,
+  init_buffer = 75L,
+  term_buffer = 50L,
+  window = 25L,
   fixed_param = FALSE,
   show_messages = TRUE,
   show_exceptions = TRUE,
   save_cmdstan_config = getOption("newstan_save_config", FALSE),
-  engine = NULL,
-  int_time = NULL,
-  step_size_jitter = NULL,
-  adapt_gamma = NULL,
-  adapt_kappa = NULL,
-  adapt_t0 = NULL
+  engine = "nuts",
+  int_time = 2 * pi,
+  step_size_jitter = 0,
+  adapt_gamma = 0.05,
+  adapt_kappa = 0.75,
+  adapt_t0 = 10
 ) {
   .newstan_reject_backend_files(
     output_dir,
@@ -577,45 +575,164 @@ stan_model_sample <- function(
       call. = FALSE
     )
   }
+  if (!engine %in% c("nuts", "static")) {
+    stop("`engine` must be one of \"nuts\", \"static\".", call. = FALSE)
+  }
   ids <- .newstan_validate_chains(chains, chain_ids)
-  call <- .newstan_elapsed(.newstan_run_sampling(
-    self,
-    data = data,
-    seed = seed,
-    refresh = refresh,
-    init = init,
-    chains = chains,
-    chain_ids = chain_ids,
-    num_threads = num_threads,
-    iter_warmup = iter_warmup,
-    iter_sampling = iter_sampling,
-    save_warmup = save_warmup,
-    thin = thin,
-    max_treedepth = max_treedepth,
-    adapt_engaged = adapt_engaged,
-    adapt_delta = adapt_delta,
-    step_size = step_size,
-    metric = metric,
-    inv_metric = inv_metric,
-    init_buffer = init_buffer,
-    term_buffer = term_buffer,
-    window = window,
-    fixed_param = fixed_param,
-    show_messages = show_messages,
-    show_exceptions = show_exceptions,
-    engine = engine,
-    int_time = int_time,
-    step_size_jitter = step_size_jitter,
-    adapt_gamma = adapt_gamma,
-    adapt_kappa = adapt_kappa,
-    adapt_t0 = adapt_t0
-  ))
+  chains <- ids$chains
+  chain_ids <- ids$chain_ids
+  num_threads <- as.integer(num_threads %||% 1L)
+  if (num_threads < 1L) {
+    stop("`num_threads` must be positive.", call. = FALSE)
+  }
+  iter_warmup <- as.integer(iter_warmup)
+  iter_sampling <- as.integer(iter_sampling)
+  thin <- as.integer(thin)
+  if (iter_warmup < 0 || iter_sampling < 0) {
+    stop("iter_warmup and iter_sampling must be non-negative.", call. = FALSE)
+  }
+  if (thin < 1L) {
+    stop("thin must be at least 1.", call. = FALSE)
+  }
+  # Calculate in double precision so adding two valid integer iteration counts
+  # cannot overflow to NA before the explicit R-size guard below.
+  num_saved_draws <- ceiling(as.double(iter_sampling) / as.double(thin))
+  if (save_warmup) {
+    num_saved_draws <- num_saved_draws +
+      ceiling(as.double(iter_warmup) / as.double(thin))
+  }
+  if (num_saved_draws > .Machine$integer.max) {
+    stop("Requested number of saved draws is too large.", call. = FALSE)
+  }
+  if (!fixed_param && engine == "static" && chains > 1L) {
+    stop(
+      "Static HMC only supports a single chain. Set `chains` = 1.",
+      call. = FALSE
+    )
+  }
+
+  call <- .newstan_elapsed({
+    common <- .newstan_normalize_common(
+      data = data,
+      seed = seed,
+      refresh = refresh,
+      init = init,
+      show_messages = show_messages,
+      show_exceptions = show_exceptions
+    )
+    inv_metric <- .newstan_normalize_inv_metric(
+      inv_metric = inv_metric,
+      metric = metric,
+      chains = chains
+    )
+    resolved_init <- resolve_init(common$init)
+
+    native_args <- list(
+      method = "sample",
+      algorithm = if (fixed_param) "fixed_param" else "hmc",
+      engine = if (fixed_param) "nuts" else engine,
+      metric = metric,
+      adapt_engaged = as.logical(adapt_engaged),
+      seed = as.integer(common$seed),
+      id = as.integer(chain_ids[[1]]),
+      num_chains = as.integer(chains),
+      init_radius = resolved_init$radius,
+      num_warmup = iter_warmup,
+      num_samples = iter_sampling,
+      thin = thin,
+      save_warmup = as.logical(save_warmup),
+      refresh = as.integer(common$refresh),
+      stepsize = as.double(step_size),
+      stepsize_jitter = as.double(step_size_jitter),
+      max_depth = as.integer(max_treedepth),
+      int_time = as.double(int_time),
+      delta = as.double(adapt_delta),
+      gamma = as.double(adapt_gamma),
+      kappa = as.double(adapt_kappa),
+      t0 = as.double(adapt_t0),
+      init_buffer = as.integer(init_buffer),
+      term_buffer = as.integer(term_buffer),
+      window = as.integer(window),
+      init = resolved_init$values,
+      inv_metric = inv_metric,
+      inv_metric_na = is.null(inv_metric),
+      verbose = as.logical(common$show_messages),
+      show_exceptions = as.logical(common$show_exceptions),
+      num_threads = num_threads
+    )
+
+    model <- self$new_model(common$data, common$seed)
+    result <- self$run_model(model, native_args)
+
+    if (result$return_code != 0) {
+      structure(
+        list(
+          draws = NULL,
+          diagnostics = NULL,
+          return_code = result$return_code,
+          args = service_args(native_args),
+          output = result$output %||% character(),
+          model_ptr = model
+        ),
+        class = c("StanSample", "StanService", "list")
+      )
+    } else {
+      draw_names <- colnames(result$samples)
+      if (!fixed_param && engine == "static") {
+        diagnostic_vars <- c("accept_stat__", "stepsize__")
+      } else {
+        diagnostic_vars <- c(
+          "accept_stat__",
+          "stepsize__",
+          "treedepth__",
+          "n_leapfrog__",
+          "divergent__",
+          "energy__"
+        )
+      }
+      par_vars <- draw_names[
+        !(draw_names %in% diagnostic_vars) & draw_names != ".chain"
+      ]
+
+      if (fixed_param) {
+        diagnostics <- posterior::draws_df(
+          "stepsize__" = NA,
+          "treedepth__" = NA,
+          "n_leapfrog__" = NA,
+          "divergent__" = NA,
+          "energy__" = NA
+        )
+      } else {
+        draws <- posterior::as_draws_df(result$samples)
+        diagnostics <- posterior::subset_draws(draws, variable = diagnostic_vars)
+      }
+
+      structure(
+        list(
+          draws = if (fixed_param) {
+            posterior::as_draws_df(result$samples[, par_vars, drop = FALSE])
+          } else {
+            posterior::subset_draws(draws, par_vars)
+          },
+          diagnostics = diagnostics,
+          return_code = result$return_code,
+          args = service_args(native_args),
+          inv_metric = result$inv_metric,
+          step_size = result$step_size,
+          output = result$output %||% character(),
+          model_ptr = model
+        ),
+        class = c("StanSample", "StanService", "list")
+      )
+    }
+  })
+
   StanMCMC$new(
     payload = call$value,
     model = self,
-    data = data %||% list(),
+    data = data,
     seed = call$value$args$seed,
-    init = init %||% 2,
+    init = init,
     elapsed = call$elapsed,
     metadata = list(
       method = "sample",
@@ -640,7 +757,7 @@ StanModel$set("public", "sample", stan_model_sample)
 #'   maximum likelihood estimate (MLE). Returns a [`StanMLE`] object.
 #'
 #' @param algorithm (string) The optimization algorithm: `"lbfgs"`, `"bfgs"`,
-#'   `"newton"`, or `"irr"` (identity rational function).
+#'   or `"newton"`.
 #' @param jacobian (logical) Should the log density be adjusted by the
 #'   abs-determinant of the Jacobian of the inverse transformation?
 #' @param init_alpha (number) Initial step size for LBFGS.
@@ -661,25 +778,25 @@ StanModel$set("public", "sample", stan_model_sample)
 NULL
 
 stan_model_optimize <- function(
-  data = NULL,
+  data = list(),
   seed = NULL,
-  refresh = NULL,
-  init = NULL,
+  refresh = 100L,
+  init = 2,
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
   sig_figs = NULL,
   threads = NULL,
   opencl_ids = NULL,
-  algorithm = NULL,
+  algorithm = "lbfgs",
   jacobian = FALSE,
-  init_alpha = NULL,
-  iter = NULL,
-  tol_obj = NULL,
-  tol_rel_obj = NULL,
-  tol_grad = NULL,
-  tol_rel_grad = NULL,
-  tol_param = NULL,
-  history_size = NULL,
+  init_alpha = 0.001,
+  iter = 2000L,
+  tol_obj = 1e-12,
+  tol_rel_obj = 1e4,
+  tol_grad = 1e-8,
+  tol_rel_grad = 1e7,
+  tol_param = 1e-8,
+  history_size = 5L,
   show_messages = TRUE,
   show_exceptions = TRUE,
   save_cmdstan_config = getOption("newstan_save_config", FALSE),
@@ -701,32 +818,72 @@ stan_model_optimize <- function(
       call. = FALSE
     )
   }
-  call <- .newstan_elapsed(.newstan_run_optimize(
-    self,
-    data = data,
-    seed = seed,
-    refresh = refresh,
-    init = init,
-    threads = threads,
-    algorithm = algorithm,
-    jacobian = jacobian,
-    init_alpha = init_alpha,
-    iter = iter,
-    tol_obj = tol_obj,
-    tol_rel_obj = tol_rel_obj,
-    tol_grad = tol_grad,
-    tol_rel_grad = tol_rel_grad,
-    tol_param = tol_param,
-    history_size = history_size,
-    show_messages = show_messages,
-    show_exceptions = show_exceptions
-  ))
+
+  call <- .newstan_elapsed({
+    common <- .newstan_normalize_common(
+      data = data,
+      seed = seed,
+      refresh = refresh,
+      init = init,
+      show_messages = show_messages,
+      show_exceptions = show_exceptions
+    )
+    threads <- as.integer(threads %||% 1L)
+
+    resolved_init <- resolve_init(common$init)
+
+    native_args <- list(
+      method = "optimize",
+      algorithm = algorithm,
+      seed = as.integer(common$seed),
+      id = 1L,
+      init_radius = resolved_init$radius,
+      iter = as.integer(iter),
+      init_alpha = as.double(init_alpha),
+      tol_obj = as.double(tol_obj),
+      tol_rel_obj = as.double(tol_rel_obj),
+      tol_grad = as.double(tol_grad),
+      tol_rel_grad = as.double(tol_rel_grad),
+      tol_param = as.double(tol_param),
+      history_size = as.integer(history_size),
+      save_iterations = FALSE,
+      refresh = as.integer(common$refresh),
+      verbose = as.logical(common$show_messages),
+      show_exceptions = as.logical(common$show_exceptions),
+      num_threads = threads,
+      init = resolved_init$values
+    )
+
+    model <- self$new_model(common$data, common$seed)
+    result <- self$run_model(model, native_args)
+
+    # Extract parameter values from last row of par matrix
+    par_mat <- result$par
+    par_vec <- if (is.matrix(par_mat) && nrow(par_mat) > 0) {
+      par_mat[nrow(par_mat), , drop = TRUE]
+    } else {
+      numeric(0)
+    }
+
+    structure(
+      list(
+        par = par_vec,
+        value = result$value,
+        return_code = result$return_code,
+        args = service_args(native_args),
+        output = result$output %||% character(),
+        model_ptr = model
+      ),
+      class = c("StanOptimize", "StanService", "list")
+    )
+  })
+
   StanMLE$new(
     payload = call$value,
     model = self,
-    data = data %||% list(),
+    data = data,
     seed = call$value$args$seed,
-    init = init %||% 2,
+    init = init,
     elapsed = call$elapsed,
     metadata = list(
       method = "optimize",
@@ -754,8 +911,7 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #' @param opt_args (list) Additional arguments to pass to
 #'   [`$optimize()`][model-method-optimize] when finding the mode.
 #' @param jacobian (logical) Should the log density be adjusted by the
-#'   abs-determinant of the Jacobian of the inverse transformation? Defaults
-#'   to `TRUE`.
+#'   abs-determinant of the Jacobian of the inverse transformation?
 #' @param draws (integer) The number of draws from the Laplace approximation.
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
@@ -768,10 +924,10 @@ StanModel$set("public", "optimize", stan_model_optimize)
 NULL
 
 stan_model_laplace <- function(
-  data = NULL,
+  data = list(),
   seed = NULL,
-  refresh = NULL,
-  init = NULL,
+  refresh = 100L,
+  init = 2,
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
   sig_figs = NULL,
@@ -780,7 +936,7 @@ stan_model_laplace <- function(
   mode = NULL,
   opt_args = NULL,
   jacobian = TRUE,
-  draws = NULL,
+  draws = 1000L,
   show_messages = TRUE,
   show_exceptions = TRUE,
   save_cmdstan_config = getOption("newstan_save_config", FALSE),
@@ -802,9 +958,9 @@ stan_model_laplace <- function(
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
   # Resolved once so the internal mode-finding optimize() run (if any) and
   # the laplace run itself agree on data/seed/init.
-  resolved_data <- data %||% list()
+  resolved_data <- data
   resolved_seed <- .newstan_seed(seed)
-  resolved_init <- init %||% 2
+  resolved_init <- init
 
   mode_fit <- NULL
   if (is.null(mode)) {
@@ -830,20 +986,63 @@ stan_model_laplace <- function(
     # Numeric mode vector (newstan extension)
     mode_val <- mode
   }
-  call <- .newstan_elapsed(.newstan_run_laplace(
-    self,
-    mode = mode_val,
-    data = resolved_data,
-    seed = resolved_seed,
-    refresh = refresh,
-    init = resolved_init,
-    threads = threads,
-    jacobian = jacobian,
-    draws = draws,
-    calculate_lp = calculate_lp,
-    show_messages = show_messages,
-    show_exceptions = show_exceptions
-  ))
+
+  call <- .newstan_elapsed({
+    common <- .newstan_normalize_common(
+      data = resolved_data,
+      seed = resolved_seed,
+      refresh = refresh,
+      init = resolved_init,
+      show_messages = show_messages,
+      show_exceptions = show_exceptions
+    )
+    threads <- as.integer(threads %||% 1L)
+
+    # Extract constrained parameter vector from mode result if needed
+    if (is.list(mode_val) && !is.null(mode_val$par)) {
+      mode_val <- mode_val$par
+    }
+    if (!is.numeric(mode_val) || is.null(names(mode_val))) {
+      stop(
+        "mode must be a named numeric vector or an optimization result.",
+        call. = FALSE
+      )
+    }
+
+    model <- self$new_model(common$data, common$seed)
+    pars <- self$constrained_param_names(model)
+    mode_val <- mode_val[pars]
+    if (anyNA(mode_val)) {
+      stop("mode must contain every constrained model parameter.", call. = FALSE)
+    }
+
+    native_args <- list(
+      method = "laplace",
+      mode = as.double(mode_val),
+      jacobian = as.logical(jacobian),
+      draws = as.integer(draws),
+      calculate_lp = as.logical(calculate_lp),
+      seed = as.integer(common$seed),
+      refresh = as.integer(common$refresh),
+      verbose = as.logical(common$show_messages),
+      show_exceptions = as.logical(common$show_exceptions),
+      num_threads = threads
+    )
+
+    result <- self$run_model(model, native_args)
+
+    structure(
+      list(
+        draws = posterior::as_draws_df(result$draws),
+        return_code = result$return_code,
+        args = service_args(native_args),
+        output = result$output %||% character(),
+        model_ptr = model
+      ),
+      class = c("StanLaplace", "StanService", "list")
+    )
+  })
+
   StanLaplace$new(
     payload = call$value,
     model = self,
@@ -893,26 +1092,26 @@ StanModel$set("public", "laplace", stan_model_laplace)
 NULL
 
 stan_model_variational <- function(
-  data = NULL,
+  data = list(),
   seed = NULL,
-  refresh = NULL,
-  init = NULL,
+  refresh = 100L,
+  init = 2,
   save_latent_dynamics = FALSE,
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
   sig_figs = NULL,
   threads = NULL,
   opencl_ids = NULL,
-  algorithm = NULL,
-  iter = NULL,
-  grad_samples = NULL,
-  elbo_samples = NULL,
-  eta = NULL,
-  adapt_engaged = NULL,
-  adapt_iter = NULL,
-  tol_rel_obj = NULL,
-  eval_elbo = NULL,
-  draws = NULL,
+  algorithm = "meanfield",
+  iter = 10000L,
+  grad_samples = 1L,
+  elbo_samples = 100L,
+  eta = 1,
+  adapt_engaged = TRUE,
+  adapt_iter = 50L,
+  tol_rel_obj = 0.01,
+  eval_elbo = 100L,
+  draws = 1000L,
   show_messages = TRUE,
   show_exceptions = TRUE,
   save_cmdstan_config = getOption("newstan_save_config", FALSE)
@@ -928,38 +1127,81 @@ stan_model_variational <- function(
     save_latent_dynamics,
     "save_latent_dynamics"
   )
-  adapt_engaged <- .newstan_flag_or_null(adapt_engaged, "adapt_engaged")
+  adapt_engaged <- .newstan_flag(adapt_engaged, "adapt_engaged")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
   if (save_latent_dynamics) {
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
   }
-  call <- .newstan_elapsed(.newstan_run_variational(
-    self,
-    data = data,
-    seed = seed,
-    refresh = refresh,
-    init = init,
-    threads = threads,
-    algorithm = algorithm,
-    iter = iter,
-    grad_samples = grad_samples,
-    elbo_samples = elbo_samples,
-    tol_rel_obj = tol_rel_obj,
-    eta = eta,
-    adapt_engaged = adapt_engaged,
-    adapt_iter = adapt_iter,
-    eval_elbo = eval_elbo,
-    draws = draws,
-    show_messages = show_messages,
-    show_exceptions = show_exceptions
-  ))
+
+  call <- .newstan_elapsed({
+    common <- .newstan_normalize_common(
+      data = data,
+      seed = seed,
+      refresh = refresh,
+      init = init,
+      show_messages = show_messages,
+      show_exceptions = show_exceptions
+    )
+    threads <- as.integer(threads %||% 1L)
+
+    resolved_init <- resolve_init(common$init)
+
+    native_args <- list(
+      method = "variational",
+      algorithm = algorithm,
+      seed = as.integer(common$seed),
+      id = 1L,
+      init_radius = resolved_init$radius,
+      iter = as.integer(iter),
+      grad_samples = as.integer(grad_samples),
+      elbo_samples = as.integer(elbo_samples),
+      tol_rel_obj = as.double(tol_rel_obj),
+      eta = as.double(eta),
+      adapt_engaged = as.logical(adapt_engaged),
+      adapt_iter = as.integer(adapt_iter),
+      eval_elbo = as.integer(eval_elbo),
+      output_samples = as.integer(draws),
+      verbose = as.logical(common$show_messages),
+      show_exceptions = as.logical(common$show_exceptions),
+      num_threads = threads,
+      init = resolved_init$values
+    )
+
+    model <- self$new_model(common$data, common$seed)
+    result <- self$run_model(model, native_args)
+
+    if (result$return_code != 0) {
+      structure(
+        list(
+          draws = NULL,
+          return_code = result$return_code,
+          args = service_args(native_args),
+          output = result$output %||% character(),
+          model_ptr = model
+        ),
+        class = c("StanVariational", "StanService", "list")
+      )
+    } else {
+      structure(
+        list(
+          draws = posterior::as_draws_df(result$draws),
+          return_code = result$return_code,
+          args = service_args(native_args),
+          output = result$output %||% character(),
+          model_ptr = model
+        ),
+        class = c("StanVariational", "StanService", "list")
+      )
+    }
+  })
+
   StanVB$new(
     payload = call$value,
     model = self,
-    data = data %||% list(),
+    data = data,
     seed = call$value$args$seed,
-    init = init %||% 2,
+    init = init,
     elapsed = call$elapsed,
     metadata = list(
       method = "variational",
@@ -999,30 +1241,30 @@ StanModel$set("public", "variational", stan_model_variational)
 NULL
 
 stan_model_pathfinder <- function(
-  data = NULL,
+  data = list(),
   seed = NULL,
-  refresh = NULL,
-  init = NULL,
+  refresh = 100L,
+  init = 2,
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
   sig_figs = NULL,
   threads = NULL,
   opencl_ids = NULL,
-  init_alpha = NULL,
-  tol_obj = NULL,
-  tol_rel_obj = NULL,
-  tol_grad = NULL,
-  tol_rel_grad = NULL,
-  tol_param = NULL,
-  history_size = NULL,
-  single_path_draws = NULL,
-  draws = NULL,
+  init_alpha = 0.001,
+  tol_obj = 1e-12,
+  tol_rel_obj = 1e4,
+  tol_grad = 1e-8,
+  tol_rel_grad = 1e7,
+  tol_param = 1e-8,
+  history_size = 5L,
+  single_path_draws = 1000L,
+  draws = 1000L,
   num_paths = 4,
-  max_lbfgs_iters = NULL,
-  num_elbo_draws = NULL,
-  save_single_paths = NULL,
-  psis_resample = NULL,
-  calculate_lp = NULL,
+  max_lbfgs_iters = 1000L,
+  num_elbo_draws = 25L,
+  save_single_paths = FALSE,
+  psis_resample = TRUE,
+  calculate_lp = TRUE,
   show_messages = TRUE,
   show_exceptions = TRUE,
   save_cmdstan_config = getOption("newstan_save_config", FALSE)
@@ -1034,42 +1276,103 @@ stan_model_pathfinder <- function(
     opencl_ids,
     save_cmdstan_config
   )
-  save_single_paths <- .newstan_flag_or_null(save_single_paths, "save_single_paths")
-  psis_resample <- .newstan_flag_or_null(psis_resample, "psis_resample")
-  calculate_lp <- .newstan_flag_or_null(calculate_lp, "calculate_lp")
+  save_single_paths <- .newstan_flag(save_single_paths, "save_single_paths")
+  psis_resample <- .newstan_flag(psis_resample, "psis_resample")
+  calculate_lp <- .newstan_flag(calculate_lp, "calculate_lp")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
-  call <- .newstan_elapsed(.newstan_run_pathfinder(
-    self,
-    data = data,
-    seed = seed,
-    refresh = refresh,
-    init = init,
-    threads = threads,
-    init_alpha = init_alpha,
-    tol_obj = tol_obj,
-    tol_rel_obj = tol_rel_obj,
-    tol_grad = tol_grad,
-    tol_rel_grad = tol_rel_grad,
-    tol_param = tol_param,
-    history_size = history_size,
-    single_path_draws = single_path_draws,
-    draws = draws,
-    num_paths = num_paths,
-    max_lbfgs_iters = max_lbfgs_iters,
-    num_elbo_draws = num_elbo_draws,
-    save_single_paths = save_single_paths,
-    psis_resample = psis_resample,
-    calculate_lp = calculate_lp,
-    show_messages = show_messages,
-    show_exceptions = show_exceptions
-  ))
+
+  call <- .newstan_elapsed({
+    common <- .newstan_normalize_common(
+      data = data,
+      seed = seed,
+      refresh = refresh,
+      init = init,
+      show_messages = show_messages,
+      show_exceptions = show_exceptions
+    )
+    threads <- as.integer(threads %||% 1L)
+
+    resolved_init <- resolve_init(common$init)
+
+    native_args <- list(
+      method = "pathfinder",
+      seed = as.integer(common$seed),
+      id = 1L,
+      init_radius = resolved_init$radius,
+      max_lbfgs_iters = as.integer(max_lbfgs_iters),
+      history_size = as.integer(history_size),
+      num_elbo_draws = as.integer(num_elbo_draws),
+      num_draws = as.integer(single_path_draws),
+      num_paths = as.integer(num_paths),
+      num_psis_draws = as.integer(draws),
+      init_alpha = as.double(init_alpha),
+      tol_obj = as.double(tol_obj),
+      tol_rel_obj = as.double(tol_rel_obj),
+      tol_grad = as.double(tol_grad),
+      tol_rel_grad = as.double(tol_rel_grad),
+      tol_param = as.double(tol_param),
+      save_single_paths = as.logical(save_single_paths),
+      psis_resample = as.logical(psis_resample),
+      calculate_lp = as.logical(calculate_lp),
+      refresh = as.integer(common$refresh),
+      verbose = as.logical(common$show_messages),
+      show_exceptions = as.logical(common$show_exceptions),
+      num_threads = threads,
+      init = resolved_init$values
+    )
+
+    model <- self$new_model(common$data, common$seed)
+    result <- self$run_model(model, native_args)
+
+    if (result$return_code != 0) {
+      structure(
+        list(
+          draws = NULL,
+          return_code = result$return_code,
+          args = service_args(native_args),
+          output = result$output %||% character(),
+          model_ptr = model
+        ),
+        class = c("StanPathfinder", "StanService", "list")
+      )
+    } else {
+      draws_df <- posterior::as_draws_df(result$draws)
+
+      # Separate special columns from parameters
+      special_vars <- c("lp_approx__", "lp__", "path__")
+      present_special <- special_vars[special_vars %in% colnames(result$draws)]
+
+      if (length(present_special) > 0) {
+        diagnostics <- posterior::subset_draws(draws_df, variable = present_special)
+        draws_df <- posterior::subset_draws(
+          draws_df,
+          variable = setdiff(colnames(result$draws), present_special)
+        )
+      } else {
+        diagnostics <- NULL
+      }
+
+      structure(
+        list(
+          draws = draws_df,
+          diagnostics = diagnostics,
+          return_code = result$return_code,
+          args = service_args(native_args),
+          output = result$output %||% character(),
+          model_ptr = model
+        ),
+        class = c("StanPathfinder", "StanService", "list")
+      )
+    }
+  })
+
   StanPathfinder$new(
     payload = call$value,
     model = self,
-    data = data %||% list(),
+    data = data,
     seed = call$value$args$seed,
-    init = init %||% 2,
+    init = init,
     elapsed = call$elapsed,
     metadata = list(
       method = "pathfinder",
@@ -1104,7 +1407,7 @@ NULL
 
 stan_model_generate_quantities <- function(
   fitted_params,
-  data = NULL,
+  data = list(),
   seed = NULL,
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
@@ -1123,19 +1426,64 @@ stan_model_generate_quantities <- function(
   )
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
-  call <- .newstan_elapsed(.newstan_run_generate_quantities(
-    self,
-    fitted_params = fitted_params,
-    data = data,
-    seed = seed,
-    num_threads = num_threads,
-    show_messages = show_messages,
-    show_exceptions = show_exceptions
-  ))
+
+  call <- .newstan_elapsed({
+    common <- .newstan_normalize_common(
+      data = data,
+      seed = seed,
+      show_messages = show_messages,
+      show_exceptions = show_exceptions
+    )
+    num_threads <- as.integer(num_threads %||% 1L)
+
+    input <- if (inherits(fitted_params, "StanFit")) {
+      fitted_params$draws(format = "draws_matrix")
+    } else {
+      fitted_params
+    }
+
+    model <- self$new_model(common$data, common$seed)
+    pars <- self$constrained_param_names(model)
+
+    # Convert draws to matrix (rows=samples, columns=parameters)
+    draws_matrix <- if (inherits(input, "draws")) {
+      posterior::as_draws_matrix(posterior::subset_draws(
+        input,
+        variable = pars
+      ))
+    } else {
+      as.matrix(input)
+    }
+
+    native_args <- list(
+      method = "generate_quantities",
+      seed = as.integer(common$seed),
+      verbose = as.logical(common$show_messages),
+      show_exceptions = as.logical(common$show_exceptions),
+      num_threads = num_threads,
+      draws = draws_matrix
+    )
+
+    result <- self$run_model(model, native_args)
+
+    gqs_draws <- posterior::as_draws_df(result$samples)
+
+    structure(
+      list(
+        draws = gqs_draws,
+        return_code = result$return_code,
+        args = service_args(native_args),
+        output = result$output %||% character(),
+        model_ptr = model
+      ),
+      class = c("StanGeneratedQuantities", "StanService", "list")
+    )
+  })
+
   StanGQ$new(
     payload = call$value,
     model = self,
-    data = data %||% list(),
+    data = data,
     seed = call$value$args$seed,
     init = NULL,
     elapsed = call$elapsed,
@@ -1168,34 +1516,79 @@ StanModel$set("public", "generate_quantities", stan_model_generate_quantities)
 NULL
 
 stan_model_diagnose <- function(
-  data = NULL,
+  data = list(),
   seed = NULL,
-  init = NULL,
+  init = 2,
   output_dir = getOption("newstan_output_dir"),
   output_basename = NULL,
-  epsilon = NULL,
-  error = NULL
+  epsilon = 1e-6,
+  error = 1e-6
 ) {
   .newstan_reject_backend_files(output_dir, output_basename)
-  call <- .newstan_elapsed(.newstan_run_diagnose(
-    self,
-    data = data,
-    seed = seed,
-    init = init,
-    epsilon = epsilon,
-    error = error
-  ))
+
+  call <- .newstan_elapsed({
+    common <- .newstan_normalize_common(data = data, seed = seed, init = init)
+
+    if (!is.numeric(epsilon) || length(epsilon) != 1L || epsilon <= 0) {
+      stop("`epsilon` must be a positive number.", call. = FALSE)
+    }
+    if (!is.numeric(error) || length(error) != 1L || error <= 0) {
+      stop("`error` must be a positive number.", call. = FALSE)
+    }
+
+    resolved_init <- resolve_init(common$init)
+
+    native_args <- list(
+      method = "diagnose",
+      epsilon = as.double(epsilon),
+      error = as.double(error),
+      seed = as.integer(common$seed),
+      id = 1L,
+      init_radius = resolved_init$radius,
+      verbose = TRUE,
+      num_threads = 1L,
+      init = resolved_init$values
+    )
+
+    model <- self$new_model(common$data, common$seed)
+    result <- self$run_model(model, native_args)
+
+    n_failed <- as.integer(result$num_failed)
+    output_lines <- result$output
+
+    # Parse output messages from Stan's test_gradients()
+    parsed <- .newstan_parse_diagnose_output(output_lines)
+
+    if (n_failed == 0L) {
+      message("[newstan] All gradient tests passed.")
+    } else {
+      message(sprintf(
+        "[newstan] %d parameter(s) failed the gradient test.",
+        n_failed
+      ))
+    }
+
+    list(
+      num_failed = n_failed,
+      return_code = result$return_code,
+      gradients = parsed$gradients,
+      lp = parsed$lp,
+      output = output_lines,
+      args = service_args(native_args),
+      model_ptr = model
+    )
+  })
   StanDiagnose$new(
     payload = call$value,
     model = self,
-    data = data %||% list(),
+    data = data,
     seed = call$value$args$seed,
-    init = init %||% 2,
+    init = init,
     elapsed = call$elapsed,
     metadata = list(
       method = "diagnose",
-      epsilon = epsilon %||% .newstan_defaults$diagnose$epsilon,
-      error = error %||% .newstan_defaults$diagnose$error
+      epsilon = epsilon,
+      error = error
     )
   )
 }
@@ -1213,7 +1606,10 @@ StanModel$set("public", "new_model", stan_model_new_model)
 
 stan_model_run_model <- function(model, args) {
   private$ensure_compiled()
-  private$compiled_env_$run_model(model, args)
+  withr::with_envvar(
+    c(STAN_NUM_THREADS = args$num_threads),
+    private$compiled_env_$run_model(model, args)
+  )
 }
 StanModel$set("public", "run_model", stan_model_run_model)
 

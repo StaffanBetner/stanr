@@ -20,7 +20,6 @@ Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
   int num_threads = Rcpp::as<int>(args["num_threads"]);
   stan::math::init_threadpool_tbb(num_threads);
 
-  // Extract method from args
   std::string method = Rcpp::as<std::string>(args["method"]);
 
   if (method == "sample") {

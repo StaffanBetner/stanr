@@ -171,19 +171,19 @@ stanc <- function(
   }
 
   stanc_flags <- c(
-    ifelse(allow_undefined || length(external_cpp) > 0, "allow-undefined", ""),
+    if (allow_undefined || length(external_cpp) > 0) "allow-undefined",
     paste0("O", optim_level),
-    ifelse(standalone_functions, "standalone-functions", ""),
-    ifelse(use_opencl, "use-opencl", ""),
-    ifelse(warn_pedantic, "warn-pedantic", ""),
-    ifelse(warn_uninitialized, "warn-uninitialized", "")
+    if (standalone_functions) "standalone-functions",
+    if (use_opencl) "use-opencl",
+    if (warn_pedantic) "warn-pedantic",
+    if (warn_uninitialized) "warn-uninitialized"
   )
 
   res <- stanc_context$call(
     "stanc",
     "model",
     model_code,
-    as.array(stanc_flags[!(stanc_flags == "")])
+    as.array(stanc_flags)
   )
 
   if (!is.null(res$errors)) {
