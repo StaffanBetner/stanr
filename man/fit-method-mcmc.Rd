@@ -2,7 +2,7 @@
 % Please edit documentation in R/classes-fit.R
 \name{fit-method-mcmc}
 \alias{fit-method-mcmc}
-\title{MCMC sampler diagnostics}
+\title{MCMC-specific methods}
 \value{
 \itemize{
 \item \verb{$sampler_diagnostics()} returns sampler diagnostics (e.g., \code{divergent__},
@@ -11,20 +11,22 @@
 \item \verb{$diagnostic_summary()} returns a data frame with counts of divergent
 transitions and max treedepth warnings.
 \item \verb{$inv_metric()} returns the inverse mass matrix used during sampling.
+\item \verb{$loo()} returns a LOO-CV object from the \pkg{loo} package.
 }
 }
 \description{
 Methods specific to \code{\link{StanMCMC}} objects for accessing sampler
-diagnostics and chain information.
+diagnostics, chain information, and model evaluation.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{sampler_diagnostics(inc_warmup = FALSE, format = "draws_array")
 num_chains()
 diagnostic_summary()
 inv_metric(matrix = TRUE)
+loo(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, ...)
 }\if{html}{\out{</div>}}
 }
 \seealso{
-\code{\link[=fit-method-draws]{$draws()}}
+\code{\link[=fit-method-draws]{$draws()}}, \code{\link[=fit-method-loo]{$loo()}}
 
 Other StanFit methods:
 \code{\link{fit-method-diagnose}},
@@ -33,6 +35,7 @@ Other StanFit methods:
 \code{\link{fit-method-gq}},
 \code{\link{fit-method-init_model_methods}},
 \code{\link{fit-method-laplace-mode}},
+\code{\link{fit-method-loo}},
 \code{\link{fit-method-lp}},
 \code{\link{fit-method-mle}},
 \code{\link{fit-method-model-methods}},

@@ -177,9 +177,7 @@
         return("")
       }
     }
-    if (verbose) {
-      message("[newstan] Compiling precompiled model header...")
-    }
+    message("[newstan] Compiling precompiled model header...")
     output <- tryCatch(
       system2(
         make,

@@ -154,7 +154,7 @@ StanModel <- R6Class(
       cpp_options = list(),
       stanc_options = list(),
       force_recompile = FALSE,
-      precompiled_headers = FALSE,
+      precompiled_headers = TRUE,
       quiet = TRUE,
       external_cpp = NULL
     ) {
@@ -253,7 +253,7 @@ StanModel <- R6Class(
     cpp_options_ = NULL,
     stanc_options_ = NULL,
     force_recompile_ = FALSE,
-    precompiled_headers_ = FALSE,
+    precompiled_headers_ = TRUE,
     quiet_ = TRUE,
     external_cpp_ = NULL,
     compiled_env_ = NULL,

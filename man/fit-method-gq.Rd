@@ -19,6 +19,7 @@ Other StanFit methods:
 \code{\link{fit-method-fit-info}},
 \code{\link{fit-method-init_model_methods}},
 \code{\link{fit-method-laplace-mode}},
+\code{\link{fit-method-loo}},
 \code{\link{fit-method-lp}},
 \code{\link{fit-method-mcmc}},
 \code{\link{fit-method-mle}},

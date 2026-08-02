@@ -14,7 +14,7 @@ stan_model(
   cpp_options = list(),
   stanc_options = list(),
   force_recompile = getOption("newstan_force_recompile", FALSE),
-  precompiled_headers = FALSE,
+  precompiled_headers = TRUE,
   quiet = TRUE,
   external_cpp = NULL
 )
@@ -49,7 +49,7 @@ has not been modified? The default is \code{FALSE}, but can be set via the
 \code{newstan_force_recompile} option.}
 
 \item{precompiled_headers}{(logical) Should precompiled headers be used to
-speed up compilation? The default is \code{FALSE}.}
+speed up compilation? The default is \code{TRUE}.}
 
 \item{quiet}{(logical) Should verbose output from compilation be suppressed?
 The default is \code{TRUE}.}

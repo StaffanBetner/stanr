@@ -5,7 +5,7 @@
   include_directories = character(),
   external_cpp = NULL,
   verbose = FALSE,
-  precompiled_headers = FALSE,
+  precompiled_headers = TRUE,
   force_recompile = FALSE
 ) {
   # Validate inputs
@@ -168,7 +168,7 @@
 #'   has not been modified? The default is `FALSE`, but can be set via the
 #'   `newstan_force_recompile` option.
 #' @param precompiled_headers (logical) Should precompiled headers be used to
-#'   speed up compilation? The default is `FALSE`.
+#'   speed up compilation? The default is `TRUE`.
 #' @param quiet (logical) Should verbose output from compilation be suppressed?
 #'   The default is `TRUE`.
 #' @param external_cpp (character vector) Paths to C++ files to prepend to the
@@ -211,7 +211,7 @@ stan_model <- function(
   cpp_options = list(),
   stanc_options = list(),
   force_recompile = getOption("newstan_force_recompile", FALSE),
-  precompiled_headers = FALSE,
+  precompiled_headers = TRUE,
   quiet = TRUE,
   external_cpp = NULL
 ) {

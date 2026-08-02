@@ -2,8 +2,14 @@
 
 skip_if_not_installed("loo")
 
-bernoulli_log_lik_file <- testthat::test_path("test-models", "bernoulli_log_lik.stan")
-bernoulli_log_lik_code <- paste(readLines(bernoulli_log_lik_file), collapse = "\n")
+bernoulli_log_lik_file <- testthat::test_path(
+  "test-models",
+  "bernoulli_log_lik.stan"
+)
+bernoulli_log_lik_code <- paste(
+  readLines(bernoulli_log_lik_file),
+  collapse = "\n"
+)
 bernoulli_log_lik_mod <- newstan::stan_model(
   code = bernoulli_log_lik_code,
   compile = TRUE
@@ -56,8 +62,10 @@ test_that("$loo() errors on multiple variable names", {
 
 test_that("$loo() errors when log_lik is not in draws", {
   bernoulli_no_ll_mod <- newstan::stan_model(
-    code = paste(readLines(testthat::test_path("test-models", "bernoulli.stan")),
-                 collapse = "\n"),
+    code = paste(
+      readLines(testthat::test_path("test-models", "bernoulli.stan")),
+      collapse = "\n"
+    ),
     compile = TRUE
   )
   bernoulli_no_ll_fit <- bernoulli_no_ll_mod$sample(

@@ -1008,12 +1008,20 @@ StanMCMC$set("public", "inv_metric", mcmc_inv_metric)
 #'
 NULL
 
-fit_loo <- function(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, ...) {
+fit_loo <- function(
+  variables = "log_lik",
+  r_eff = FALSE,
+  moment_match = FALSE,
+  ...
+) {
   if (!requireNamespace("loo", quietly = TRUE)) {
     stop("The `loo` package is required!", call. = FALSE)
   }
   if (length(variables) != 1) {
-    stop("Only a single variable name is allowed for the 'variables' argument.", call. = FALSE)
+    stop(
+      "Only a single variable name is allowed for the 'variables' argument.",
+      call. = FALSE
+    )
   }
   LLarray <- self$draws(variables, format = "draws_array")
   if (is.logical(r_eff)) {
@@ -1032,7 +1040,9 @@ fit_loo <- function(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, 
     suppressWarnings(loo_result <- loo::loo.array(LLarray, r_eff = r_eff, ...))
 
     log_lik_i <- function(x, i, parameter_name = "log_lik", ...) {
-      ll_array <- x$draws(variables = parameter_name, format = "draws_array")[, , i]
+      ll_array <- x$draws(variables = parameter_name, format = "draws_array")[,,
+        i
+      ]
       attr(ll_array, "dim") <- attributes(ll_array)$dim[1:2]
       ll_array
     }
@@ -1046,7 +1056,9 @@ fit_loo <- function(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, 
     loo::loo_moment_match.default(
       x = self,
       loo = loo_result,
-      post_draws = function(x, ...) { x$draws(format = "draws_matrix") },
+      post_draws = function(x, ...) {
+        x$draws(format = "draws_matrix")
+      },
       log_lik_i = log_lik_i,
       unconstrain_pars = function(x, pars, ...) {
         x$unconstrain_draws(format = "draws_matrix")
