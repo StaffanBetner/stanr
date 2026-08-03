@@ -17,11 +17,23 @@
 #' @noRd
 .newstan_system2 <- function(...) system2(...)
 
+#' Thin wrapper around `tools::Rcmd()`.
+#'
+#' Gives tests the same mocking seam as `.newstan_system2()` above, for the
+#' `R CMD config` calls made by `.newstan_r_config()` -- `tools::Rcmd()`
+#' shells out via `system2()` internally, but not through `.newstan_system2`,
+#' so it needs its own seam.
+#'
+#' @noRd
+.newstan_rcmd <- function(...) tools::Rcmd(...)
+
 #' Return the compiler configuration value used by R's build system.
 #'
 #' Memoized for the life of the R session: `R CMD config <variable>` is
 #' session-stable, so the underlying subprocess only ever runs once per
-#' `variable`.
+#' `variable`. Delegates to `tools::Rcmd()` (via `.newstan_rcmd()`) rather
+#' than constructing the `R CMD` invocation by hand, so the Windows
+#' `Rcmd.exe` front-end is used correctly there too.
 #'
 #' @noRd
 .newstan_r_config <- function(variable) {
@@ -31,12 +43,7 @@
     return(cached)
   }
   output <- tryCatch(
-    .newstan_system2(
-      R.home("bin/R"),
-      c("CMD", "config", variable),
-      stdout = TRUE,
-      stderr = FALSE
-    ),
+    .newstan_rcmd(c("config", variable), stdout = TRUE, stderr = FALSE),
     error = function(e) character()
   )
   value <- paste(output, collapse = "\n")
@@ -92,9 +99,7 @@
   writeLines(
     c(
       paste("include", makeconf),
-      ".PHONY: pch compiler",
-      "compiler:",
-      "\t@$(CXX) --version",
+      ".PHONY: pch",
       "pch:",
       "\t@mkdir -p \"$(dir $(PCH))\"",
       "\t$(CXX) $(ALL_CPPFLAGS) $(CXXFLAGS) $(CXXPICFLAGS) -x c++-header \"$(HEADER)\" -o \"$(PCH)\" $(EXTRA_CXXFLAGS)"
@@ -119,16 +124,15 @@
   if (!is.null(cached)) {
     return(cached)
   }
-  make <- Sys.which("make")
-  identity <- if (!nzchar(make)) {
+  cxx17 <- .newstan_r_config("CXX17")
+  identity <- if (!nzchar(cxx17)) {
     ""
   } else {
-    makefile <- .newstan_pch_makefile()
-    on.exit(unlink(makefile), add = TRUE)
+    cxx17_words <- strsplit(cxx17, "\\s+")[[1]]
     output <- tryCatch(
       .newstan_system2(
-        make,
-        c("-f", shQuote(makefile), "USE_CXX17=1", "compiler"),
+        cxx17_words[[1]],
+        c(cxx17_words[-1], "--version"),
         stdout = TRUE,
         stderr = TRUE
       ),
