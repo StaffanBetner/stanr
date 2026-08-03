@@ -40,8 +40,26 @@ should look for files specified in \verb{#include} directives.}
 
 \item{user_header}{(string) Not yet supported. Use \code{external_cpp} instead.}
 
-\item{cpp_options}{(list) C++ compilation options. Not yet supported by the
-in-process backend.}
+\item{cpp_options}{(list) C++ compilation options, merged into the
+Makevars flags used to compile the model. Each element is either:
+\itemize{
+\item A named element, e.g. \code{list(CXX = "g++")}. This \emph{overrides} any value
+computed internally for that name (e.g. \code{CXXFLAGS}), replacing it
+rather than adding to it.
+\item An unnamed string of the form \code{"<NAME> = <value>"}, e.g.
+\code{"CXX = g++"}. Equivalent to the named form above -- also overrides.
+\item An unnamed string of the form \code{"<NAME> += <value>"}, e.g.
+\code{"CXXFLAGS += -Wno-psabi"}. \emph{Appends} \verb{<value>} to any existing value
+for \verb{<NAME>} instead of replacing it (space-separated), matching how
+\verb{+=} behaves in a Makevars file.
+}
+
+Entries are applied in list order, so the same name may appear more
+than once, e.g. \code{list(CXXFLAGS = "-O3", "CXXFLAGS += -Wall")} first
+overrides \code{CXXFLAGS}, then appends to it. \code{OPENCL_LIBS} is a special
+name: overriding or appending to it changes the OpenCL link flags used
+when \code{use_opencl = TRUE} -- see \code{use_opencl} below -- rather than a
+real Makevars variable.}
 
 \item{stanc_options}{(list) Stan-to-C++ transpiler options. Not yet supported.}
 
@@ -68,12 +86,13 @@ methods (e.g. \code{\link[=model-method-sample]{$sample()}}), not by this argume
 \code{opencl_ids = NULL} (the default there) means \code{select_opencl_device()}
 is simply never called, so the platform/device baked in at compile time
 (0/0) is used. The library used to link OpenCL support can be overridden
-via \code{options(newstan_opencl_libs = ...)} -- the default is \code{"-framework OpenCL"} on macOS and \code{"-lOpenCL"} elsewhere. This override is
-particularly relevant on Apple Silicon: the system OpenCL framework
+via \code{cpp_options = list(OPENCL_LIBS = ...)} -- the default is
+\code{"-framework OpenCL"} on macOS and \code{"-lOpenCL"} elsewhere. This override
+is particularly relevant on Apple Silicon: the system OpenCL framework
 exposes no double-precision (\code{fp64}) device there, and Stan requires
 doubles, so real OpenCL testing on Apple Silicon requires an
 OpenCL implementation with \code{fp64} support (e.g. POCL) and pointing
-\code{newstan_opencl_libs} at its ICD loader instead of the system framework.}
+\code{OPENCL_LIBS} at its ICD loader instead of the system framework.}
 }
 \value{
 A \code{\link{StanModel}} object.

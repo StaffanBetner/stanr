@@ -17,7 +17,8 @@ invisibly.
 \item \verb{$stan_version()} returns the Stan version bundled with the package as a
 string.
 \item \verb{$is_compiled()} returns \code{TRUE} if the model has been compiled.
-\item \verb{$cpp_options()} returns a named list of C++ options.
+\item \verb{$cpp_options()} returns the \code{cpp_options} list the model was created
+with (see \code{\link[=stan_model]{stan_model()}}).
 \item \verb{$stanc_options()} returns a named list of stanc options.
 \item \verb{$use_opencl()} returns \code{TRUE} if the model was created with
 \code{use_opencl = TRUE} and \code{FALSE} otherwise.

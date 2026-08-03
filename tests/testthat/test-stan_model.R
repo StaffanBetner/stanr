@@ -39,6 +39,119 @@ test_that("stan_model errors on missing file", {
   expect_snapshot(stan_model(stan_file = "nonexistent.stan"), error = TRUE)
 })
 
+test_that("stan_model validates the cpp_options argument", {
+  expect_error(
+    stan_model(code = "parameters { real x; }", cpp_options = "not-a-list"),
+    "`cpp_options` must be a list"
+  )
+  expect_error(
+    stan_model(code = "parameters { real x; }", cpp_options = list(1)),
+    "Unnamed `cpp_options` entries must each be a single string"
+  )
+  expect_error(
+    stan_model(
+      code = "parameters { real x; }",
+      cpp_options = list("not an assignment")
+    ),
+    "form '<NAME> = <value>' or '<NAME> \\+= <value>'"
+  )
+  expect_error(
+    stan_model(
+      code = "parameters { real x; }",
+      cpp_options = list(CXXFLAGS = list("-O3"))
+    ),
+    "single non-missing string, number, or logical"
+  )
+  # The same name may legitimately appear more than once (e.g. an
+  # overriding assignment followed by an appending one), so this must not
+  # error.
+  expect_no_error(
+    stan_model(
+      code = "parameters { real x; }",
+      cpp_options = list(CXXFLAGS = "-O3", "CXXFLAGS += -Wall"),
+      compile = FALSE
+    )
+  )
+})
+
+test_that("stan_model stores and reports cpp_options via $cpp_options()", {
+  mod <- stan_model(
+    code = "parameters { real x; }",
+    cpp_options = list(CXXFLAGS = "-O3", STAN_THREADS = TRUE),
+    compile = FALSE
+  )
+  expect_equal(
+    mod$cpp_options(),
+    list(CXXFLAGS = "-O3", STAN_THREADS = TRUE)
+  )
+})
+
+test_that("a named cpp_options entry compiles successfully (overrides, doesn't break the build)", {
+  # Overriding CXXFLAGS drops newstan's own -O3 -g0 optimization flags, but
+  # must not break the build: Makeconf's own CXXFLAGS still apply via the
+  # outer `withr::with_makevars(assignment = "+=")` layer, and PKG_CPPFLAGS
+  # (carrying the `-I` include path newstan's headers need) is untouched.
+  mod <- stan_model(
+    code = '
+      parameters { real theta; }
+      model { theta ~ normal(0, 1); }
+    ',
+    precompiled_headers = FALSE,
+    cpp_options = list(CXXFLAGS = "-O0")
+  )
+  expect_true(mod$is_compiled())
+})
+
+test_that(".newstan_parse_cpp_options parses named, '=', and '+=' entries", {
+  parsed <- newstan:::.newstan_parse_cpp_options(
+    list(CXX = "g++", "CXXFLAGS = -O3", "CXXFLAGS += -Wno-psabi", THREADS = TRUE)
+  )
+  expect_equal(
+    parsed,
+    list(
+      list(name = "CXX", op = "=", value = "g++"),
+      list(name = "CXXFLAGS", op = "=", value = "-O3"),
+      list(name = "CXXFLAGS", op = "+=", value = "-Wno-psabi"),
+      list(name = "THREADS", op = "=", value = "TRUE")
+    )
+  )
+})
+
+test_that(".newstan_apply_makevars overrides on '=' and appends on '+='", {
+  base <- c(CXXFLAGS = "-g -O2", PKG_LIBS = "-lfoo")
+
+  # A named argument (i.e. `op = "="`) overrides rather than appends.
+  overridden <- newstan:::.newstan_apply_makevars(
+    base,
+    list(list(name = "CXXFLAGS", op = "=", value = "-O3"))
+  )
+  expect_equal(unname(overridden[["CXXFLAGS"]]), "-O3")
+
+  # `+=` appends to the existing value instead of replacing it.
+  appended <- newstan:::.newstan_apply_makevars(
+    base,
+    list(list(name = "CXXFLAGS", op = "+=", value = "-Wno-psabi"))
+  )
+  expect_equal(unname(appended[["CXXFLAGS"]]), "-g -O2 -Wno-psabi")
+
+  # `+=` on a name absent from `base` degrades to a plain set.
+  new_var <- newstan:::.newstan_apply_makevars(
+    base,
+    list(list(name = "LDFLAGS", op = "+=", value = "-lbar"))
+  )
+  expect_equal(unname(new_var[["LDFLAGS"]]), "-lbar")
+
+  # Assignments are applied in order: override then append composes.
+  composed <- newstan:::.newstan_apply_makevars(
+    base,
+    list(
+      list(name = "CXXFLAGS", op = "=", value = "-O3"),
+      list(name = "CXXFLAGS", op = "+=", value = "-Wall")
+    )
+  )
+  expect_equal(unname(composed[["CXXFLAGS"]]), "-O3 -Wall")
+})
+
 # Persistent, cross-session model cache (Task A1) -----------------------------
 
 test_that("stan_model writes the .cpp and a built artifact under the resolved cache dir, not tempdir", {
@@ -231,6 +344,40 @@ test_that("changing external_cpp file contents (same path) changes model_hash an
   expect_true(mod2$is_compiled())
   expect_equal(call_count, 2L)
 
+  cpp_files_after <- list.files(cache_dir, pattern = "[.]cpp$")
+  expect_length(cpp_files_after, 2L)
+})
+
+test_that("changing cpp_options changes model_hash and triggers a fresh compile", {
+  cache_root <- withr::local_tempdir()
+  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+  cache_dir <- getOption("newstan_cache_dir")
+
+  code <- '
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+  '
+
+  # `+=` (not a named override) so the internally computed `PKG_CPPFLAGS`
+  # (which carries the `-I` include path newstan's own headers need) is
+  # appended to rather than replaced.
+  mod <- stan_model(
+    code = code,
+    precompiled_headers = FALSE,
+    cpp_options = list("PKG_CPPFLAGS += -DNEWSTAN_TEST_FLAG=1")
+  )
+  expect_true(mod$is_compiled())
+  cpp_files_before <- list.files(cache_dir, pattern = "[.]cpp$")
+  expect_length(cpp_files_before, 1L)
+
+  # Same Stan code, different `cpp_options`: must be treated as a distinct
+  # compiled artifact, not reused from the first model's cache entry.
+  mod2 <- stan_model(
+    code = code,
+    precompiled_headers = FALSE,
+    cpp_options = list("PKG_CPPFLAGS += -DNEWSTAN_TEST_FLAG=2")
+  )
+  expect_true(mod2$is_compiled())
   cpp_files_after <- list.files(cache_dir, pattern = "[.]cpp$")
   expect_length(cpp_files_after, 2L)
 })

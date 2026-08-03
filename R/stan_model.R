@@ -1,3 +1,25 @@
+# Applies an ordered list of `list(name, op, value)` assignments (as
+# returned by `.newstan_parse_cpp_options()`) to a named `base` Makevars
+# vector, in order: an `"="` assignment replaces `base[[name]]` outright, and
+# a `"+="` assignment appends to it (space-joined) -- or, if `name` isn't yet
+# in `base`, is equivalent to `"="`, matching how an unset Makefile variable
+# behaves under `+=`. Applying assignments here (rather than folding them
+# into a single flat named vector ahead of time and handing that to
+# `withr::with_makevars()`) also sidesteps a `withr` pitfall: it silently
+# drops all but one same-named entry when the caller already has a personal
+# Makevars file on disk, so a vector with two "CXXFLAGS" entries wouldn't
+# reliably apply both.
+.newstan_apply_makevars <- function(base, assignments) {
+  for (a in assignments) {
+    if (identical(a$op, "+=") && a$name %in% names(base)) {
+      base[[a$name]] <- paste(base[[a$name]], a$value)
+    } else {
+      base[a$name] <- a$value
+    }
+  }
+  base
+}
+
 .compile_stan_model_environment <- function(
   code,
   model_name,
@@ -6,7 +28,8 @@
   verbose = FALSE,
   precompiled_headers = TRUE,
   force_recompile = FALSE,
-  use_opencl = FALSE
+  use_opencl = FALSE,
+  cpp_options = list()
 ) {
   if (verbose) {
     message("[newstan] Compiling '", model_name, "'...")
@@ -40,18 +63,42 @@
     function(path) paste(readLines(path, warn = FALSE), collapse = "\n"),
     character(1)
   )
+  # A named `cpp_options` entry (or an unnamed `"NAME = value"` string)
+  # overrides the internally computed value for that name; an unnamed
+  # `"NAME += value"` string appends to it instead. See
+  # `.newstan_parse_cpp_options()` / `.newstan_apply_makevars()`.
+  cpp_option_assignments <- .newstan_parse_cpp_options(cpp_options)
+  is_opencl_libs <- vapply(
+    cpp_option_assignments,
+    function(a) identical(a$name, "OPENCL_LIBS"),
+    logical(1)
+  )
+  opencl_assignments <- cpp_option_assignments[is_opencl_libs]
+  # Any other `cpp_options` entries are generic Makefile variable/flag
+  # overrides (e.g. `list(CXXFLAGS = "-march=native")`): merged into the
+  # Makevars used to build the model further down. `OPENCL_LIBS` is excluded
+  # here because it's consumed separately below -- it applies against the
+  # OpenCL link flags default, not `libs`, so folding it in here too would
+  # double it up.
+  extra_assignments <- cpp_option_assignments[!is_opencl_libs]
   # OpenCL link flags are resolved here (rather than down near `libs` below)
-  # because they are also a cache-key input: a `.so` linked against a
-  # `newstan_opencl_libs` override (e.g. POCL's ICD loader) is a genuinely
+  # because they are also a cache-key input: a `.so` linked against an
+  # `OPENCL_LIBS` cpp_option override (e.g. POCL's ICD loader) is a genuinely
   # different artifact from one linked against the default. Only resolved
   # when `use_opencl` is TRUE -- when it's FALSE, `opencl_libs` is fixed to
-  # `""` so `getOption("newstan_opencl_libs")` is a no-op cache-key input for
-  # non-OpenCL models (its value is irrelevant when OpenCL isn't in play).
+  # `""` so `cpp_options`' `OPENCL_LIBS` entries are a no-op cache-key input
+  # for non-OpenCL models (their value is irrelevant when OpenCL isn't in
+  # play).
   opencl_libs <- if (use_opencl) {
-    getOption(
-      "newstan_opencl_libs",
-      if (Sys.info()[["sysname"]] == "Darwin") "-framework OpenCL" else "-lOpenCL"
-    )
+    opencl_default <- if (Sys.info()[["sysname"]] == "Darwin") {
+      "-framework OpenCL"
+    } else {
+      "-lOpenCL"
+    }
+    .newstan_apply_makevars(
+      c(OPENCL_LIBS = opencl_default),
+      opencl_assignments
+    )[["OPENCL_LIBS"]]
   } else {
     ""
   }
@@ -71,7 +118,24 @@
       R.version$platform,
       .newstan_compiler_identity(),
       as.character(use_opencl),
-      opencl_libs
+      opencl_libs,
+      # Stably sorted by name: `order()` preserves the relative order of
+      # same-named assignments (ties), which is the only relative order that
+      # affects the outcome of `.newstan_apply_makevars()` (assignments to
+      # different names don't interact) -- so this keeps the hash stable
+      # against reordering of unrelated `cpp_options` entries while still
+      # varying if two assignments to the *same* name are reordered.
+      if (length(extra_assignments)) {
+        extra_names <- vapply(extra_assignments, `[[`, character(1), "name")
+        ord <- order(extra_names)
+        vapply(
+          extra_assignments[ord],
+          function(a) paste(a$name, a$op, a$value),
+          character(1)
+        )
+      } else {
+        character()
+      }
     ),
     algo = "xxhash64"
   )
@@ -168,13 +232,19 @@
     # so our -O3 -g0 wins the last-flag-wins compiler precedence instead of
     # being silently overridden by Makeconf's -g -O2. USE_CXX17/PKG_CPPFLAGS/
     # PKG_LIBS are not set by Makeconf, so `+=` on them is equivalent to `=`.
+    # Remaining `cpp_options` (already resolved into `extra_assignments`,
+    # `OPENCL_LIBS` aside) are applied in order, overriding or appending as
+    # each entry requests -- see `.newstan_apply_makevars()`.
     withr::with_makevars(
-      c(
-        USE_CXX17 = 1,
-        PKG_CPPFLAGS = compilation_cppflags,
-        PKG_LIBS = libs,
-        CXXFLAGS = .newstan_opt_flags,
-        CXX17FLAGS = .newstan_opt_flags
+      .newstan_apply_makevars(
+        c(
+          USE_CXX17 = "1",
+          PKG_CPPFLAGS = compilation_cppflags,
+          PKG_LIBS = libs,
+          CXXFLAGS = .newstan_opt_flags,
+          CXX17FLAGS = .newstan_opt_flags
+        ),
+        extra_assignments
       ),
       assignment = "+=",
       Rcpp::sourceCpp(
@@ -271,8 +341,24 @@
 #' @param include_paths (character vector) Paths to directories where Stan
 #'   should look for files specified in `#include` directives.
 #' @param user_header (string) Not yet supported. Use `external_cpp` instead.
-#' @param cpp_options (list) C++ compilation options. Not yet supported by the
-#'   in-process backend.
+#' @param cpp_options (list) C++ compilation options, merged into the
+#'   Makevars flags used to compile the model. Each element is either:
+#'   * A named element, e.g. `list(CXX = "g++")`. This *overrides* any value
+#'     computed internally for that name (e.g. `CXXFLAGS`), replacing it
+#'     rather than adding to it.
+#'   * An unnamed string of the form `"<NAME> = <value>"`, e.g.
+#'     `"CXX = g++"`. Equivalent to the named form above -- also overrides.
+#'   * An unnamed string of the form `"<NAME> += <value>"`, e.g.
+#'     `"CXXFLAGS += -Wno-psabi"`. *Appends* `<value>` to any existing value
+#'     for `<NAME>` instead of replacing it (space-separated), matching how
+#'     `+=` behaves in a Makevars file.
+#'
+#'   Entries are applied in list order, so the same name may appear more
+#'   than once, e.g. `list(CXXFLAGS = "-O3", "CXXFLAGS += -Wall")` first
+#'   overrides `CXXFLAGS`, then appends to it. `OPENCL_LIBS` is a special
+#'   name: overriding or appending to it changes the OpenCL link flags used
+#'   when `use_opencl = TRUE` -- see `use_opencl` below -- rather than a
+#'   real Makevars variable.
 #' @param stanc_options (list) Stan-to-C++ transpiler options. Not yet supported.
 #' @param force_recompile (logical) Should the model be recompiled even if it
 #'   has not been modified? The default is `FALSE`, but can be set via the
@@ -293,13 +379,13 @@
 #'   `opencl_ids = NULL` (the default there) means `select_opencl_device()`
 #'   is simply never called, so the platform/device baked in at compile time
 #'   (0/0) is used. The library used to link OpenCL support can be overridden
-#'   via `options(newstan_opencl_libs = ...)` -- the default is `"-framework
-#'   OpenCL"` on macOS and `"-lOpenCL"` elsewhere. This override is
-#'   particularly relevant on Apple Silicon: the system OpenCL framework
+#'   via `cpp_options = list(OPENCL_LIBS = ...)` -- the default is
+#'   `"-framework OpenCL"` on macOS and `"-lOpenCL"` elsewhere. This override
+#'   is particularly relevant on Apple Silicon: the system OpenCL framework
 #'   exposes no double-precision (`fp64`) device there, and Stan requires
 #'   doubles, so real OpenCL testing on Apple Silicon requires an
 #'   OpenCL implementation with `fp64` support (e.g. POCL) and pointing
-#'   `newstan_opencl_libs` at its ICD loader instead of the system framework.
+#'   `OPENCL_LIBS` at its ICD loader instead of the system framework.
 #'
 #' @details `libnewstan_runner.a` (the static archive with the sampling/
 #'   optimize/etc. service runners, linked into every model regardless of

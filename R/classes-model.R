@@ -7,6 +7,75 @@
   x
 }
 
+# Parses `cpp_options` into an ordered list of `list(name, op, value)`
+# assignments, mirroring the semantics of lines in a Makevars file: a named
+# list element is an overriding (`=`) assignment, and so is an unnamed string
+# written as `"<NAME> = <value>"`; an unnamed string written as
+# `"<NAME> += <value>"` is an appending assignment. Entries are returned in
+# the order given -- a later assignment to the same name is meant to take
+# effect after an earlier one, exactly as repeated lines in a Makevars file
+# would (so, unlike a plain named list, the same name may legitimately appear
+# more than once, e.g. an overriding `CXXFLAGS = "-O3"` followed by an
+# appending `"CXXFLAGS += -Wall"`).
+.newstan_parse_cpp_options <- function(cpp_options) {
+  if (!is.list(cpp_options)) {
+    stop("`cpp_options` must be a list.", call. = FALSE)
+  }
+  if (!length(cpp_options)) {
+    return(list())
+  }
+  nms <- names(cpp_options)
+  if (is.null(nms)) {
+    nms <- rep("", length(cpp_options))
+  }
+  nms[is.na(nms)] <- ""
+  lapply(seq_along(cpp_options), function(i) {
+    nm <- nms[[i]]
+    value <- cpp_options[[i]]
+    if (nzchar(nm)) {
+      if (
+        !(is.character(value) || is.logical(value) || is.numeric(value)) ||
+          length(value) != 1L ||
+          is.na(value)
+      ) {
+        stop(
+          "`cpp_options` values must each be a single non-missing string, ",
+          "number, or logical.",
+          call. = FALSE
+        )
+      }
+      list(
+        name = nm,
+        op = "=",
+        value = if (is.logical(value)) toupper(as.character(value)) else
+          as.character(value)
+      )
+    } else {
+      if (!is.character(value) || length(value) != 1L || is.na(value)) {
+        stop(
+          "Unnamed `cpp_options` entries must each be a single string of ",
+          "the form '<NAME> = <value>' or '<NAME> += <value>'.",
+          call. = FALSE
+        )
+      }
+      m <- regmatches(
+        value,
+        regexec("^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\+=|=)\\s*(.*)$", value)
+      )[[1]]
+      if (!length(m)) {
+        stop(
+          "Unnamed `cpp_options` entries must each be a single string of ",
+          "the form '<NAME> = <value>' or '<NAME> += <value>', got: \"",
+          value,
+          "\".",
+          call. = FALSE
+        )
+      }
+      list(name = m[[2]], op = m[[3]], value = trimws(m[[4]]))
+    }
+  })
+}
+
 .newstan_seed <- function(seed) {
   if (is.null(seed)) {
     seed <- as.integer(stats::runif(1, 1, .Machine$integer.max))
@@ -244,14 +313,13 @@ StanModel <- R6Class(
       if (length(include_paths)) {
         include_paths <- normalizePath(include_paths, mustWork = TRUE)
       }
-      if (!is.list(cpp_options) || !is.list(stanc_options)) {
-        stop("`cpp_options` and `stanc_options` must be lists.", call. = FALSE)
-      }
-      if (length(cpp_options)) {
-        stop(
-          "Non-empty `cpp_options` are not yet supported by the in-process backend.",
-          call. = FALSE
-        )
+      # Validated (and, for the raw-string form, syntax-checked) up front so
+      # a malformed `cpp_options` entry fails fast at construction rather
+      # than at compile time; the parsed assignments themselves are
+      # re-derived from the stored raw list in `.compile_stan_model_environment()`.
+      .newstan_parse_cpp_options(cpp_options)
+      if (!is.list(stanc_options)) {
+        stop("`stanc_options` must be a list.", call. = FALSE)
       }
       if (length(stanc_options)) {
         stop(
@@ -362,7 +430,8 @@ StanModel <- R6Class(
 #' * `$stan_version()` returns the Stan version bundled with the package as a
 #'   string.
 #' * `$is_compiled()` returns `TRUE` if the model has been compiled.
-#' * `$cpp_options()` returns a named list of C++ options.
+#' * `$cpp_options()` returns the `cpp_options` list the model was created
+#'   with (see [stan_model()]).
 #' * `$stanc_options()` returns a named list of stanc options.
 #' * `$use_opencl()` returns `TRUE` if the model was created with
 #'   `use_opencl = TRUE` and `FALSE` otherwise.
@@ -517,7 +586,8 @@ stan_model_compile <- function(
     verbose = !quiet,
     precompiled_headers = private$precompiled_headers_,
     force_recompile = force_recompile,
-    use_opencl = private$use_opencl_
+    use_opencl = private$use_opencl_,
+    cpp_options = private$cpp_options_
   )
   invisible(self)
 }

@@ -14,7 +14,13 @@ test_that("use_opencl = TRUE stores and reports the flag without compiling", {
 })
 
 skip_if(!nzchar(Sys.getenv("NEWSTAN_OPENCL_LIBS")), "NEWSTAN_OPENCL_LIBS not set")
-withr::local_options(newstan_opencl_libs = Sys.getenv("NEWSTAN_OPENCL_LIBS"))
+# `NEWSTAN_OPENCL_LIBS` only tells this test suite where CI's POCL ICD loader
+# lives; it's threaded into each model below via `cpp_options = list(OPENCL_LIBS
+# = ...)` rather than a global option, matching how a package user would
+# override it.
+.opencl_cpp_options <- function() {
+  list(OPENCL_LIBS = Sys.getenv("NEWSTAN_OPENCL_LIBS"))
+}
 
 .opencl_test_data <- function() {
   set.seed(123)
@@ -28,7 +34,11 @@ withr::local_options(newstan_opencl_libs = Sys.getenv("NEWSTAN_OPENCL_LIBS"))
 
 test_that("an OpenCL-compiled model samples successfully on POCL", {
   path <- test_path("test-models/bernoulli_logit_glm.stan")
-  mod <- stan_model(stan_file = path, use_opencl = TRUE)
+  mod <- stan_model(
+    stan_file = path,
+    use_opencl = TRUE,
+    cpp_options = .opencl_cpp_options()
+  )
   data <- .opencl_test_data()
 
   result <- mod$sample(
@@ -49,7 +59,11 @@ test_that("OpenCL and CPU fits of the same model agree on posterior means", {
   path <- test_path("test-models/bernoulli_logit_glm.stan")
   data <- .opencl_test_data()
 
-  mod_cl <- stan_model(stan_file = path, use_opencl = TRUE)
+  mod_cl <- stan_model(
+    stan_file = path,
+    use_opencl = TRUE,
+    cpp_options = .opencl_cpp_options()
+  )
   fit_cl <- mod_cl$sample(
     data = data,
     opencl_ids = c(0, 0),
@@ -83,7 +97,11 @@ test_that("OpenCL and CPU fits of the same model agree on posterior means", {
 
 test_that("an invalid OpenCL device index errors", {
   path <- test_path("test-models/bernoulli_logit_glm.stan")
-  mod <- stan_model(stan_file = path, use_opencl = TRUE)
+  mod <- stan_model(
+    stan_file = path,
+    use_opencl = TRUE,
+    cpp_options = .opencl_cpp_options()
+  )
   data <- .opencl_test_data()
 
   expect_error(
@@ -112,7 +130,11 @@ test_that("a non-OpenCL model rejects opencl_ids at fit time", {
 
 test_that("optimize() runs successfully on an OpenCL-compiled model", {
   path <- test_path("test-models/bernoulli_logit_glm.stan")
-  mod <- stan_model(stan_file = path, use_opencl = TRUE)
+  mod <- stan_model(
+    stan_file = path,
+    use_opencl = TRUE,
+    cpp_options = .opencl_cpp_options()
+  )
   data <- .opencl_test_data()
 
   result <- mod$optimize(
