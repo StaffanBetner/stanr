@@ -1,7 +1,6 @@
 test_that("optimizing returns expected structure", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
 
@@ -13,9 +12,8 @@ test_that("optimizing returns expected structure", {
 })
 
 test_that("optimizing with lbfgs algorithm works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$optimize(
     data = data,
@@ -27,11 +25,25 @@ test_that("optimizing with lbfgs algorithm works", {
   expect_equal(result$return_codes(), 0L)
 })
 
+test_that("optimizing with an invalid algorithm errors before reaching C++", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_error(
+    mod$optimize(
+      data = data,
+      algorithm = "typo",
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "`algorithm` must be one of"
+  )
+})
+
 test_that("optimizing finds reasonable theta for bernoulli", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
+  mod <- test_model("bernoulli")
   # 5 successes out of 10 -> MLE theta = 0.5
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  data <- bernoulli_data
 
   result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
 
@@ -40,9 +52,8 @@ test_that("optimizing finds reasonable theta for bernoulli", {
 })
 
 test_that("optimizing output() returns non-empty Stan log messages", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
 
@@ -51,8 +62,7 @@ test_that("optimizing output() returns non-empty Stan log messages", {
 })
 
 test_that("optimizing with jacobian = TRUE vs FALSE gives different mle() for constrained parameters", {
-  path <- test_path("test-models/sigma_normal.stan")
-  mod <- stan_model(stan_file = path)
+  mod <- test_model("sigma_normal")
   data <- list(N = 5, y = c(0.8, -1.2, 0.5, 1.7, -0.3))
 
   result_no_jacobian <- mod$optimize(
@@ -77,9 +87,8 @@ test_that("optimizing with jacobian = TRUE vs FALSE gives different mle() for co
 })
 
 test_that("optimizing with save_iterations = TRUE exposes the full optimization path via draws()", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$optimize(
     data = data,
@@ -106,12 +115,20 @@ test_that("optimizing with save_iterations = TRUE exposes the full optimization 
 })
 
 test_that("optimizing default save_iterations yields a single row in draws()", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
 
   draws <- unclass(as.matrix(result$draws()))
   expect_equal(nrow(draws), 1L)
+})
+
+test_that("mle() errors on an unknown variable name", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+
+  expect_error(result$mle(variables = "theta_typo"), "Unknown variable")
 })

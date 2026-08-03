@@ -1,7 +1,6 @@
 test_that("laplace evaluates model-side gradients in the generated model library", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$laplace(
     data = data,
@@ -36,7 +35,9 @@ test_that("laplace with mode = NULL works for models with vector/array parameter
   expect_equal(result$return_codes(), 0L)
   expect_s3_class(result, "StanLaplace")
   draws <- result$draws()
-  expect_true(all(c("theta", "beta[1]", "beta[2]") %in% posterior::variables(draws)))
+  expect_true(all(
+    c("theta", "beta[1]", "beta[2]") %in% posterior::variables(draws)
+  ))
   expect_equal(posterior::ndraws(draws), 5L)
 })
 
@@ -59,7 +60,9 @@ test_that("laplace with mode = StanMLE works for models with vector parameters",
 
   expect_equal(result$return_codes(), 0L)
   expect_s3_class(result, "StanLaplace")
-  expect_true(all(c("theta", "beta[1]", "beta[2]") %in% posterior::variables(result$draws())))
+  expect_true(all(
+    c("theta", "beta[1]", "beta[2]") %in% posterior::variables(result$draws())
+  ))
 })
 
 test_that("laplace with a raw numeric mode vector uses bracket-format names for vector parameters", {
@@ -83,13 +86,14 @@ test_that("laplace with a raw numeric mode vector uses bracket-format names for 
 
   expect_equal(result$return_codes(), 0L)
   expect_s3_class(result, "StanLaplace")
-  expect_true(all(c("theta", "beta[1]", "beta[2]") %in% posterior::variables(result$draws())))
+  expect_true(all(
+    c("theta", "beta[1]", "beta[2]") %in% posterior::variables(result$draws())
+  ))
 })
 
 test_that("laplace with no mode and default jacobian succeeds", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$laplace(
     data = data,
@@ -105,9 +109,8 @@ test_that("laplace with no mode and default jacobian succeeds", {
 })
 
 test_that("laplace with jacobian = TRUE and mode = StanMLE fitted with jacobian = TRUE works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   opt_fit <- mod$optimize(
     data = data,
@@ -132,9 +135,8 @@ test_that("laplace with jacobian = TRUE and mode = StanMLE fitted with jacobian 
 })
 
 test_that("laplace rejects mode and opt_args together", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   expect_error(
     mod$laplace(

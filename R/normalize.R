@@ -51,12 +51,10 @@
     return(NULL)
   }
 
-  # Wrap single metric in list for recycling across chains
   if (!is.list(inv_metric)) {
     inv_metric <- list(inv_metric)
   }
 
-  # Validate per-chain length
   if (length(inv_metric) > 1L && length(inv_metric) != chains) {
     stop(
       "inv_metric must be a single metric or a list of length ",
@@ -68,5 +66,3 @@
 
   inv_metric
 }
-
-

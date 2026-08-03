@@ -8,13 +8,15 @@
 
 get_rejecting_model <- function() {
   if (!exists("mod", envir = .newstan_show_exceptions_cache)) {
-    .newstan_show_exceptions_cache$mod <- stan_model(code = "
+    .newstan_show_exceptions_cache$mod <- stan_model(
+      code = "
       parameters { real x; }
       model {
         x ~ normal(0, 1);
         if (abs(x) > 0.5) reject(\"test rejection\");
       }
-    ")
+    "
+    )
   }
   .newstan_show_exceptions_cache$mod
 }

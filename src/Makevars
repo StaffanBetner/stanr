@@ -6,7 +6,7 @@ PKG_CPPFLAGS += $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::CxxFlags()" | 
 TBB_LIBS = $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::RcppParallelLibs()" | tail -n 1)
 
 ifeq ($(OS),Windows_NT)
-    TBB_CHECK = $(shell "${R_HOME}/bin/Rscript" -e "cat(utils::packageVersion('RcppParallel') > '6.0.0')")
+    TBB_CHECK = $(shell "${R_HOME}/bin/Rscript" -e "cat(utils::packageVersion('RcppParallel') >= '6.0.0')")
 	ifeq ($(TBB_CHECK),TRUE)
 		TBB_LIBS = -ltbb12 -ltbbmalloc
 	endif

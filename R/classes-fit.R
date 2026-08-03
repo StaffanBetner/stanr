@@ -213,28 +213,11 @@ StanFit <- R6Class(
       if (!inherits(private$model_, "StanModel")) {
         stop("This fit does not retain a model binding.", call. = FALSE)
       }
-      # Fast path: the pointer/probe below were already validated (or
-      # rebuilt) against the model's current compiled artifact, and the
-      # model has not been recompiled since -- skip the probe entirely.
-      #
-      # Two independent conditions must hold, not just the generation
-      # match. `native_generation_` is plain integer data and *survives*
-      # `saveRDS()`/`readRDS()` unchanged -- and so does the model's own
-      # `compile_generation_` (also plain data, reachable through the same
-      # serialized object graph as `private$model_`). A fit that had
-      # already been used (and so had `native_generation_` set) before
-      # being saved will, after `readRDS()`, have a `native_generation_`
-      # that *still* equals the restored model's `compile_generation_`:
-      # both were frozen from the same session at save time, so the
-      # generation check alone cannot detect the restore. What *does*
-      # reliably break across serialization is the external pointer
-      # itself -- `readRDS()` always hands back a null `model_ptr_` (see
-      # `.newstan_xptr_is_null()`) -- so that check is required in
-      # addition to the generation match; it is what actually catches the
-      # readRDS case here (verified with a real compiled model: the
-      # generation numbers do coincide post-restore, and only the
-      # pointer-nullness check prevents the fast path from firing on a
-      # broken pointer).
+      # The generation check alone can't detect a readRDS() restore: the fit's
+      # native_generation_ and the model's compile_generation_ are plain data
+      # serialized together, so they still match after restore. What breaks in a
+      # restore is the external pointer itself (readRDS() nulls it), so the
+      # pointer check is required in addition to the generation match.
       if (
         !is.na(private$native_generation_) &&
           private$native_generation_ == private$model_$compile_generation() &&
@@ -795,7 +778,7 @@ StanMCMC <- R6Class(
       warmup <- NULL
       warmup_diagnostics <- NULL
       if (isTRUE(payload$args$save_warmup) && !is.null(payload$draws)) {
-        all_draws <- posterior::as_draws_array(payload$draws)
+        all_draws <- payload$draws
         warmup_iterations <- ceiling(
           (payload$args$num_warmup %||% 0L) / (payload$args$thin %||% 1L)
         )
@@ -828,20 +811,6 @@ StanMCMC <- R6Class(
             ]
           }
         }
-      }
-      # `StanMCMC`'s served default format is `draws_array`. `payload$draws`/
-      # `payload$diagnostics` are already `draws_array` objects by this point
-      # (built via `as_draws_array()` in `stan_model_sample()`'s
-      # `payload_fn`, and the `save_warmup` branch above also produces
-      # arrays), so these calls are no-ops. Kept unconditionally as a cheap
-      # identity/safety net so `private$draws_`/`private$diagnostics_` are
-      # guaranteed to be in the expected format regardless of which branch
-      # ran above, without needing to reason about every payload source.
-      if (!is.null(payload$draws)) {
-        payload$draws <- posterior::as_draws_array(payload$draws)
-      }
-      if (!is.null(payload$diagnostics)) {
-        payload$diagnostics <- posterior::as_draws_array(payload$diagnostics)
       }
       super$initialize(
         payload,
@@ -982,7 +951,10 @@ mcmc_inv_metric <- function(matrix = TRUE) {
   dense <- is.matrix(metric[[1]])
   if (dense) {
     if (!matrix) {
-      stop("`matrix = FALSE` is only available for diagonal metrics.", call. = FALSE)
+      stop(
+        "`matrix = FALSE` is only available for diagonal metrics.",
+        call. = FALSE
+      )
     }
     return(metric)
   }
@@ -1213,6 +1185,15 @@ NULL
 mle_mle <- function(variables = NULL) {
   value <- private$par_ %||% numeric()
   if (!is.null(variables)) {
+    missing <- setdiff(variables, names(value))
+    if (length(missing)) {
+      stop(
+        "Unknown variable(s): ",
+        paste(missing, collapse = ", "),
+        ".",
+        call. = FALSE
+      )
+    }
     value <- value[variables]
   }
   value
@@ -1263,14 +1244,6 @@ StanLaplace <- R6Class(
     ) {
       private$mode_ <- mode
       payload$draws <- .newstan_rename_draw_columns(payload$draws)
-      # `stan_model_laplace()`'s payload_fn produces a `draws_df`, but
-      # `StanLaplace`'s served default format is `draws_matrix` (below);
-      # convert at construction time so `$draws()`/`$summary()` don't
-      # re-convert on every call. (Beyond B2b's explicit plan scope, but the
-      # same construction-time-format mismatch as `StanMCMC`/`StanGQ`.)
-      if (!is.null(payload$draws)) {
-        payload$draws <- posterior::as_draws_matrix(payload$draws)
-      }
       super$initialize(
         payload,
         model,
@@ -1331,11 +1304,7 @@ StanVB <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      draws <- if (is.null(payload$draws)) {
-        NULL
-      } else {
-        posterior::as_draws_matrix(payload$draws)
-      }
+      draws <- payload$draws
       draws <- .newstan_rename_draw_columns(draws)
       requested <- payload$args$output_samples
       # ADVI writes the posterior mean as the first row before the requested
@@ -1395,27 +1364,7 @@ StanPathfinder <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      if (!is.null(payload$draws) && !is.null(payload$diagnostics)) {
-        lhs <- posterior::as_draws_matrix(payload$draws)
-        rhs <- posterior::as_draws_matrix(payload$diagnostics)
-        if (nrow(lhs) == nrow(rhs)) {
-          rhs <- rhs[, setdiff(colnames(rhs), colnames(lhs)), drop = FALSE]
-          payload$draws <- cbind(lhs, rhs)
-        }
-      }
       payload$draws <- .newstan_rename_draw_columns(payload$draws)
-      # The `cbind()` above strips the `draws_matrix` class (base `cbind()`
-      # on two classed matrices returns a plain matrix/array), and when
-      # `payload$diagnostics` is absent the `if` above never runs at all, so
-      # `payload$draws` can reach here as a plain matrix or (in the no-
-      # diagnostics case) still a `draws_df`. `StanPathfinder`'s served
-      # default format is `draws_matrix` (below); convert at construction
-      # time so `$draws()`/`$summary()` don't re-convert on every call.
-      # (Beyond B2b's explicit plan scope, but the same construction-time-
-      # format mismatch as `StanMCMC`/`StanGQ`.)
-      if (!is.null(payload$draws)) {
-        payload$draws <- posterior::as_draws_matrix(payload$draws)
-      }
       super$initialize(
         payload,
         model,
@@ -1462,14 +1411,6 @@ StanGQ <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      # `StanGQ`'s served default format is `draws_array` (below), but
-      # `stan_model_generate_quantities()`'s payload_fn produces a
-      # `draws_df`. Convert at construction time (see the matching comment in
-      # `StanMCMC$initialize`) so `$draws()`/`$summary()` don't re-convert
-      # the whole object on every call.
-      if (!is.null(payload$draws)) {
-        payload$draws <- posterior::as_draws_array(payload$draws)
-      }
       super$initialize(
         payload,
         model,

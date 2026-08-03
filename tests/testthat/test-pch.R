@@ -1,7 +1,10 @@
 # Tests for precompiled-header subprocess memoization (see .newstan_memo)
 
 reset_pch_memo <- function() {
-  rm(list = ls(envir = newstan:::.newstan_memo), envir = newstan:::.newstan_memo)
+  rm(
+    list = ls(envir = newstan:::.newstan_memo),
+    envir = newstan:::.newstan_memo
+  )
 }
 
 test_that("second identical .newstan_pch_flags() call makes no additional .newstan_system2 calls", {
@@ -101,7 +104,10 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
   on.exit(reset_pch_memo(), add = TRUE)
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
-  withr::local_options(newstan_cache_dir = file.path(cache_home, "models"))
+  withr::local_options(
+    newstan_cache_dir = file.path(cache_home, "models"),
+    newstan_pch_dir = file.path(cache_home, "pch")
+  )
 
   pch_build_calls <- new.env()
   pch_build_calls$n <- 0L
@@ -120,7 +126,10 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
 
   code <- "parameters { real theta; } model { theta ~ normal(0, 1); }"
   expect_error(
-    newstan:::.compile_stan_model_environment(code = code, model_name = "pch_fresh_test"),
+    newstan:::.compile_stan_model_environment(
+      code = code,
+      model_name = "pch_fresh_test"
+    ),
     "simulated genuine model compile error"
   )
   # One initial PCH build (there was none cached yet) and one compile
@@ -135,7 +144,10 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   on.exit(reset_pch_memo(), add = TRUE)
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
-  withr::local_options(newstan_cache_dir = file.path(cache_home, "models"))
+  withr::local_options(
+    newstan_cache_dir = file.path(cache_home, "models"),
+    newstan_pch_dir = file.path(cache_home, "pch")
+  )
 
   header <- system.file(
     "include",
@@ -171,7 +183,10 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   code <- "parameters { real theta; } model { theta ~ normal(0, 1); }"
 
   # Call A: establishes a fresh, on-disk PCH via a successful compile.
-  newstan:::.compile_stan_model_environment(code = code, model_name = "pch_stale_test")
+  newstan:::.compile_stan_model_environment(
+    code = code,
+    model_name = "pch_stale_test"
+  )
   expect_equal(pch_build_calls$n, 1L)
   expect_equal(sourceCpp_calls, 1L)
 
@@ -184,7 +199,10 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   # not re-run) and the same memoized PCH flags as call A -- but the PCH on
   # disk is now stale relative to model_pch.hpp's bumped mtime, so the
   # compile-failure handler should rebuild it once and retry once.
-  newstan:::.compile_stan_model_environment(code = code, model_name = "pch_stale_test")
+  newstan:::.compile_stan_model_environment(
+    code = code,
+    model_name = "pch_stale_test"
+  )
   expect_equal(sourceCpp_calls, 3L)
   expect_equal(pch_build_calls$n, 2L)
 })

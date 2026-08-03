@@ -1,6 +1,5 @@
 test_that("numeric values are accepted for Stan integer data only when integral", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
+  mod <- test_model("bernoulli")
 
   result <- mod$sample(
     data = list(N = 4, y = c(1, 0, 1, 0)),
@@ -27,8 +26,7 @@ test_that("numeric values are accepted for Stan integer data only when integral"
 })
 
 test_that("NA integer data is rejected before Stan services run", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
+  mod <- test_model("bernoulli")
 
   expect_error(
     mod$sample(
@@ -44,8 +42,7 @@ test_that("NA integer data is rejected before Stan services run", {
 })
 
 test_that("invalid sampling counts throw a configuration error", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
+  mod <- test_model("bernoulli")
   data <- list(N = 4L, y = c(1L, 0L, 1L, 0L))
 
   expect_error(
@@ -85,8 +82,7 @@ test_that("invalid sampling counts throw a configuration error", {
 })
 
 test_that("numeric initialization radius is accepted", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
+  mod <- test_model("bernoulli")
   expect_silent(
     mod$sample(
       data = list(N = 4L, y = c(1L, 0L, 1L, 0L)),

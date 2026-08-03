@@ -38,7 +38,6 @@
       next
     }
 
-    # Extract log probability
     if (startsWith(line, "Log probability=")) {
       lp_str <- sub("^Log probability=", "", line)
       lp_val <- suppressWarnings(as.numeric(lp_str))
@@ -48,12 +47,12 @@
       next
     }
 
-    # Skip header line
     if (grepl("param", line, fixed = TRUE)) {
       next
     }
 
-    # Parse gradient row: space-separated numeric values
+    # Columns: param index, value, analytic ("model") gradient,
+    # finite-difference gradient, and the absolute error between them.
     parts <- strsplit(line, "\\s+")[[1]]
     parts <- parts[nzchar(parts)]
     numeric_parts <- suppressWarnings(as.numeric(parts))

@@ -31,42 +31,32 @@
   use_opencl = FALSE,
   cpp_options = list()
 ) {
-  if (verbose) {
-    message("[newstan] Compiling '", model_name, "'...")
+  for (pkg in c("RcppEigen", "BH")) {
+    if (!nzchar(system.file(package = pkg))) {
+      stop(
+        "Package `",
+        pkg,
+        "` must be installed to compile Stan models.",
+        call. = FALSE
+      )
+    }
   }
 
-  # The generated wrapper is part of the translation unit.  Include it in the
-  # cache key so changes to the native runner/model bridge (including
-  # dev-time edits to inst/stan_model.cpp) cannot reuse a sourceCpp artifact
-  # compiled against an older wrapper.
+  # stanc() (a call into the bundled stanc.js engine) is the expensive step,
+  # so a warm cache should skip it entirely: hashing its inputs (code with
+  # includes resolved, external_cpp contents, this wrapper source, versions,
+  # toolchain) has the same discriminating power as hashing its output.
   model_support <- readLines(
     system.file("stan_model.cpp", package = "newstan", mustWork = TRUE)
   )
-  # Step 1: Compute the cache key *before* invoking stanc(). stanc() (a JS
-  # engine call into the bundled stanc.js) is by far the most expensive part
-  # of this function, so on a warm cache we want to skip it entirely. This is
-  # sound because stanc is a deterministic function of `code`,
-  # `include_directories` (already spliced into `code` by the caller), and
-  # `external_cpp` (spliced in by content, not path -- see below) -- and the
-  # bundled stanc.js itself can only change with a newstan version bump,
-  # which is already an input. So hashing these inputs has the same
-  # discriminating power as hashing stanc()'s actual output, without paying
-  # for it on a cache hit.
-  #
-  # `external_cpp` is hashed by file *contents* rather than path: stanc()
-  # splices the contents of each file into the generated C++ (see
-  # R/stanc.R), so identical content living at a different path must hash
-  # identically, and different content living at the same path must hash
-  # differently.
-  external_cpp_contents <- vapply(
-    external_cpp,
-    function(path) paste(readLines(path, warn = FALSE), collapse = "\n"),
-    character(1)
-  )
-  # A named `cpp_options` entry (or an unnamed `"NAME = value"` string)
-  # overrides the internally computed value for that name; an unnamed
-  # `"NAME += value"` string appends to it instead. See
-  # `.newstan_parse_cpp_options()` / `.newstan_apply_makevars()`.
+  # external_cpp is hashed by content, not path: stanc splices file contents
+  # into the generated C++, so identical content at different paths must
+  # hash the same, and different content at the same path must differ.
+  external_cpp_contents <- .newstan_external_cpp_contents(external_cpp)
+  # OPENCL_LIBS is consumed for link flags separately from the other
+  # `cpp_options` Makevars assignments below (to avoid double-applying it),
+  # and pinned to `""` when OpenCL is off so it can't perturb the cache key
+  # for non-OpenCL models.
   cpp_option_assignments <- .newstan_parse_cpp_options(cpp_options)
   is_opencl_libs <- vapply(
     cpp_option_assignments,
@@ -74,21 +64,7 @@
     logical(1)
   )
   opencl_assignments <- cpp_option_assignments[is_opencl_libs]
-  # Any other `cpp_options` entries are generic Makefile variable/flag
-  # overrides (e.g. `list(CXXFLAGS = "-march=native")`): merged into the
-  # Makevars used to build the model further down. `OPENCL_LIBS` is excluded
-  # here because it's consumed separately below -- it applies against the
-  # OpenCL link flags default, not `libs`, so folding it in here too would
-  # double it up.
   extra_assignments <- cpp_option_assignments[!is_opencl_libs]
-  # OpenCL link flags are resolved here (rather than down near `libs` below)
-  # because they are also a cache-key input: a `.so` linked against an
-  # `OPENCL_LIBS` cpp_option override (e.g. POCL's ICD loader) is a genuinely
-  # different artifact from one linked against the default. Only resolved
-  # when `use_opencl` is TRUE -- when it's FALSE, `opencl_libs` is fixed to
-  # `""` so `cpp_options`' `OPENCL_LIBS` entries are a no-op cache-key input
-  # for non-OpenCL models (their value is irrelevant when OpenCL isn't in
-  # play).
   opencl_libs <- if (use_opencl) {
     opencl_default <- if (Sys.info()[["sysname"]] == "Darwin") {
       "-framework OpenCL"
@@ -119,12 +95,9 @@
       .newstan_compiler_identity(),
       as.character(use_opencl),
       opencl_libs,
-      # Stably sorted by name: `order()` preserves the relative order of
-      # same-named assignments (ties), which is the only relative order that
-      # affects the outcome of `.newstan_apply_makevars()` (assignments to
-      # different names don't interact) -- so this keeps the hash stable
-      # against reordering of unrelated `cpp_options` entries while still
-      # varying if two assignments to the *same* name are reordered.
+      # Stable sort by name: reordering unrelated `cpp_options` entries must
+      # not change the hash; reordering two assignments to the *same* name
+      # must.
       if (length(extra_assignments)) {
         extra_names <- vapply(extra_assignments, `[[`, character(1), "name")
         ord <- order(extra_names)
@@ -168,6 +141,9 @@
   # `cpp_file`, but would otherwise silently reuse a stale on-disk `.cpp`
   # file if we didn't also regenerate it here.
   if (force_recompile || !file.exists(cpp_file)) {
+    if (verbose) {
+      message("[newstan] Compiling '", model_name, "'...")
+    }
     cpp_code <- stanc(
       code,
       include_directories = include_directories,
@@ -213,7 +189,13 @@
     mustWork = TRUE
   )
 
-  tbb_libs <- utils::capture.output(RcppParallel::RcppParallelLibs())
+  tbb_libs <- utils::tail(
+    utils::capture.output(RcppParallel::RcppParallelLibs()),
+    1
+  )
+  if (!length(tbb_libs)) {
+    tbb_libs <- ""
+  }
   if (
     .Platform$OS.type == "windows" &&
       utils::packageVersion("RcppParallel") >= '6.0.0'
@@ -257,20 +239,12 @@
     )
   }
 
-  # `Rcpp::sourceCpp()` never propagates the compiler's actual diagnostic
-  # text into the R condition it throws on a build failure -- it always
-  # raises a generic synthetic message (e.g. "Error 1 occurred building
-  # shared library."), regardless of what the compiler really said. That
-  # means a genuinely stale on-disk PCH (e.g. after `R CMD INSTALL`
-  # re-copies `inst/include/` and bumps the installed header's mtime) is
-  # indistinguishable, from here, from any other compile failure by message
-  # text alone. Instead of sniffing the message, check the PCH's staleness
-  # directly: if it's missing, or older than any of the headers it covers,
-  # attempt a single "rebuild the PCH, then retry once" recovery. If the PCH
-  # looks fresh, the failure is almost certainly a genuine model C++ error
-  # (e.g. a bad `external_cpp` file, which stanc() doesn't validate) --
-  # rebuilding the PCH in that case would cost 30-60s before the same real
-  # error surfaces unchanged, so skip straight to `stop(error)` instead.
+  # `Rcpp::sourceCpp()` never propagates the compiler's actual diagnostics --
+  # it always raises a generic synthetic error -- so PCH staleness must be
+  # checked directly below rather than inferred from the error message. A
+  # fresh PCH means the failure is almost certainly a genuine model C++
+  # error, and rebuilding the PCH would just waste 30-60s before the same
+  # error resurfaces, so skip straight to `stop(error)`.
   tryCatch(
     compile_model(cppflags),
     error = function(error) {
@@ -475,12 +449,12 @@ stan_model <- function(
 #'   This always clears the package's own default cache root under
 #'   [tools::R_user_dir("newstan", "cache")][tools::R_user_dir()] -- i.e. its
 #'   `models` and `pch` subdirectories -- regardless of whether
-#'   `getOption("newstan_cache_dir")` has been set to point [stan_model()] at
-#'   a different models cache directory. An overridden `newstan_cache_dir` is
-#'   deliberately left untouched: newstan does not own that directory (it may
-#'   be shared with other software or point outside the user cache root
-#'   entirely), so this function only ever removes paths it created by
-#'   default.
+#'   `getOption("newstan_cache_dir")` or `getOption("newstan_pch_dir")` has
+#'   been set to point compilation at different directories. An overridden
+#'   `newstan_cache_dir`/`newstan_pch_dir` is deliberately left untouched:
+#'   newstan does not own that directory (it may be shared with other
+#'   software or point outside the user cache root entirely), so this
+#'   function only ever removes paths it created by default.
 #'
 #' @return An invisible named character vector with elements `models` and
 #'   `pch`, giving the cache paths targeted for removal (present whether or

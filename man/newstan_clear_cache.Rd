@@ -19,12 +19,12 @@ compilation(s) to rebuild from scratch.
 This always clears the package's own default cache root under
 \link[tools:R_user_dir]{tools::R_user_dir("newstan", "cache")} -- i.e. its
 \code{models} and \code{pch} subdirectories -- regardless of whether
-\code{getOption("newstan_cache_dir")} has been set to point \code{\link[=stan_model]{stan_model()}} at
-a different models cache directory. An overridden \code{newstan_cache_dir} is
-deliberately left untouched: newstan does not own that directory (it may
-be shared with other software or point outside the user cache root
-entirely), so this function only ever removes paths it created by
-default.
+\code{getOption("newstan_cache_dir")} or \code{getOption("newstan_pch_dir")} has
+been set to point compilation at different directories. An overridden
+\code{newstan_cache_dir}/\code{newstan_pch_dir} is deliberately left untouched:
+newstan does not own that directory (it may be shared with other
+software or point outside the user cache root entirely), so this
+function only ever removes paths it created by default.
 }
 \seealso{
 \code{\link[=stan_model]{stan_model()}}

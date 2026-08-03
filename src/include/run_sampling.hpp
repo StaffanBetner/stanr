@@ -149,8 +149,7 @@ namespace newstan {
       metric_writers.emplace_back();
     }
 
-    const bool metric_supplied = args.containsElementNamed("inv_metric") &&
-                           !Rcpp::as<bool>(args["inv_metric_na"]);
+    const bool metric_supplied = args.containsElementNamed("inv_metric");
     auto metric_ctxs = make_metric_contexts(model, args, metric, num_chains,
                                              metric_supplied);
     const bool multi_chain = num_chains > 1;

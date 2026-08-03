@@ -104,7 +104,12 @@ test_that("a named cpp_options entry compiles successfully (overrides, doesn't b
 
 test_that(".newstan_parse_cpp_options parses named, '=', and '+=' entries", {
   parsed <- newstan:::.newstan_parse_cpp_options(
-    list(CXX = "g++", "CXXFLAGS = -O3", "CXXFLAGS += -Wno-psabi", THREADS = TRUE)
+    list(
+      CXX = "g++",
+      "CXXFLAGS = -O3",
+      "CXXFLAGS += -Wno-psabi",
+      THREADS = TRUE
+    )
   )
   expect_equal(
     parsed,
@@ -183,7 +188,11 @@ test_that("stan_model writes the .cpp and a built artifact under the resolved ca
   n_cpp_before <- length(cpp_files)
   mod2 <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod2$is_compiled())
-  cpp_files_after <- list.files(cache_dir, pattern = "[.]cpp$", full.names = TRUE)
+  cpp_files_after <- list.files(
+    cache_dir,
+    pattern = "[.]cpp$",
+    full.names = TRUE
+  )
   expect_equal(length(cpp_files_after), n_cpp_before)
 })
 
@@ -385,6 +394,15 @@ test_that("changing cpp_options changes model_hash and triggers a fresh compile"
 test_that("newstan_clear_cache() removes the models/pch cache dirs and a later compile recreates them", {
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
+  cache_root <- tools::R_user_dir("newstan", "cache")
+  # newstan_clear_cache() always targets tools::R_user_dir()'s default root
+  # (see its docs), never the getOption() overrides -- so these must resolve
+  # to that same default root, or compilation below (which does consult the
+  # options) would land somewhere newstan_clear_cache() never looks.
+  withr::local_options(
+    newstan_cache_dir = file.path(cache_root, "models"),
+    newstan_pch_dir = file.path(cache_root, "pch")
+  )
 
   code <- '
     parameters { real theta; }
@@ -393,7 +411,6 @@ test_that("newstan_clear_cache() removes the models/pch cache dirs and a later c
   mod <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
 
-  cache_root <- tools::R_user_dir("newstan", "cache")
   models_dir <- file.path(cache_root, "models")
   expect_true(dir.exists(models_dir))
 

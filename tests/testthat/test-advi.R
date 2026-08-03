@@ -1,7 +1,6 @@
 test_that("advi returns expected structure", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$variational(
     data = data,
@@ -19,9 +18,8 @@ test_that("advi returns expected structure", {
 })
 
 test_that("advi with meanfield algorithm works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$variational(
     data = data,
@@ -33,4 +31,21 @@ test_that("advi with meanfield algorithm works", {
   )
 
   expect_equal(result$return_codes(), 0L)
+})
+
+test_that("advi with an invalid algorithm errors before reaching C++", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_error(
+    mod$variational(
+      data = data,
+      algorithm = "typo",
+      iter = 1000,
+      draws = 100,
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "`algorithm` must be one of"
+  )
 })

@@ -1,5 +1,5 @@
 test_that("reduce_sum model runs with a configured TBB thread pool", {
-  mod <- stan_model(stan_file = test_path("test-models/reduce_sum_normal.stan"))
+  mod <- test_model("reduce_sum_normal")
 
   result <- mod$sample(
     data = list(N = 8, y = c(-1.1, -0.4, -0.2, 0, 0.3, 0.7, 0.9, 1.2)),
@@ -19,7 +19,7 @@ test_that("reduce_sum model runs with a configured TBB thread pool", {
 })
 
 test_that("ODE model evaluates solver output during fixed-parameter sampling", {
-  mod <- stan_model(stan_file = test_path("test-models/ode_decay.stan"))
+  mod <- test_model("ode_decay")
 
   result <- mod$sample(
     data = list(T = 3, ts = c(0.5, 1, 2), y0 = 4, rate = 0.5),
@@ -40,9 +40,7 @@ test_that("ODE model evaluates solver output during fixed-parameter sampling", {
 })
 
 test_that("hierarchical non-centred logistic model samples", {
-  mod <- stan_model(
-    stan_file = test_path("test-models/hierarchical_logistic.stan")
-  )
+  mod <- test_model("hierarchical_logistic")
   data <- list(
     N = 8,
     K = 2,

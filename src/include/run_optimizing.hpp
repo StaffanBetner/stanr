@@ -98,7 +98,6 @@ namespace newstan {
               iter, save_iterations, interrupt, logger, init_writer,
               sample_writer);
 
-    // Extract results from sample_writer
     Rcpp::NumericMatrix mat = sample_writer.to_r_matrix();
     double lp_val = NA_REAL;
 

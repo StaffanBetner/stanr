@@ -1,7 +1,6 @@
 test_that("generated_quantities returns expected structure", {
-  path <- test_path("test-models/bernoulli_gqs.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli_gqs")
+  data <- bernoulli_data
 
   # First get some posterior draws via sampling
   samp <- mod$sample(
@@ -32,9 +31,8 @@ test_that("generated_quantities returns expected structure", {
 })
 
 test_that("generated_quantities produces log_lik column", {
-  path <- test_path("test-models/bernoulli_gqs.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli_gqs")
+  data <- bernoulli_data
 
   samp <- mod$sample(
     data = data,

@@ -17,13 +17,14 @@ namespace newstan {
     const double epsilon = Rcpp::as<double>(args["epsilon"]);
     const double error_thresh = Rcpp::as<double>(args["error"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
+    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     newstan::r_data_context init_ctx(init_list);
     newstan::r_discard_writer init_writer;
     newstan::r_sample_writer param_writer;
-    newstan::r_logger logger(verbose);
+    newstan::r_logger logger(verbose, show_exceptions);
     newstan::r_interrupt interrupt;
 
     // diagnose returns number of failed parameters (not error code)

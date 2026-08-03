@@ -14,7 +14,7 @@
 #' so tests can count/mock subprocess invocations via
 #' `testthat::local_mocked_bindings()` without spawning real processes.
 #'
-#' @keywords internal
+#' @noRd
 .newstan_system2 <- function(...) system2(...)
 
 #' Return the compiler configuration value used by R's build system.
@@ -23,7 +23,7 @@
 #' session-stable, so the underlying subprocess only ever runs once per
 #' `variable`.
 #'
-#' @keywords internal
+#' @noRd
 .newstan_r_config <- function(variable) {
   memo_key <- paste0("r_config:", variable)
   cached <- .newstan_memo[[memo_key]]
@@ -53,7 +53,7 @@
 #' `.compile_stan_model_environment()`, R/stan_model.R) instead of shelling
 #' out to `Rscript`.
 #'
-#' @keywords internal
+#' @noRd
 .newstan_dependency_cppflags <- function() {
   cached <- .newstan_memo$dependency_cppflags
   if (!is.null(cached)) {
@@ -85,7 +85,7 @@
 
 #' Create an R-toolchain Makefile for a precompiled header.
 #'
-#' @keywords internal
+#' @noRd
 .newstan_pch_makefile <- function() {
   makeconf <- file.path(R.home("etc"), "Makeconf")
   makefile <- tempfile("newstan-pch-", fileext = ".mk")
@@ -129,7 +129,7 @@
 #' Returns `""` if `make` is unavailable, mirroring `.newstan_pch_flags()`'s
 #' own degrade path (PCH is unavailable under the same condition).
 #'
-#' @keywords internal
+#' @noRd
 .newstan_compiler_identity <- function() {
   cached <- .newstan_memo$compiler_identity
   if (!is.null(cached)) {
@@ -170,7 +170,7 @@
 #' `.newstan_pch_flags()` was never called with these flags in this session,
 #' or it was and PCH was unavailable, e.g. no `make`).
 #'
-#' @keywords internal
+#' @noRd
 .newstan_pch_current <- function(cppflags) {
   memo_key <- paste0(
     "pch_flags:",
@@ -222,7 +222,7 @@
 #'   only cares about the literal path handed to `-include`, not about how
 #'   (or whether) anything on the include-search path resolves it.
 #'
-#' @keywords internal
+#' @noRd
 .newstan_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
   memo_key <- paste0(
     "pch_flags:",
@@ -307,8 +307,10 @@
     algo = "xxhash64"
   )
   cache_dir <- file.path(
-    tools::R_user_dir("newstan", "cache"),
-    "pch",
+    getOption(
+      "newstan_pch_dir",
+      file.path(tools::R_user_dir("newstan", "cache"), "pch")
+    ),
     fingerprint
   )
   # GCC's `-include` discovers a sibling `.gch` beside the literal path it is

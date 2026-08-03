@@ -5,7 +5,7 @@
 #' use rather than at package load, then memoized for the life of the
 #' session.
 #'
-#' @keywords internal
+#' @noRd
 stanc_ctx <- function() {
   if (is.null(.newstan_memo$stanc_context)) {
     ctx <- QuickJSR::JSContext$new()
@@ -22,7 +22,7 @@ stanc_ctx <- function() {
 #' @param include_stack Paths included while resolving the current program.
 #'
 #' @return The Stan program with matching include directives replaced by their contents.
-#' @keywords internal
+#' @noRd
 resolve_stan_includes <- function(
   model_code,
   include_directories,
@@ -102,6 +102,41 @@ resolve_stan_includes <- function(
   paste(lines, collapse = "\n")
 }
 
+#' Validate `external_cpp` paths and read their contents
+#'
+#' Shared by `stanc()` and `.compile_stan_model_environment()` so both call
+#' sites validate and read `external_cpp` files identically.
+#'
+#' @param paths `NULL` or a character vector of file paths.
+#'
+#' @return A character vector of file contents (one element per path, in
+#'   order), or `character()` if `paths` is `NULL`.
+#' @noRd
+.newstan_external_cpp_contents <- function(paths) {
+  if (is.null(paths)) {
+    return(character())
+  }
+  if (!is.character(paths) || anyNA(paths)) {
+    stop(
+      "external_cpp must be NULL or a character vector of file paths.",
+      call. = FALSE
+    )
+  }
+  bad <- !file.exists(paths) | dir.exists(paths)
+  if (any(bad)) {
+    stop(
+      "External C++ files do not exist or are directories: ",
+      paste(shQuote(paths[bad]), collapse = ", "),
+      call. = FALSE
+    )
+  }
+  vapply(
+    paths,
+    function(path) paste(readLines(path, warn = FALSE), collapse = "\n"),
+    character(1)
+  )
+}
+
 #' Compile Stan code to C++
 #'
 #' Compiles a Stan program with the bundled `stanc3` compiler. Before
@@ -167,36 +202,11 @@ stanc <- function(
   }
   model_code <- resolve_stan_includes(model_code, include_directories)
 
-  if (is.null(external_cpp)) {
-    external_cpp <- character()
-  }
-  if (!is.character(external_cpp) || anyNA(external_cpp)) {
-    stop(
-      "external_cpp must be NULL or a character vector of file paths.",
-      call. = FALSE
-    )
-  }
-  missing_external_cpp <- !file.exists(external_cpp) | dir.exists(external_cpp)
-  if (any(missing_external_cpp)) {
-    stop(
-      "External C++ files do not exist or are directories: ",
-      paste(shQuote(external_cpp[missing_external_cpp]), collapse = ", "),
-      call. = FALSE
-    )
-  }
-  external_cpp_code <- if (length(external_cpp) == 0) {
+  contents <- .newstan_external_cpp_contents(external_cpp)
+  external_cpp_code <- if (length(contents) == 0) {
     NULL
   } else {
-    paste(
-      vapply(
-        external_cpp,
-        function(path) {
-          paste(readLines(path, warn = FALSE), collapse = "\n")
-        },
-        character(1)
-      ),
-      collapse = "\n"
-    )
+    paste(contents, collapse = "\n")
   }
 
   stanc_flags <- c(
@@ -241,7 +251,7 @@ stanc <- function(
 #' @return A named list with elements `data`, `parameters`,
 #'   `transformed_parameters`, and `generated_quantities`. Each element is a
 #'   named list of variables, where each variable has `type` and `dimensions`.
-#' @keywords internal
+#' @noRd
 model_variables <- function(
   model_code,
   include_directories = character(),

@@ -1,7 +1,6 @@
 test_that("pathfinder single path returns expected structure", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$pathfinder(
     data = data,
@@ -20,9 +19,8 @@ test_that("pathfinder single path returns expected structure", {
 })
 
 test_that("pathfinder single path returns draws_df", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$pathfinder(
     data = data,
@@ -40,9 +38,8 @@ test_that("pathfinder single path returns draws_df", {
 })
 
 test_that("pathfinder multi-path returns expected structure", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$pathfinder(
     data = data,
@@ -65,9 +62,8 @@ test_that("pathfinder multi-path returns expected structure", {
 })
 
 test_that("pathfinder multi-path with num_paths = 1 uses single pathfinder", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$pathfinder(
     data = data,

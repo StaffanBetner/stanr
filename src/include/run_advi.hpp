@@ -57,6 +57,8 @@ namespace newstan {
           interrupt, logger,
           init_writer, sample_writer,
           diagnostic_writer);
+    } else {
+      logger.error("Unknown variational algorithm: " + algorithm);
     }
 
     logger.flush();

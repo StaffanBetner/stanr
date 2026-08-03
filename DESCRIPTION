@@ -1,14 +1,15 @@
 Package: newstan
 Title: A Modern R Interface for Stan
-Version: 0.1.0
+Version: 0.1.1
 Authors@R:
   person(given = c("Andrew", "R."), family = "Johnson", role = c("aut", "cre"),
           email = "andrew.johnson@arjohnsonau.com",
           comment = c(ORCID = "0000-0001-7000-8065"))
 Description:
-    A modern, simpler R interface for Stan. Bundles all required Stan headers internally,
-    depending only on BH (Boost), RcppEigen (Eigen), and RcppParallel (TBB)
-    for external dependencies.
+    A modern, simpler R interface for Stan. Bundles the Stan headers
+    internally and compiles models in-process, using the BH (Boost),
+    RcppEigen (Eigen), and RcppParallel (TBB) packages for the required
+    third-party headers and libraries.
 License: MIT + file LICENSE
 Depends:
     R (>= 4.0)

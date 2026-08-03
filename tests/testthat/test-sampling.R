@@ -1,7 +1,6 @@
 test_that("sampling returns expected structure", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -26,9 +25,8 @@ test_that("sampling returns expected structure", {
 })
 
 test_that("sampling rejects a non-logical flag argument", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   expect_error(
     mod$sample(
@@ -44,9 +42,8 @@ test_that("sampling rejects a non-logical flag argument", {
 })
 
 test_that("sampling output() returns non-empty Stan log messages", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -62,9 +59,8 @@ test_that("sampling output() returns non-empty Stan log messages", {
 })
 
 test_that("show_messages = FALSE silences the console but output() still works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- expect_silent(
     mod$sample(
@@ -81,9 +77,8 @@ test_that("show_messages = FALSE silences the console but output() still works",
 })
 
 test_that("sampling respects explicit tuning values instead of defaults", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -104,9 +99,8 @@ test_that("sampling respects explicit tuning values instead of defaults", {
 })
 
 test_that("sampling with multiple chains works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -122,9 +116,8 @@ test_that("sampling with multiple chains works", {
 })
 
 test_that("sampling with fixed_param algorithm works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -140,9 +133,8 @@ test_that("sampling with fixed_param algorithm works", {
 })
 
 test_that("sampling with adapt_engaged = FALSE works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -160,9 +152,8 @@ test_that("sampling with adapt_engaged = FALSE works", {
 })
 
 test_that("sampling with adapt_engaged = FALSE and iter_warmup = 0 works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -179,9 +170,8 @@ test_that("sampling with adapt_engaged = FALSE and iter_warmup = 0 works", {
 })
 
 test_that("sampling with adapt_engaged = TRUE and iter_warmup = 0 fails with a clear message", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -197,9 +187,8 @@ test_that("sampling with adapt_engaged = TRUE and iter_warmup = 0 fails with a c
 })
 
 test_that("sampling with inv_metric (diag_e) works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   # Bernoulli model has 1 unconstrained parameter (theta)
   # Identity inverse metric is just [1]
@@ -220,9 +209,8 @@ test_that("sampling with inv_metric (diag_e) works", {
 })
 
 test_that("fit$inv_metric() returns per-chain matrices for a diag_e adaptive fit", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -249,9 +237,8 @@ test_that("fit$inv_metric() returns per-chain matrices for a diag_e adaptive fit
 })
 
 test_that("fit$inv_metric() returns dense matrices for metric = 'dense_e' and errors on matrix = FALSE", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -269,13 +256,15 @@ test_that("fit$inv_metric() returns dense matrices for metric = 'dense_e' and er
   expect_true(is.matrix(metric[[1]]))
   expect_equal(dim(metric[[1]]), c(1, 1))
 
-  expect_error(result$inv_metric(matrix = FALSE), "only available for diagonal metrics")
+  expect_error(
+    result$inv_metric(matrix = FALSE),
+    "only available for diagonal metrics"
+  )
 })
 
 test_that("fit$inv_metric() errors when sampling ran without adaptation", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -292,9 +281,8 @@ test_that("fit$inv_metric() errors when sampling ran without adaptation", {
 })
 
 test_that("sampling with save_warmup increases draws", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result_no_warmup <- mod$sample(
     data = data,
@@ -327,9 +315,8 @@ test_that("sampling with save_warmup increases draws", {
 })
 
 test_that("sampling with static HMC engine works (unit_e, adapt)", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -350,9 +337,8 @@ test_that("sampling with static HMC engine works (unit_e, adapt)", {
 })
 
 test_that("sampling with static HMC engine works (unit_e, no adapt)", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -373,9 +359,8 @@ test_that("sampling with static HMC engine works (unit_e, no adapt)", {
 })
 
 test_that("sampling with static HMC engine works (diag_e, adapt)", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -396,9 +381,8 @@ test_that("sampling with static HMC engine works (diag_e, adapt)", {
 })
 
 test_that("sampling with static HMC engine works (diag_e, no adapt)", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -419,9 +403,8 @@ test_that("sampling with static HMC engine works (diag_e, no adapt)", {
 })
 
 test_that("sampling with static HMC engine works (dense_e, adapt)", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   # Bernoulli model has 1 unconstrained parameter
   # Dense identity metric is just a 1x1 matrix
@@ -444,9 +427,8 @@ test_that("sampling with static HMC engine works (dense_e, adapt)", {
 })
 
 test_that("sampling with static HMC engine works (dense_e, no adapt)", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -467,9 +449,8 @@ test_that("sampling with static HMC engine works (dense_e, no adapt)", {
 })
 
 test_that("sampling with static HMC + inv_metric (diag_e) works", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   # Bernoulli model has 1 unconstrained parameter
   result <- mod$sample(
@@ -492,9 +473,8 @@ test_that("sampling with static HMC + inv_metric (diag_e) works", {
 })
 
 test_that("static HMC with multiple chains throws a configuration error", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   expect_error(
     mod$sample(
@@ -511,9 +491,8 @@ test_that("static HMC with multiple chains throws a configuration error", {
 })
 
 test_that("sampling with an invalid engine errors before reaching C++", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   expect_error(
     mod$sample(
@@ -529,14 +508,31 @@ test_that("sampling with an invalid engine errors before reaching C++", {
   )
 })
 
+test_that("sampling with an invalid metric errors before reaching C++", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 50,
+      iter_sampling = 50,
+      chains = 1,
+      metric = "typo",
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "`metric` must be one of"
+  )
+})
+
 # ---------------------------------------------------------------------------
 # $diagnostic_summary() method
 # ---------------------------------------------------------------------------
 
 test_that("diagnostic_summary() returns one row per chain with expected columns", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -581,9 +577,8 @@ test_that("diagnostic_summary() returns one row per chain with expected columns"
 })
 
 test_that("diagnostic_summary() chain column reflects supplied chain_ids", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -600,9 +595,8 @@ test_that("diagnostic_summary() chain column reflects supplied chain_ids", {
 })
 
 test_that("diagnostic_summary() returns NA_integer_ per row for fixed_param runs", {
-  path <- test_path("test-models/bernoulli.stan")
-  mod <- stan_model(stan_file = path)
-  data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
 
   result <- mod$sample(
     data = data,
@@ -633,7 +627,10 @@ test_that("diagnostic_summary() counts per-chain divergences for a pathological 
       x ~ normal(0, exp(y / 2));
     }
   "
-  mod <- stan_model(code = funnel_code, model_name = "funnel_diagnostic_summary")
+  mod <- stan_model(
+    code = funnel_code,
+    model_name = "funnel_diagnostic_summary"
+  )
 
   # Neal's funnel with a short warmup and a low adapt_delta reliably
   # triggers divergent transitions (verified across several seeds).
