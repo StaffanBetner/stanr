@@ -3,7 +3,6 @@
 ^src/math/lib/sundials_([^\/]*)/src/sunnonlinsol/fixedpoint/fmod
 ^src/sundials
 ^inst/include/(?!newstan)
-
 ^\.Rproj\.user$
 ^LICENSE\.md$
 ^README\.Rmd$
@@ -19,7 +18,6 @@
 ^libs$
 ^lib$
 inst/lib
-
 \.gitignore$
 \.prepare
 .*\.o$
