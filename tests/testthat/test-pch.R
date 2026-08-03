@@ -101,7 +101,9 @@ mock_pch_system2 <- function(pch_build_calls_env) {
     if (length(args) && identical(args[[length(args)]], "pch")) {
       pch_build_calls_env$n <- pch_build_calls_env$n + 1L
       pch_arg <- grep("PCH=", args, value = TRUE)[[1]]
-      pch_path <- sub("'$", "", sub(".*PCH=", "", pch_arg))
+      # `shQuote()` wraps in `'` under a POSIX shell but `"` under Windows'
+      # cmd default, so strip whichever trailing quote is there.
+      pch_path <- sub("['\"]$", "", sub(".*PCH=", "", pch_arg))
       dir.create(dirname(pch_path), recursive = TRUE, showWarnings = FALSE)
       file.create(pch_path)
       return(character())

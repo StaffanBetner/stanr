@@ -90,19 +90,49 @@
   flags
 }
 
+#' Locate R's `Makeconf`.
+#'
+#' Windows keeps it under an architecture subdirectory (`etc/x64/Makeconf`);
+#' the platforms where `.Platform$r_arch` is `""` keep it directly in
+#' `etc/`. Falls back to the unsuffixed location if the arch-suffixed one
+#' is absent.
+#'
+#' @noRd
+.newstan_makeconf <- function() {
+  if (nzchar(.Platform$r_arch)) {
+    arch_makeconf <- file.path(R.home("etc"), .Platform$r_arch, "Makeconf")
+    if (file.exists(arch_makeconf)) {
+      return(arch_makeconf)
+    }
+  }
+  file.path(R.home("etc"), "Makeconf")
+}
+
 #' Create an R-toolchain Makefile for a precompiled header.
+#'
+#' The recipe names the `CXX17*` variables explicitly rather than the plain
+#' `CXX`/`CXXFLAGS`/`CXXPICFLAGS` ones. `USE_CXX17` is not a Makeconf switch --
+#' R implements it in `tools:::.shlib_internal()`, which substitutes
+#' `$(CXX17) $(CXX17STD)` etc. before invoking make -- so a bare `make -f`
+#' against Makeconf would silently get `$(CXX)`'s own default standard
+#' (`-std=gnu++20` as of R 4.6) while `sourceCpp()` compiles the model TU
+#' (R/stan_model.R, which sets `USE_CXX17=1`) at `-std=gnu++17`. GCC/clang
+#' reject a PCH built under a different `-std` than its consumer.
+#'
+#' The recipe does not create `$(dir $(PCH))`; the caller does that in R,
+#' so the recipe needs no shell built-ins beyond the compiler itself (GNU
+#' make on Windows falls back to `cmd.exe` when no `sh` is on `PATH`, where
+#' `mkdir -p` would fail and abort the build).
 #'
 #' @noRd
 .newstan_pch_makefile <- function() {
-  makeconf <- file.path(R.home("etc"), "Makeconf")
   makefile <- tempfile("newstan-pch-", fileext = ".mk")
   writeLines(
     c(
-      paste("include", makeconf),
+      paste("include", .newstan_makeconf()),
       ".PHONY: pch",
       "pch:",
-      "\t@mkdir -p \"$(dir $(PCH))\"",
-      "\t$(CXX) $(ALL_CPPFLAGS) $(CXXFLAGS) $(CXXPICFLAGS) -x c++-header \"$(HEADER)\" -o \"$(PCH)\" $(EXTRA_CXXFLAGS)"
+      "\t$(CXX17) $(CXX17STD) $(ALL_CPPFLAGS) $(CXX17FLAGS) $(CXX17PICFLAGS) -x c++-header \"$(HEADER)\" -o \"$(PCH)\" $(EXTRA_CXXFLAGS)"
     ),
     makefile
   )
@@ -183,7 +213,8 @@
 #'   it can live anywhere with an arbitrary name.
 #' * GCC: only supports `-include <file>`, which substitutes a sibling
 #'   `<file>.gch` when one exists beside the exact (absolute) path given --
-#'   so a symlink to the header inside the cache dir, with a `.gch` built
+#'   so a stand-in for the header inside the cache dir (a symlink, or a plain
+#'   copy on Windows, where symlinks are unavailable), with a `.gch` built
 #'   beside it, is sufficient.
 #'
 #' @noRd
@@ -248,8 +279,10 @@
       r = R.version$version.string,
       arch = R.version$arch,
       compiler = compiler,
+      # The CXX17* family, matching the variables the PCH recipe
+      # (`.newstan_pch_makefile()`) and the model TU compile both resolve to.
       makeconf = vapply(
-        c("CXX", "CXXFLAGS", "CXXPICFLAGS", "CPPFLAGS"),
+        c("CXX17", "CXX17STD", "CXX17FLAGS", "CXX17PICFLAGS", "CPPFLAGS"),
         .newstan_r_config,
         character(1)
       ),
@@ -278,8 +311,8 @@
     fingerprint
   )
   # GCC's `-include` discovers a sibling `.gch` beside the literal path it is
-  # given (see the mechanism note in the roxygen block above), so a symlink
-  # to the real header placed inside the cache dir is enough -- no need to
+  # given (see the mechanism note in the roxygen block above), so a stand-in
+  # for the real header placed inside the cache dir is enough -- no need to
   # replicate `include/newstan/...` structure the way implicit-inclusion PCH
   # discovery via `-I` would require.
   cache_header <- file.path(cache_dir, "model_pch.hpp")
@@ -290,15 +323,23 @@
   }
 
   if (!file.exists(pch)) {
+    # The make recipe deliberately has no `mkdir` step (see
+    # `.newstan_pch_makefile()`), so the output directory is created here.
+    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
     if (compiler_type == "gcc" && !file.exists(cache_header)) {
-      dir.create(
-        dirname(cache_header),
-        recursive = TRUE,
-        showWarnings = FALSE
-      )
-      if (!file.symlink(header, cache_header)) {
+      # Windows has no usable symlinks here -- `file.symlink()` requires
+      # Developer Mode or an elevated process and fails outright on non-NTFS
+      # volumes -- so stage a plain copy instead. The copy cannot drift from
+      # the original: `model_pch.hpp`'s md5 is part of `fingerprint` above,
+      # so any edit to it resolves to a different `cache_dir` entirely.
+      staged <- if (.Platform$OS.type == "windows") {
+        file.copy(header, cache_header, overwrite = TRUE)
+      } else {
+        file.symlink(header, cache_header)
+      }
+      if (!isTRUE(staged)) {
         warning(
-          "Could not create the precompiled-header cache symlink; compiling without one.",
+          "Could not stage the header in the precompiled-header cache; compiling without one.",
           call. = FALSE
         )
         return(remember(""))
@@ -311,7 +352,6 @@
         c(
           "-f",
           shQuote(makefile),
-          "USE_CXX17=1",
           shQuote(paste0("PCH=", pch)),
           shQuote(paste0(
             "HEADER=",
