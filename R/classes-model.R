@@ -7,6 +7,20 @@
   x
 }
 
+.newstan_int <- function(x, name, min = 0L) {
+  if (
+    !is.numeric(x) ||
+      length(x) != 1L ||
+      is.na(x) ||
+      x != floor(x) ||
+      x < min ||
+      x > .Machine$integer.max
+  ) {
+    stop("`", name, "` must be a single integer >= ", min, ".", call. = FALSE)
+  }
+  as.integer(x)
+}
+
 # Parses `cpp_options` into an ordered list of `list(name, op, value)`
 # assignments, mirroring the semantics of lines in a Makevars file: a named
 # list element is an overriding (`=`) assignment, and so is an unnamed string
@@ -149,7 +163,7 @@
   list(
     payload = payload,
     seed = seed,
-    elapsed = unname(proc.time()[["elapsed"]] - started)
+    elapsed = proc.time()[["elapsed"]] - started
   )
 }
 
@@ -757,19 +771,10 @@ stan_model_sample <- function(
   ids <- .newstan_validate_chains(chains, chain_ids)
   chains <- ids$chains
   chain_ids <- ids$chain_ids
-  num_threads <- as.integer(num_threads %||% 1L)
-  if (num_threads < 1L) {
-    stop("`num_threads` must be positive.", call. = FALSE)
-  }
-  iter_warmup <- as.integer(iter_warmup)
-  iter_sampling <- as.integer(iter_sampling)
-  thin <- as.integer(thin)
-  if (iter_warmup < 0 || iter_sampling < 0) {
-    stop("iter_warmup and iter_sampling must be non-negative.", call. = FALSE)
-  }
-  if (thin < 1L) {
-    stop("thin must be at least 1.", call. = FALSE)
-  }
+  num_threads <- .newstan_int(num_threads %||% 1L, "num_threads", min = 1L)
+  iter_warmup <- .newstan_int(iter_warmup, "iter_warmup")
+  iter_sampling <- .newstan_int(iter_sampling, "iter_sampling")
+  thin <- .newstan_int(thin, "thin", min = 1L)
   # Calculate in double precision so adding two valid integer iteration counts
   # cannot overflow to NA before the explicit R-size guard below.
   num_saved_draws <- ceiling(as.double(iter_sampling) / as.double(thin))
@@ -791,7 +796,11 @@ stan_model_sample <- function(
     metric = metric,
     chains = chains
   )
-  refresh <- as.integer(refresh)
+  refresh <- .newstan_int(refresh, "refresh")
+  max_treedepth <- .newstan_int(max_treedepth, "max_treedepth")
+  init_buffer <- .newstan_int(init_buffer, "init_buffer")
+  term_buffer <- .newstan_int(term_buffer, "term_buffer")
+  window <- .newstan_int(window, "window")
 
   native_args_fn <- function(seed, resolved_init, model) {
     native <- list(
@@ -811,15 +820,15 @@ stan_model_sample <- function(
       refresh = refresh,
       stepsize = as.double(step_size),
       stepsize_jitter = as.double(step_size_jitter),
-      max_depth = as.integer(max_treedepth),
+      max_depth = max_treedepth,
       int_time = as.double(int_time),
       delta = as.double(adapt_delta),
       gamma = as.double(adapt_gamma),
       kappa = as.double(adapt_kappa),
       t0 = as.double(adapt_t0),
-      init_buffer = as.integer(init_buffer),
-      term_buffer = as.integer(term_buffer),
-      window = as.integer(window),
+      init_buffer = init_buffer,
+      term_buffer = term_buffer,
+      window = window,
       init = resolved_init$values,
       verbose = show_messages,
       show_exceptions = show_exceptions,
@@ -989,8 +998,10 @@ stan_model_optimize <- function(
     )
   }
 
-  threads <- as.integer(threads %||% 1L)
-  refresh <- as.integer(refresh)
+  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  refresh <- .newstan_int(refresh, "refresh")
+  iter <- .newstan_int(iter, "iter")
+  history_size <- .newstan_int(history_size, "history_size")
 
   native_args_fn <- function(seed, resolved_init, model) {
     list(
@@ -999,14 +1010,14 @@ stan_model_optimize <- function(
       seed = seed,
       id = 1L,
       init_radius = resolved_init$radius,
-      iter = as.integer(iter),
+      iter = iter,
       init_alpha = as.double(init_alpha),
       tol_obj = as.double(tol_obj),
       tol_rel_obj = as.double(tol_rel_obj),
       tol_grad = as.double(tol_grad),
       tol_rel_grad = as.double(tol_rel_grad),
       tol_param = as.double(tol_param),
-      history_size = as.integer(history_size),
+      history_size = history_size,
       save_iterations = save_iterations,
       jacobian = jacobian,
       refresh = refresh,
@@ -1114,6 +1125,18 @@ stan_model_laplace <- function(
   if (!is.null(mode) && !is.null(opt_args)) {
     stop("`mode` and `opt_args` cannot both be supplied.", call. = FALSE)
   }
+  reserved <- intersect(
+    names(opt_args),
+    c("data", "seed", "init", "jacobian", "show_messages", "show_exceptions")
+  )
+  if (length(reserved)) {
+    stop(
+      "`opt_args` cannot override: ",
+      paste(reserved, collapse = ", "),
+      ".",
+      call. = FALSE
+    )
+  }
   jacobian <- .newstan_flag(jacobian, "jacobian")
   calculate_lp <- .newstan_flag(calculate_lp, "calculate_lp")
   show_messages <- .newstan_flag(show_messages, "show_messages")
@@ -1152,8 +1175,9 @@ stan_model_laplace <- function(
     mode_val <- mode
   }
 
-  threads <- as.integer(threads %||% 1L)
-  refresh <- as.integer(refresh)
+  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  refresh <- .newstan_int(refresh, "refresh")
+  draws <- .newstan_int(draws, "draws")
 
   if (!is.numeric(mode_val) || is.null(names(mode_val))) {
     stop(
@@ -1175,7 +1199,7 @@ stan_model_laplace <- function(
       method = "laplace",
       mode = as.double(mode_val),
       jacobian = jacobian,
-      num_draws = as.integer(draws),
+      num_draws = draws,
       calculate_lp = calculate_lp,
       seed = seed,
       refresh = refresh,
@@ -1301,8 +1325,14 @@ stan_model_variational <- function(
     )
   }
 
-  threads <- as.integer(threads %||% 1L)
-  refresh <- as.integer(refresh)
+  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  refresh <- .newstan_int(refresh, "refresh")
+  iter <- .newstan_int(iter, "iter")
+  grad_samples <- .newstan_int(grad_samples, "grad_samples")
+  elbo_samples <- .newstan_int(elbo_samples, "elbo_samples")
+  adapt_iter <- .newstan_int(adapt_iter, "adapt_iter")
+  eval_elbo <- .newstan_int(eval_elbo, "eval_elbo")
+  draws <- .newstan_int(draws, "draws")
 
   native_args_fn <- function(seed, resolved_init, model) {
     list(
@@ -1311,15 +1341,15 @@ stan_model_variational <- function(
       seed = seed,
       id = 1L,
       init_radius = resolved_init$radius,
-      iter = as.integer(iter),
-      grad_samples = as.integer(grad_samples),
-      elbo_samples = as.integer(elbo_samples),
+      iter = iter,
+      grad_samples = grad_samples,
+      elbo_samples = elbo_samples,
       tol_rel_obj = as.double(tol_rel_obj),
       eta = as.double(eta),
       adapt_engaged = adapt_engaged,
-      adapt_iter = as.integer(adapt_iter),
-      eval_elbo = as.integer(eval_elbo),
-      output_samples = as.integer(draws),
+      adapt_iter = adapt_iter,
+      eval_elbo = eval_elbo,
+      output_samples = draws,
       verbose = show_messages,
       show_exceptions = show_exceptions,
       num_threads = threads,
@@ -1433,8 +1463,14 @@ stan_model_pathfinder <- function(
     private$select_opencl(opencl_ids)
   }
 
-  threads <- as.integer(threads %||% 1L)
-  refresh <- as.integer(refresh)
+  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  refresh <- .newstan_int(refresh, "refresh")
+  num_paths <- .newstan_int(num_paths, "num_paths", min = 1L)
+  single_path_draws <- .newstan_int(single_path_draws, "single_path_draws")
+  draws <- .newstan_int(draws, "draws")
+  max_lbfgs_iters <- .newstan_int(max_lbfgs_iters, "max_lbfgs_iters")
+  num_elbo_draws <- .newstan_int(num_elbo_draws, "num_elbo_draws")
+  history_size <- .newstan_int(history_size, "history_size")
 
   native_args_fn <- function(seed, resolved_init, model) {
     list(
@@ -1442,12 +1478,12 @@ stan_model_pathfinder <- function(
       seed = seed,
       id = 1L,
       init_radius = resolved_init$radius,
-      max_lbfgs_iters = as.integer(max_lbfgs_iters),
-      history_size = as.integer(history_size),
-      num_elbo_draws = as.integer(num_elbo_draws),
-      num_draws = as.integer(single_path_draws),
-      num_paths = as.integer(num_paths),
-      num_psis_draws = as.integer(draws),
+      max_lbfgs_iters = max_lbfgs_iters,
+      history_size = history_size,
+      num_elbo_draws = num_elbo_draws,
+      num_draws = single_path_draws,
+      num_paths = num_paths,
+      num_psis_draws = draws,
       init_alpha = as.double(init_alpha),
       tol_obj = as.double(tol_obj),
       tol_rel_obj = as.double(tol_rel_obj),
@@ -1496,7 +1532,7 @@ stan_model_pathfinder <- function(
     elapsed = res$elapsed,
     metadata = list(
       method = "pathfinder",
-      num_paths = as.integer(num_paths),
+      num_paths = num_paths,
       threads = threads,
       show_exceptions = show_exceptions
     )
@@ -1515,8 +1551,9 @@ StanModel$set("public", "pathfinder", stan_model_pathfinder)
 #'   quantities block of the Stan program for a set of parameter values.
 #'   Returns a [`StanGQ`] object.
 #'
-#' @param fitted_params A [`StanFit`] object or a draws matrix containing
-#'   parameter values to use for the generated quantities block.
+#' @param fitted_params A [`StanFit`] object, or anything accepted by
+#'   [posterior::as_draws_matrix()], containing draws with every model
+#'   parameter present by name (e.g. `beta[1]`, not a positional column).
 #' @param num_threads (integer) The total number of threads to use.
 #' @template param-opencl_ids
 #'
@@ -1541,8 +1578,7 @@ stan_model_generate_quantities <- function(
   .newstan_reject_backend_files(
     output_dir,
     output_basename,
-    sig_figs,
-    FALSE
+    sig_figs
   )
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
@@ -1550,26 +1586,19 @@ stan_model_generate_quantities <- function(
     private$select_opencl(opencl_ids)
   }
 
-  num_threads <- as.integer(num_threads %||% 1L)
+  num_threads <- .newstan_int(num_threads %||% 1L, "num_threads", min = 1L)
 
   input <- if (inherits(fitted_params, "StanFit")) {
     fitted_params$draws(format = "draws_matrix")
   } else {
-    fitted_params
+    posterior::as_draws_matrix(fitted_params)
   }
 
   native_args_fn <- function(seed, resolved_init, model) {
-    pars <- self$constrained_param_names(model)
-
-    # Convert draws to matrix (rows=samples, columns=parameters)
-    draws_matrix <- if (inherits(input, "draws")) {
-      posterior::as_draws_matrix(posterior::subset_draws(
-        input,
-        variable = pars
-      ))
-    } else {
-      as.matrix(input)
-    }
+    pars <- .newstan_bracket_names(self$constrained_param_names(model))
+    draws_matrix <- posterior::as_draws_matrix(
+      posterior::subset_draws(input, variable = pars)
+    )
 
     list(
       method = "generate_quantities",

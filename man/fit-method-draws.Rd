@@ -9,7 +9,8 @@
 (the default), all variables are returned.}
 
 \item{inc_warmup}{(logical) Should warmup draws be included? Defaults to
-\code{FALSE}. Only applies to \code{\link{StanMCMC}} objects.}
+\code{FALSE}. Errors unless the fit is a \code{\link[=model-method-sample]{$sample()}} run
+with \code{save_warmup = TRUE}.}
 
 \item{format}{(string) The format of the returned draws. Must be a valid
 format from the \pkg{posterior} package. Defaults depend on the fitting

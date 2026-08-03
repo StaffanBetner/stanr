@@ -42,21 +42,17 @@
     }
   }
 
-  # stanc() (a call into the bundled stanc.js engine) is the expensive step,
-  # so a warm cache should skip it entirely: hashing its inputs (code with
-  # includes resolved, external_cpp contents, this wrapper source, versions,
-  # toolchain) has the same discriminating power as hashing its output.
+  # stanc() is the expensive step, so its inputs are hashed (with the same
+  # discriminating power as hashing its output) to let a warm cache skip it.
   model_support <- readLines(
     system.file("stan_model.cpp", package = "newstan", mustWork = TRUE)
   )
   # external_cpp is hashed by content, not path: stanc splices file contents
-  # into the generated C++, so identical content at different paths must
-  # hash the same, and different content at the same path must differ.
+  # into the generated C++, so the hash must depend on content, not location.
   external_cpp_contents <- .newstan_external_cpp_contents(external_cpp)
   # OPENCL_LIBS is consumed for link flags separately from the other
-  # `cpp_options` Makevars assignments below (to avoid double-applying it),
-  # and pinned to `""` when OpenCL is off so it can't perturb the cache key
-  # for non-OpenCL models.
+  # `cpp_options` assignments (avoiding double-applying it), and pinned to
+  # `""` when OpenCL is off so it can't perturb the cache key.
   cpp_option_assignments <- .newstan_parse_cpp_options(cpp_options)
   is_opencl_libs <- vapply(
     cpp_option_assignments,
@@ -78,12 +74,9 @@
   } else {
     ""
   }
-  # R.version$platform and compiler identity are included because the model
-  # cache is now persistent across sessions (see cache_dir below):
-  # Rcpp::sourceCpp()'s own cache doesn't detect an in-place toolchain
-  # upgrade (see .newstan_compiler_identity(), R/pch.R), so without these
-  # inputs a stale .so built by an older/different compiler could be
-  # dyn.load()ed indefinitely instead of triggering a rebuild.
+  # R.version$platform and compiler identity are included because
+  # Rcpp::sourceCpp()'s own cache can't detect an in-place toolchain
+  # upgrade, so a toolchain upgrade must still produce a new cache entry.
   model_hash <- digest::digest(
     c(
       code,
@@ -113,33 +106,23 @@
     algo = "xxhash64"
   )
 
-  # Persistent, cross-session cache: `model_hash` is stable across R
-  # sessions for identical model source, but sourceCpp's own default
-  # `cacheDir` is a per-session temp directory, so without an explicit
-  # `cacheDir` every new session would recompile every model from scratch.
-  # Resolving and passing a real on-disk `cache_dir` (below) lets sourceCpp
-  # reuse a previously built shared object -- and skip the compiler
-  # entirely -- across sessions.
+  # sourceCpp's own default cacheDir is a per-session temp directory, so
+  # without an explicit on-disk cache_dir every session would recompile
+  # every model from scratch instead of reusing the .so across sessions.
   cache_dir <- getOption(
     "newstan_cache_dir",
     file.path(tools::R_user_dir("newstan", "cache"), "models")
   )
   dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
   if (file.access(cache_dir, 2) != 0) {
-    # Soft degrade: unwritable/uncreatable cache dir falls back to the
-    # session temp dir silently. Not worth alarming the user about -- the
-    # only consequence is losing cross-session reuse for this session.
+    # Soft degrade: unwritable cache dir falls back to the session temp dir.
     cache_dir <- tempdir()
   }
 
   cpp_file <- file.path(cache_dir, paste0("stan_", model_hash, ".cpp"))
-  # Step 2: Stan -> C++ via stanc.js (QuickJSR). Only invoked on a cache
-  # miss -- i.e. when nothing on disk already matches `model_hash` -- which
-  # is the whole point of hashing the pre-stanc() inputs above.
-  # `force_recompile` also forces regeneration: `Rcpp::sourceCpp(rebuild =
-  # force_recompile)` below always recompiles the object code from
-  # `cpp_file`, but would otherwise silently reuse a stale on-disk `.cpp`
-  # file if we didn't also regenerate it here.
+  # Only invoked on a cache miss (nothing on disk matches `model_hash`).
+  # `force_recompile` also forces regeneration here, since `sourceCpp(rebuild
+  # = force_recompile)` below would otherwise silently reuse a stale `.cpp`.
   if (force_recompile || !file.exists(cpp_file)) {
     if (verbose) {
       message("[newstan] Compiling '", model_name, "'...")
@@ -158,13 +141,10 @@
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS"
   )
   if (use_opencl) {
-    # Platform/device are pinned to 0/0 at compile time purely to satisfy the
-    # hard `#error OPENCL_PLATFORM_ID_NOT_SET`-style guards in
-    # opencl_context.hpp -- they do not constrain which device is actually
-    # used at runtime. Real device selection happens later, per fit call, via
-    # `select_opencl_device()` (see `.newstan_select_opencl` in
-    # classes-model.R), so a single cached OpenCL-flavored binary serves
-    # every device/platform a caller might select at runtime.
+    # Platform/device are pinned to 0/0 at compile time only to satisfy
+    # opencl_context.hpp's `#error`-style guards -- they don't constrain
+    # which device is used at runtime; real selection happens later, via
+    # `select_opencl_device()`, so one cached binary serves any device.
     cppflags <- paste(
       cppflags,
       "-DSTAN_OPENCL -DOPENCL_PLATFORM_ID=0 -DOPENCL_DEVICE_ID=0",
@@ -203,6 +183,9 @@
     tbb_libs <- "-ltbb12 -ltbbmalloc"
   }
 
+  # libnewstan_runner.a is always compiled without STAN_OPENCL, while an
+  # OpenCL-enabled model TU defines it; safe only as long as services touch
+  # the model solely through the stan::model::model_base virtual interface.
   libs <- paste(shQuote(runtime_archive), tbb_libs)
   if (use_opencl) {
     libs <- paste(libs, opencl_libs)
@@ -214,9 +197,6 @@
     # so our -O3 -g0 wins the last-flag-wins compiler precedence instead of
     # being silently overridden by Makeconf's -g -O2. USE_CXX17/PKG_CPPFLAGS/
     # PKG_LIBS are not set by Makeconf, so `+=` on them is equivalent to `=`.
-    # Remaining `cpp_options` (already resolved into `extra_assignments`,
-    # `OPENCL_LIBS` aside) are applied in order, overriding or appending as
-    # each entry requests -- see `.newstan_apply_makevars()`.
     withr::with_makevars(
       .newstan_apply_makevars(
         c(
@@ -241,10 +221,7 @@
 
   # `Rcpp::sourceCpp()` never propagates the compiler's actual diagnostics --
   # it always raises a generic synthetic error -- so PCH staleness must be
-  # checked directly below rather than inferred from the error message. A
-  # fresh PCH means the failure is almost certainly a genuine model C++
-  # error, and rebuilding the PCH would just waste 30-60s before the same
-  # error resurfaces, so skip straight to `stop(error)`.
+  # checked directly below rather than inferred from the error message.
   tryCatch(
     compile_model(cppflags),
     error = function(error) {
@@ -360,15 +337,6 @@
 #'   doubles, so real OpenCL testing on Apple Silicon requires an
 #'   OpenCL implementation with `fp64` support (e.g. POCL) and pointing
 #'   `OPENCL_LIBS` at its ICD loader instead of the system framework.
-#'
-#' @details `libnewstan_runner.a` (the static archive with the sampling/
-#'   optimize/etc. service runners, linked into every model regardless of
-#'   `use_opencl`) is always compiled without `STAN_OPENCL`, while an
-#'   OpenCL-enabled model translation unit defines it; this is believed safe
-#'   because services only touch the model through the
-#'   `stan::model::model_base` virtual interface (no `matrix_cl` types cross
-#'   that boundary), but is a latent ODR (One Definition Rule) hazard if
-#'   that assumption is ever found to not hold.
 #'
 #' @return A [`StanModel`] object.
 #'

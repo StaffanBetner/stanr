@@ -106,28 +106,12 @@
 
 #' Return an identity string for the active C++ compiler toolchain.
 #'
-#' Runs `$(CXX) --version` through the same `make`-based probe used to pick
-#' PCH flags below, and memoizes the result for the life of the R session
-#' (single key -- the toolchain cannot change mid-session).
-#'
-#' Used for two purposes: selecting PCH flags in `.newstan_pch_flags()`
-#' (clang vs gcc), and as a component of `model_hash`
-#' (`.compile_stan_model_environment()`, R/stan_model.R). The latter exists
-#' because `Rcpp::sourceCpp()`'s own on-disk cache is keyed purely on the
-#' source file's path/content identity plus whether a previously built
-#' shared object still exists at its recorded path (see
-#' `Rcpp:::.sourceCppFindCacheEntryIndex()`) -- it has no notion of compiler
-#' identity or version. An in-place toolchain upgrade that leaves
-#' `R.version$platform` unchanged (e.g. an Xcode Command Line Tools or
-#' system gcc update) would therefore be invisible to sourceCpp's cache, and
-#' -- now that `.compile_stan_model_environment()` uses a *persistent*
-#' cross-session cache dir instead of a per-session `tempdir()` -- a stale
-#' `.so` built by the old toolchain could be `dyn.load`ed indefinitely.
-#' Folding compiler identity into `model_hash` gives such an upgrade a new
-#' cache entry instead.
-#'
-#' Returns `""` if `make` is unavailable, mirroring `.newstan_pch_flags()`'s
-#' own degrade path (PCH is unavailable under the same condition).
+#' Memoized for the life of the R session (single key -- the toolchain
+#' cannot change mid-session). Used to select PCH flags in
+#' `.newstan_pch_flags()` (clang vs gcc), and as a component of `model_hash`
+#' (`.compile_stan_model_environment()`, R/stan_model.R): `Rcpp::sourceCpp()`'s
+#' own cache has no notion of compiler identity, so an in-place toolchain
+#' upgrade could otherwise leave a stale `.so` reloaded indefinitely.
 #'
 #' @noRd
 .newstan_compiler_identity <- function() {
@@ -186,35 +170,17 @@
 #' transitively covers `stan/model/model_header.hpp`, `Rcpp.h`, and the
 #' newstan wrapper headers -- the full cold-compiled preamble of an assembled
 #' model translation unit (`inst/stan_model.cpp`).
-#'
-#' The entire resolved flag string is memoized for the life of the R
-#' session, keyed on `digest::digest(list(cppflags, rebuild = FALSE))` (the
-#' key always uses `rebuild = FALSE`: the memo represents the steady-state
-#' resolved flags, and `rebuild = TRUE` calls bypass the memo lookup
-#' entirely, then refresh the memo entry on success). On a memo hit,
-#' `file.exists()` is still checked for the associated PCH file before
-#' returning it -- the user could have cleared the cache dir mid-session --
-#' and a missing file falls through to full recomputation instead of
-#' returning stale flags. The `make`-based compiler probe this function runs
-#' is likewise memoized (single key: it depends only on the session-stable
-#' toolchain), while the actual PCH-build `make` invocation is not (it has
-#' real side effects -- writing the `.gch` file -- and is already gated by
-#' `file.exists(pch)` checks).
+#' The resolved flags are memoized per-session, keyed on `cppflags` with the
+#' memo key always using `rebuild = FALSE`. A memo hit still revalidates the
+#' cached PCH via `file.exists()`; a miss falls through to recomputation.
 #'
 #' The two compiler families use different discovery mechanisms:
-#' * clang: `-include-pch <pch>` names the compiled `.gch`/`.pch` file
-#'   directly, so it can live anywhere (here, the user cache dir) with an
-#'   arbitrary name.
-#' * GCC: only supports `-include <file>`, which acts as if `#include
-#'   "<file>"` were the first line of the translation unit, and -- per
-#'   <https://gcc.gnu.org/onlinedocs/gcc/Precompiled-Headers.html> -- GCC
-#'   automatically substitutes `<file>.gch` for `<file>` "if suitable" when
-#'   such a sibling file exists. Because `<file>` here is the exact
-#'   (absolute) path given to `-include`, not a path resolved by searching
-#'   `-I` directories, this sibling lookup happens beside whatever path we
-#'   pass -- so a symlink to the installed header placed inside the user
-#'   cache dir, together with a `.gch` built beside that symlink, is
-#'   sufficient.
+#' * clang: `-include-pch <pch>` names the compiled `.gch` file directly, so
+#'   it can live anywhere with an arbitrary name.
+#' * GCC: only supports `-include <file>`, which substitutes a sibling
+#'   `<file>.gch` when one exists beside the exact (absolute) path given --
+#'   so a symlink to the header inside the cache dir, with a `.gch` built
+#'   beside it, is sufficient.
 #'
 #' @noRd
 .newstan_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {

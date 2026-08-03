@@ -86,7 +86,7 @@ namespace newstan {
     // updates; otherwise it writes only the final point.
     newstan::r_sample_writer sample_writer(save_iterations ? iter + 1 : 1);
     newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt;
+    newstan::r_interrupt interrupt(true);
 
     int return_code = jacobian
         ? run_optimizing_algorithm<true>(
@@ -120,8 +120,6 @@ namespace newstan {
       Rcpp::_["par"] = mat,
       Rcpp::_["value"] = lp_val,
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "optimize",
-      Rcpp::_["algorithm"] = algorithm,
       Rcpp::_["output"] = output
     );
   }

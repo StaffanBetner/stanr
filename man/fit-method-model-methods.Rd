@@ -27,10 +27,10 @@ Defaults to \code{NULL}, which uses the fit's default draws format (see
 \value{
 \itemize{
 \item \verb{$log_prob()} returns the log probability as a numeric scalar.
-\item \verb{$grad_log_prob()} returns a list with \code{value} (log probability) and
-\code{gradient} (gradient vector).
-\item \verb{$hessian()} returns a list with \code{value} (log probability), \code{gradient},
-and \code{hessian} (Hessian matrix).
+\item \verb{$grad_log_prob()} returns the gradient as a numeric vector, with the log
+probability attached as the \code{log_prob} attribute.
+\item \verb{$hessian()} returns a list with elements \code{log_prob}, \code{grad_log_prob},
+and \code{hessian}.
 \item \verb{$constrain_variables()} returns a named list of constrained parameter
 values.
 \item \verb{$unconstrain_variables()} returns a numeric vector of unconstrained

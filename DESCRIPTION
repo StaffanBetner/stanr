@@ -1,6 +1,6 @@
 Package: newstan
 Title: A Modern R Interface for Stan
-Version: 0.1.1
+Version: 0.1.2
 Authors@R:
   person(given = c("Andrew", "R."), family = "Johnson", role = c("aut", "cre"),
           email = "andrew.johnson@arjohnsonau.com",

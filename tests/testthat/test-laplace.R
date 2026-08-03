@@ -150,3 +150,18 @@ test_that("laplace rejects mode and opt_args together", {
     "`mode` and `opt_args` cannot both be supplied"
   )
 })
+
+test_that("laplace rejects opt_args that override reserved arguments", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_error(
+    mod$laplace(
+      data = data,
+      opt_args = list(jacobian = TRUE),
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "`opt_args` cannot override"
+  )
+})

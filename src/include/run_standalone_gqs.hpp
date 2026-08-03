@@ -20,7 +20,7 @@ namespace newstan {
 
     newstan::r_sample_writer sample_writer(static_cast<int>(draws.rows()));
     newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt;
+    newstan::r_interrupt interrupt(true);
 
     const int return_code = stan::services::standalone_generate(
         model, draws, seed,
@@ -31,7 +31,6 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["samples"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "generate_quantities",
       Rcpp::_["output"] = output
     );
   }

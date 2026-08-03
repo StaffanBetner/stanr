@@ -65,7 +65,7 @@ test_that("invalid sampling counts throw a configuration error", {
       seed = 42,
       show_messages = FALSE
     ),
-    "thin must be at least 1"
+    "`thin` must be a single integer >= 1"
   )
   expect_error(
     mod$sample(

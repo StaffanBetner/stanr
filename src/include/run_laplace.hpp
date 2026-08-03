@@ -25,7 +25,7 @@ namespace newstan {
     stan::callbacks::json_writer<std::ostringstream> hessian_writer(
         std::make_unique<std::ostringstream>());
     newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt;
+    newstan::r_interrupt interrupt(true);
 
     int return_code;
     if (jacobian) {
@@ -42,7 +42,6 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["draws"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "laplace",
       Rcpp::_["output"] = output
     );
   }

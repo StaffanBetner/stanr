@@ -352,7 +352,9 @@ namespace newstan {
         });
 
     // --- Combine results (R thread only) ---
-    Rcpp::NumericVector combined = writer_chains_to_array(sample_writers);
+    Rcpp::NumericVector combined = return_code == 0
+        ? writer_chains_to_array(sample_writers)
+        : Rcpp::NumericVector(0);
     Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
 
     bool metric_captured = false;
@@ -366,10 +368,6 @@ namespace newstan {
     Rcpp::List result = Rcpp::List::create(
       Rcpp::_["samples"] = combined,
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "sample",
-      Rcpp::_["algorithm"] = algorithm,
-      Rcpp::_["engine"] = engine,
-      Rcpp::_["metric"] = metric,
       Rcpp::_["inv_metric"] = R_NilValue,
       Rcpp::_["step_size"] = R_NilValue,
       Rcpp::_["output"] = output

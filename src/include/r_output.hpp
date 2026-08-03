@@ -137,20 +137,6 @@ class r_sample_writer : public stan::callbacks::writer {
     return r_mat;
   }
 
-  /**
-   * Copy the stored columns into preallocated R vectors.  This is intended for
-   * assembling multi-chain output on R's main thread without first creating a
-   * combined Eigen matrix.
-   */
-  void copy_to_r_columns(Rcpp::List& columns, int row_offset) const {
-    if (n_rows_ == 0) return;
-    for (int j = 0; j < n_cols_; ++j) {
-      Rcpp::NumericVector column = columns[j];
-      std::memcpy(column.begin() + row_offset, values_.col(j).data(),
-                  static_cast<size_t>(n_rows_) * sizeof(double));
-    }
-  }
-
   // Copy column v (n_rows_ contiguous doubles) into slice [ , chain, v] of a
   // preallocated iterations x chains x variables array. Main R thread only.
   void copy_to_r_array_chain(double* dest, int n_iterations, int n_chains,

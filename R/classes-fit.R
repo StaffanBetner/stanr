@@ -213,11 +213,12 @@ StanFit <- R6Class(
       if (!inherits(private$model_, "StanModel")) {
         stop("This fit does not retain a model binding.", call. = FALSE)
       }
-      # The generation check alone can't detect a readRDS() restore: the fit's
-      # native_generation_ and the model's compile_generation_ are plain data
-      # serialized together, so they still match after restore. What breaks in a
-      # restore is the external pointer itself (readRDS() nulls it), so the
-      # pointer check is required in addition to the generation match.
+      # Generations are plain data serialized with the fit, so they still
+      # match after readRDS(). What breaks in a restore is the pointer
+      # (nulled) and the sourceCpp wrappers' native symbols, neither of which
+      # survives serialization. A failed probe therefore rebuilds the
+      # compiled environment; the cached `.so` (keyed on `model_hash`) stays
+      # valid.
       if (
         !is.na(private$native_generation_) &&
           private$native_generation_ == private$model_$compile_generation() &&
@@ -234,12 +235,6 @@ StanFit <- R6Class(
         private$native_generation_ <- private$model_$compile_generation()
         return(invisible(NULL))
       }
-      # Fits restored via readRDS() carry a stale external pointer (an Rcpp
-      # XPtr doesn't survive serialization); probing it throws, which signals
-      # a one-time rebuild of the compiled environment -- the sourceCpp
-      # wrappers hold native-symbol pointers that don't survive
-      # serialization. The binary itself doesn't need rebuilding: the
-      # cached `.so` is keyed on `model_hash` and is still valid.
       valid <- tryCatch(
         {
           probe(private$model_ptr_)
@@ -320,7 +315,8 @@ StanFit <- R6Class(
 #' @param variables (character vector) Which variables to extract. If `NULL`
 #'   (the default), all variables are returned.
 #' @param inc_warmup (logical) Should warmup draws be included? Defaults to
-#'   `FALSE`. Only applies to [`StanMCMC`] objects.
+#'   `FALSE`. Errors unless the fit is a [`$sample()`][model-method-sample] run
+#'   with `save_warmup = TRUE`.
 #' @param format (string) The format of the returned draws. Must be a valid
 #'   format from the \pkg{posterior} package. Defaults depend on the fitting
 #'   method: `"draws_array"` for MCMC and generated quantities, `"draws_matrix"`
@@ -339,18 +335,18 @@ fit_draws <- function(variables = NULL, inc_warmup = FALSE, format = NULL) {
   }
   draws <- private$draws_
   if (inc_warmup) {
-    if (!is.null(private$warmup_draws_)) {
-      draws <- posterior::bind_draws(
-        private$warmup_draws_,
-        draws,
-        along = "iteration"
-      )
-    } else if (inherits(self, "StanMCMC")) {
+    if (is.null(private$warmup_draws_)) {
       stop(
-        "warmup draws were not saved; rerun with `save_warmup = TRUE`",
+        "warmup draws were not saved; only `$sample()` runs with ",
+        "`save_warmup = TRUE` store them.",
         call. = FALSE
       )
     }
+    draws <- posterior::bind_draws(
+      private$warmup_draws_,
+      draws,
+      along = "iteration"
+    )
   }
   if (!is.null(variables)) {
     draws <- posterior::subset_draws(draws, variable = variables)
@@ -573,10 +569,10 @@ StanFit$set("public", "save_object", fit_save_object)
 #'
 #' @return
 #' * `$log_prob()` returns the log probability as a numeric scalar.
-#' * `$grad_log_prob()` returns a list with `value` (log probability) and
-#'   `gradient` (gradient vector).
-#' * `$hessian()` returns a list with `value` (log probability), `gradient`,
-#'   and `hessian` (Hessian matrix).
+#' * `$grad_log_prob()` returns the gradient as a numeric vector, with the log
+#'   probability attached as the `log_prob` attribute.
+#' * `$hessian()` returns a list with elements `log_prob`, `grad_log_prob`,
+#'   and `hessian`.
 #' * `$constrain_variables()` returns a named list of constrained parameter
 #'   values.
 #' * `$unconstrain_variables()` returns a numeric vector of unconstrained
@@ -1210,7 +1206,7 @@ mle_mle <- function(variables = NULL) {
 }
 StanMLE$set("public", "mle", mle_mle)
 
-mle_summary <- function(variables = NULL) {
+mle_summary <- function(variables = NULL, ...) {
   value <- self$mle(variables)
   data.frame(
     variable = names(value),

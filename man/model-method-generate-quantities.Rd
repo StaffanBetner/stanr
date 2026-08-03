@@ -5,8 +5,9 @@
 \alias{generate_quantities}
 \title{Run generated quantities}
 \arguments{
-\item{fitted_params}{A \code{\link{StanFit}} object or a draws matrix containing
-parameter values to use for the generated quantities block.}
+\item{fitted_params}{A \code{\link{StanFit}} object, or anything accepted by
+\code{\link[posterior:as_draws_matrix]{posterior::as_draws_matrix()}}, containing draws with every model
+parameter present by name (e.g. \code{beta[1]}, not a positional column).}
 
 \item{num_threads}{(integer) The total number of threads to use.}
 

@@ -70,7 +70,6 @@ namespace newstan {
       Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
       return Rcpp::List::create(
         Rcpp::_["return_code"] = return_code,
-        Rcpp::_["method"] = "pathfinder",
         Rcpp::_["draws"] = sample_writer.to_r_matrix(),
         Rcpp::_["output"] = output
       );
@@ -117,7 +116,6 @@ namespace newstan {
       Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
       return Rcpp::List::create(
         Rcpp::_["return_code"] = return_code,
-        Rcpp::_["method"] = "pathfinder",
         Rcpp::_["draws"] = param_writer.to_r_matrix(),
         Rcpp::_["output"] = output
       );

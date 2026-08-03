@@ -25,7 +25,7 @@ namespace newstan {
     newstan::r_discard_writer init_writer;
     newstan::r_sample_writer param_writer;
     newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt;
+    newstan::r_interrupt interrupt(true);
 
     // diagnose returns number of failed parameters (not error code)
     int n_failed = stan::services::diagnose::diagnose(
@@ -44,7 +44,6 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["num_failed"] = n_failed,
       Rcpp::_["return_code"] = n_failed == 0 ? 0 : 1,
-      Rcpp::_["method"] = "diagnose",
       Rcpp::_["output"] = messages
     );
   }

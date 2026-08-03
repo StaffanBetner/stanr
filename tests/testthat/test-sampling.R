@@ -640,7 +640,24 @@ test_that("sampling with num_threads = 0 errors", {
       seed = 42,
       show_messages = FALSE
     ),
-    "must be positive"
+    "`num_threads` must be a single integer >= 1"
+  )
+})
+
+test_that("sampling with a non-numeric iter_warmup errors", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = "abc",
+      iter_sampling = 20,
+      chains = 1,
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "`iter_warmup` must be a single integer"
   )
 })
 

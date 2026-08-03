@@ -37,7 +37,7 @@ namespace newstan {
     newstan::r_sample_writer sample_writer(output_samples + 1);
     newstan::r_discard_writer diagnostic_writer;
     newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt;
+    newstan::r_interrupt interrupt(true);
 
     int return_code = stan::services::error_codes::CONFIG;
 
@@ -66,8 +66,6 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["draws"] = sample_writer.to_r_matrix(),
       Rcpp::_["return_code"] = return_code,
-      Rcpp::_["method"] = "variational",
-      Rcpp::_["algorithm"] = algorithm,
       Rcpp::_["output"] = output
     );
   }

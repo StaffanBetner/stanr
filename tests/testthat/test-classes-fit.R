@@ -22,6 +22,19 @@ test_that(".newstan_bracket_names handles a vector mixing dotted and plain names
 })
 
 
+test_that("optimize() fit errors on draws(inc_warmup = TRUE)", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+
+  expect_error(
+    result$draws(inc_warmup = TRUE),
+    "warmup draws were not saved"
+  )
+})
+
+
 test_that("save_object() does not serialize the fit data twice", {
   # Regression test: `private$data_` and `private$metadata_$data` used to
   # both hold a reference to the same data list, and R serialization does

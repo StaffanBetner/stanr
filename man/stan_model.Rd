@@ -117,16 +117,6 @@ model using Stan's inference algorithms.
 See the \code{compile} argument for control over whether and how compilation
 happens.
 }
-\details{
-\code{libnewstan_runner.a} (the static archive with the sampling/
-optimize/etc. service runners, linked into every model regardless of
-\code{use_opencl}) is always compiled without \code{STAN_OPENCL}, while an
-OpenCL-enabled model translation unit defines it; this is believed safe
-because services only touch the model through the
-\verb{stan::model::model_base} virtual interface (no \code{matrix_cl} types cross
-that boundary), but is a latent ODR (One Definition Rule) hazard if
-that assumption is ever found to not hold.
-}
 \examples{
 \dontrun{
 # Create a StanModel from Stan code
