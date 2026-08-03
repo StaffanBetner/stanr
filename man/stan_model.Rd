@@ -17,7 +17,8 @@ stan_model(
   precompiled_headers = TRUE,
   quiet = TRUE,
   external_cpp = NULL,
-  use_opencl = FALSE
+  use_opencl = FALSE,
+  compile_standalone = FALSE
 )
 }
 \arguments{
@@ -93,6 +94,15 @@ exposes no double-precision (\code{fp64}) device there, and Stan requires
 doubles, so real OpenCL testing on Apple Silicon requires an
 OpenCL implementation with \code{fp64} support (e.g. POCL) and pointing
 \code{OPENCL_LIBS} at its ICD loader instead of the system framework.}
+
+\item{compile_standalone}{(logical) Should the Stan program's \code{functions}
+block be exposed as part of this compilation? The default is \code{FALSE}.
+When \code{TRUE}, \verb{$functions} is already populated when \code{stan_model()}
+returns -- equivalent to \code{FALSE} here plus calling
+\code{\link[=model-method-expose-stan-functions]{$expose_stan_functions()}}
+immediately after, but without a second compile. See
+\code{\link[=model-method-expose-stan-functions]{$expose_stan_functions()}} for
+what gets exposed and how.}
 }
 \value{
 A \code{\link{StanModel}} object.

@@ -55,6 +55,14 @@ approximation), \code{\link{StanVB}} (variational inference), \code{\link{StanPa
 
 }
 
+\subsection{Function exposure}{\tabular{ll}{
+   \strong{Method} \tab \strong{Description} \cr
+   \code{\link[=fit-method-expose-stan-functions]{$expose_stan_functions()}} \tab Expose the model's \code{functions} block as R functions. \cr
+   \code{\link[=fit-method-expose-stan-functions]{$functions}} \tab Environment holding the exposed functions (shared with the model). \cr
+}
+
+}
+
 \subsection{Saving}{\tabular{ll}{
    \strong{Method} \tab \strong{Description} \cr
    \code{\link[=fit-method-save]{$save_object()}} \tab Save the fitted model object to a file. \cr

@@ -45,6 +45,7 @@ approach to approximate the posterior distribution. Returns a
 Other StanModel methods:
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
+\code{\link{model-method-expose-stan-functions}},
 \code{\link{model-method-generate-quantities}},
 \code{\link{model-method-laplace}},
 \code{\link{model-method-model-info}},

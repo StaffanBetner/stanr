@@ -251,6 +251,13 @@
 #'  |:----------|:---------------|
 #'  [`$diagnose()`][model-method-diagnose] | Run Stan's `"diagnose"` method to test gradients, return [`StanDiagnose`] object. |
 #'
+#'  ## Function exposure
+#'
+#'  |**Method**|**Description**|
+#'  |:----------|:---------------|
+#'  [`$expose_stan_functions()`][model-method-expose-stan-functions] | Expose the program's `functions` block as R functions. |
+#'  [`$functions`][model-method-expose-stan-functions] | Environment holding the exposed functions. |
+#'
 #'  ## Model fitting
 #'
 #'  |**Method**|**Description**|
@@ -267,6 +274,7 @@ NULL
 StanModel <- R6Class(
   "StanModel",
   public = list(
+    functions = NULL,
     initialize = function(
       stan_file = NULL,
       code = NULL,
@@ -280,7 +288,8 @@ StanModel <- R6Class(
       precompiled_headers = TRUE,
       quiet = TRUE,
       external_cpp = NULL,
-      use_opencl = FALSE
+      use_opencl = FALSE,
+      compile_standalone = FALSE
     ) {
       compile <- .newstan_flag(compile, "compile")
       force_recompile <- .newstan_flag(force_recompile, "force_recompile")
@@ -290,6 +299,10 @@ StanModel <- R6Class(
       )
       quiet <- .newstan_flag(quiet, "quiet")
       use_opencl <- .newstan_flag(use_opencl, "use_opencl")
+      compile_standalone <- .newstan_flag(
+        compile_standalone,
+        "compile_standalone"
+      )
       if (is.null(stan_file) == is.null(code)) {
         stop("Supply exactly one of `stan_file` and `code`.", call. = FALSE)
       }
@@ -362,6 +375,8 @@ StanModel <- R6Class(
       private$quiet_ <- quiet
       private$external_cpp_ <- external_cpp
       private$use_opencl_ <- use_opencl
+      private$compile_standalone_ <- compile_standalone
+      self$functions <- new.env(parent = emptyenv())
       if (compile) {
         self$compile()
       }
@@ -380,7 +395,9 @@ StanModel <- R6Class(
     quiet_ = TRUE,
     external_cpp_ = NULL,
     use_opencl_ = FALSE,
+    compile_standalone_ = FALSE,
     compiled_env_ = NULL,
+    functions_compiled_env_ = NULL,
     compile_generation_ = 0L,
     variables_ = NULL,
     resolved_code_ = NULL,
@@ -574,6 +591,10 @@ StanModel$set("public", "variables", stan_model_variables)
 #'   has not been modified since it was last compiled? The default is `FALSE`.
 #' @param quiet (logical) Should verbose output from compilation be suppressed?
 #'   The default is `TRUE`.
+#' @param compile_standalone (logical) Should the Stan program's `functions`
+#'   block be exposed as part of this compilation? Defaults to whatever was
+#'   set at [stan_model()] construction time. See
+#'   [`$expose_stan_functions()`][model-method-expose-stan-functions].
 #'
 #' @return The [`StanModel`] object, invisibly.
 #'
@@ -583,10 +604,12 @@ NULL
 
 stan_model_compile <- function(
   force_recompile = private$force_recompile_,
-  quiet = private$quiet_
+  quiet = private$quiet_,
+  compile_standalone = private$compile_standalone_
 ) {
   force_recompile <- .newstan_flag(force_recompile, "force_recompile")
   quiet <- .newstan_flag(quiet, "quiet")
+  compile_standalone <- .newstan_flag(compile_standalone, "compile_standalone")
   # Incremented unconditionally, before compilation runs, so the generation
   # always reflects "a compile was attempted" -- fits use this (via
   # `$compile_generation()`) to know whether their cached native pointer
@@ -602,8 +625,22 @@ stan_model_compile <- function(
     precompiled_headers = private$precompiled_headers_,
     force_recompile = force_recompile,
     use_opencl = private$use_opencl_,
-    cpp_options = private$cpp_options_
+    cpp_options = private$cpp_options_,
+    standalone_functions = compile_standalone
   )
+  if (compile_standalone) {
+    # cmdstanr parity: compile_standalone exposes without a separate
+    # $expose_stan_functions() call. Unconditional on every $compile() run
+    # (not just the first) -- $compile() can be re-run via
+    # force_recompile, and rebuilding from the fresh compiled env keeps
+    # the function objects pointing at live (not stale/freed) symbols.
+    private$functions_compiled_env_ <- private$compiled_env_
+    .newstan_build_functions_env(
+      private$compiled_env_,
+      self$functions,
+      global = FALSE
+    )
+  }
   invisible(self)
 }
 StanModel$set("public", "compile", stan_model_compile)
@@ -624,6 +661,103 @@ stan_model_select_opencl <- function(opencl_ids) {
   invisible(NULL)
 }
 StanModel$set("private", "select_opencl", stan_model_select_opencl)
+
+# StanModel function-exposure methods -------------------------------------------
+
+#' Expose Stan functions as R functions
+#'
+#' @name model-method-expose-stan-functions
+#' @aliases expose_stan_functions expose_functions
+#' @family StanModel methods
+#'
+#' @description The `$expose_stan_functions()` method of a [`StanModel`]
+#'   object compiles the functions declared in the Stan program's `functions`
+#'   block and makes them callable from R. `$expose_functions()` is an alias
+#'   (cmdstanr's name for the same method).
+#'
+#'   ```
+#'   expose_stan_functions(global = FALSE, verbose = FALSE)
+#'   expose_functions(global = FALSE, verbose = FALSE)
+#'   ```
+#'
+#'   Exposed functions are always assigned into the `$functions` member
+#'   environment (e.g. `mod$functions$my_fun(...)`); `global = TRUE`
+#'   additionally assigns each one into the global environment, so it can
+#'   also be called directly (`my_fun(...)`). Repeat calls are cheap: once a
+#'   model's functions have been compiled -- whether by an earlier
+#'   `$expose_stan_functions()` call, or automatically via
+#'   `compile_standalone = TRUE` at [stan_model()] time -- a later call just
+#'   performs the requested `$functions`/global assignments, without
+#'   recompiling.
+#'
+#'   A Stan function whose name ends in `_rng` gets a trailing `seed = NULL`
+#'   argument on its R wrapper. All exposed `_rng` functions share one
+#'   underlying RNG, seeded once per `$expose_stan_functions()` call from
+#'   R's own RNG stream (so calling `set.seed()` before exposing makes draws
+#'   reproducible); passing `seed` explicitly to a call reseeds the
+#'   generator immediately before that call.
+#'
+#'   A function whose argument or return types can't be represented in R
+#'   (e.g. a Stan `tuple`) is skipped, with a warning naming it; the
+#'   program's other functions are still exposed. An overloaded Stan
+#'   function (same name, different signature) exposes only the
+#'   first-defined overload, also with a warning.
+#'
+#' @param global (logical) Should the exposed functions also be assigned
+#'   into the global environment? The default, `FALSE`, only populates
+#'   `$functions`.
+#' @param verbose (logical) Should compiler progress messages be printed?
+#'   No compilation happens (so this has no effect) if the functions were
+#'   already compiled, e.g. via `compile_standalone = TRUE`.
+#'
+#' @return The [`StanModel`] object's `$functions` environment, invisibly.
+#'
+#' @section Caching: Compiled functions are cached on disk the same way
+#'   compiled models are (see [stan_model()]) -- a warm cache skips
+#'   recompilation entirely, including across R sessions.
+#'
+#' @section Serialization: Exposed function objects in `$functions` are
+#'   compiled bindings and, like any compiled function from this package, do
+#'   not survive `saveRDS()`/`readRDS()`. After restoring a saved
+#'   [`StanModel`] or [`StanFit`], call `$expose_stan_functions()` again to
+#'   repopulate `$functions` -- this rebuilds from the on-disk cache and
+#'   does not recompile.
+#'
+#' @seealso [stan_model()] for the `compile_standalone` argument, which
+#'   exposes functions as part of the model's own compilation.
+#'
+NULL
+
+stan_model_expose_stan_functions <- function(global = FALSE, verbose = FALSE) {
+  global <- .newstan_flag(global, "global")
+  verbose <- .newstan_flag(verbose, "verbose")
+
+  if (is.null(private$functions_compiled_env_)) {
+    if (
+      !is.null(private$compiled_env_) &&
+        !is.null(private$compiled_env_$newstan_exposed_functions)
+    ) {
+      private$functions_compiled_env_ <- private$compiled_env_
+    } else {
+      # Deliberately does not go through `private$ensure_compiled()` /
+      # `self$native_function()`: either would trigger a full `self$compile()`
+      # as a side effect on a never-compiled model, but exposing functions
+      # must work on a `compile = FALSE` model without compiling it.
+      private$functions_compiled_env_ <- .compile_standalone_functions_environment(
+        code = private$resolved_code(),
+        external_cpp = private$external_cpp_,
+        cpp_options = private$cpp_options_,
+        verbose = verbose,
+        precompiled_headers = private$precompiled_headers_
+      )
+    }
+  }
+
+  .newstan_build_functions_env(private$functions_compiled_env_, self$functions, global)
+  invisible(self$functions)
+}
+StanModel$set("public", "expose_stan_functions", stan_model_expose_stan_functions)
+StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 
 # StanModel fitting methods ----------------------------------------------------
 

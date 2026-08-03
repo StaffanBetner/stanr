@@ -21,6 +21,7 @@ Print a summary table of posterior draws or point estimates.
 Other StanFit methods:
 \code{\link{fit-method-diagnose}},
 \code{\link{fit-method-draws}},
+\code{\link{fit-method-expose-stan-functions}},
 \code{\link{fit-method-fit-info}},
 \code{\link{fit-method-gq}},
 \code{\link{fit-method-laplace-mode}},

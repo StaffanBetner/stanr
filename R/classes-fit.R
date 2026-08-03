@@ -114,6 +114,13 @@
 #'  [`$unconstrain_draws()`][fit-method-model-methods] | Unconstrain posterior draws. |
 #'  [`$variable_skeleton()`][fit-method-model-methods] | Return a skeleton of the variable structure. |
 #'
+#'  ## Function exposure
+#'
+#'  |**Method**|**Description**|
+#'  |:----------|:---------------|
+#'  [`$expose_stan_functions()`][fit-method-expose-stan-functions] | Expose the model's `functions` block as R functions. |
+#'  [`$functions`][fit-method-expose-stan-functions] | Environment holding the exposed functions (shared with the model). |
+#'
 #'  ## Saving
 #'
 #'  |**Method**|**Description**|
@@ -743,6 +750,59 @@ fit_variable_skeleton <- function(
   )
 }
 StanFit$set("public", "variable_skeleton", fit_variable_skeleton)
+
+#' Expose Stan functions from a fitted model
+#'
+#' @name fit-method-expose-stan-functions
+#' @family StanFit methods
+#'
+#' @description The `$expose_stan_functions()` method of a [`StanFit`]
+#'   object delegates to the bound [`StanModel`]'s
+#'   [`$expose_stan_functions()`][model-method-expose-stan-functions] -- see
+#'   that topic for the full description of `global`/`verbose`, `_rng`
+#'   reproducibility, caching, and the serialization caveat.
+#'   `$expose_functions()` is an alias. `$functions` is a read-only active
+#'   binding returning the model's `$functions` environment -- shared with
+#'   the model and with every other fit from the same model, since exposure
+#'   is memoized on the model, not per fit.
+#'
+#'   ```
+#'   expose_stan_functions(global = FALSE, verbose = FALSE)
+#'   expose_functions(global = FALSE, verbose = FALSE)
+#'   ```
+#'
+#' @param global (logical) Should the exposed functions also be assigned
+#'   into the global environment?
+#' @param verbose (logical) Should compiler progress messages be printed?
+#'
+#' @return `$expose_stan_functions()`/`$expose_functions()` return the
+#'   model's `$functions` environment, invisibly. Both methods, and reading
+#'   `$functions`, error if this fit does not retain a model binding (e.g.
+#'   after restoring a fit that was saved without its model).
+#'
+#' @seealso [`$expose_stan_functions()`][model-method-expose-stan-functions]
+#'
+NULL
+
+fit_expose_stan_functions <- function(global = FALSE, verbose = FALSE) {
+  if (!inherits(private$model_, "StanModel")) {
+    stop("This fit does not retain a model binding.", call. = FALSE)
+  }
+  private$model_$expose_stan_functions(global, verbose)
+}
+StanFit$set("public", "expose_stan_functions", fit_expose_stan_functions)
+StanFit$set("public", "expose_functions", fit_expose_stan_functions)
+
+fit_functions <- function(value) {
+  if (!missing(value)) {
+    stop("`$functions` is read-only.", call. = FALSE)
+  }
+  if (!inherits(private$model_, "StanModel")) {
+    stop("This fit does not retain a model binding.", call. = FALSE)
+  }
+  private$model_$functions
+}
+StanFit$set("active", "functions", fit_functions)
 
 # StanMCMC class ---------------------------------------------------------------
 

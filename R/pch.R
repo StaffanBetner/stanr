@@ -393,3 +393,68 @@
     )
   }
 }
+
+#' Compile with a PCH, retrying once with a rebuilt PCH on staleness.
+#'
+#' Shared by more than one compile path (`.compile_stan_model_environment()`
+#' in R/stan_model.R now, another compile path in a follow-up phase), so it
+#' lives here alongside the other PCH helpers it calls
+#' (`.newstan_pch_current()`, `.newstan_pch_flags()`) rather than in either
+#' caller. `compile_fn` is a one-argument function `function(compilation_cppflags)`
+#' that performs the actual compile.
+#'
+#' @noRd
+.newstan_compile_with_pch_retry <- function(
+  compile_fn,
+  cppflags,
+  base_cppflags,
+  pch_enabled,
+  verbose = FALSE
+) {
+  # `Rcpp::sourceCpp()` never propagates the compiler's actual diagnostics --
+  # it always raises a generic synthetic error -- so PCH staleness must be
+  # checked directly below rather than inferred from the error message.
+  tryCatch(
+    compile_fn(cppflags),
+    error = function(error) {
+      if (!pch_enabled) {
+        stop(error)
+      }
+
+      pch_path <- .newstan_pch_current(base_cppflags)
+      stale <- is.na(pch_path) ||
+        !file.exists(pch_path) ||
+        {
+          deps <- c(
+            system.file(
+              "include",
+              "newstan",
+              "model_pch.hpp",
+              package = "newstan",
+              mustWork = TRUE
+            ),
+            vapply(
+              c("Rcpp", "RcppEigen", "BH", "RcppParallel"),
+              function(p) system.file("include", package = p),
+              character(1)
+            )
+          )
+          any(file.mtime(deps) > file.mtime(pch_path))
+        }
+      if (!stale) {
+        stop(error)
+      }
+
+      if (verbose) {
+        message(
+          "[newstan] Compile failed; rebuilding precompiled model header and retrying..."
+        )
+      }
+      pch_flags <- .newstan_pch_flags(base_cppflags, verbose, rebuild = TRUE)
+      if (!nzchar(pch_flags)) {
+        stop(error)
+      }
+      compile_fn(paste(pch_flags, base_cppflags))
+    }
+  )
+}

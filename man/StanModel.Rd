@@ -49,6 +49,14 @@ many of which have their own (linked) documentation pages:
 
 }
 
+\subsection{Function exposure}{\tabular{ll}{
+   \strong{Method} \tab \strong{Description} \cr
+   \code{\link[=model-method-expose-stan-functions]{$expose_stan_functions()}} \tab Expose the program's \code{functions} block as R functions. \cr
+   \code{\link[=model-method-expose-stan-functions]{$functions}} \tab Environment holding the exposed functions. \cr
+}
+
+}
+
 \subsection{Model fitting}{\tabular{ll}{
    \strong{Method} \tab \strong{Description} \cr
    \code{\link[=model-method-sample]{$sample()}} \tab Run Stan's \code{"sample"} method (HMC/NUTS MCMC), return \code{\link{StanMCMC}} object. \cr

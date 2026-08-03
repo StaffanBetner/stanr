@@ -20,6 +20,90 @@
   base
 }
 
+.newstan_tbb_libs <- function() {
+  tbb_libs <- utils::tail(
+    utils::capture.output(RcppParallel::RcppParallelLibs()),
+    1
+  )
+  if (!length(tbb_libs)) {
+    tbb_libs <- ""
+  }
+  if (
+    .Platform$OS.type == "windows" &&
+      utils::packageVersion("RcppParallel") >= '6.0.0'
+  ) {
+    tbb_libs <- "-ltbb12 -ltbbmalloc"
+  }
+  tbb_libs
+}
+
+# Shared by every compile path (model TU, functions-only TU): both need
+# RcppEigen/BH on top of base R's compiler toolchain.
+.newstan_require_compile_packages <- function() {
+  for (pkg in c("RcppEigen", "BH")) {
+    if (!nzchar(system.file(package = pkg))) {
+      stop(
+        "Package `",
+        pkg,
+        "` must be installed to compile Stan code.",
+        call. = FALSE
+      )
+    }
+  }
+}
+
+# Non-OpenCL cppflags shared by every compile path; a model compile appends
+# OpenCL-specific flags on top of this when `use_opencl = TRUE`.
+.newstan_base_cppflags <- function() {
+  paste(
+    paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
+    "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS"
+  )
+}
+
+# Stable sort by name: reordering unrelated `cpp_options` entries must not
+# change the hash; reordering two assignments to the *same* name must.
+.newstan_cpp_options_hash_component <- function(assignments) {
+  if (length(assignments)) {
+    assignment_names <- vapply(assignments, `[[`, character(1), "name")
+    ord <- order(assignment_names)
+    vapply(
+      assignments[ord],
+      function(a) paste(a$name, a$op, a$value),
+      character(1)
+    )
+  } else {
+    character()
+  }
+}
+
+# sourceCpp's own default cacheDir is a per-session temp directory, so
+# without an explicit on-disk cache_dir every session would recompile every
+# model from scratch instead of reusing the .so across sessions.
+.newstan_models_cache_dir <- function() {
+  cache_dir <- getOption(
+    "newstan_cache_dir",
+    file.path(tools::R_user_dir("newstan", "cache"), "models")
+  )
+  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+  if (file.access(cache_dir, 2) != 0) {
+    # Soft degrade: unwritable cache dir falls back to the session temp dir.
+    cache_dir <- tempdir()
+  }
+  cache_dir
+}
+
+# Kept in sync by hand with the `// [[Rcpp::export]]` function names in
+# inst/stan_model.cpp -- reserved so a combined-TU expose can't silently
+# shadow one of them.
+.newstan_model_support_exports <- c(
+  "new_model", "run_model", "constrained_param_names", "new_base_rng",
+  "model_num_upars", "model_param_metadata", "model_constrained_names",
+  "model_unconstrained_names", "model_log_prob", "model_grad_log_prob",
+  "model_hessian", "model_unconstrain", "model_unconstrain_matrix",
+  "model_constrain", "select_opencl_device"
+)
+
 .compile_stan_model_environment <- function(
   code,
   model_name,
@@ -29,18 +113,10 @@
   precompiled_headers = TRUE,
   force_recompile = FALSE,
   use_opencl = FALSE,
-  cpp_options = list()
+  cpp_options = list(),
+  standalone_functions = FALSE
 ) {
-  for (pkg in c("RcppEigen", "BH")) {
-    if (!nzchar(system.file(package = pkg))) {
-      stop(
-        "Package `",
-        pkg,
-        "` must be installed to compile Stan models.",
-        call. = FALSE
-      )
-    }
-  }
+  .newstan_require_compile_packages()
 
   # stanc() is the expensive step, so its inputs are hashed (with the same
   # discriminating power as hashing its output) to let a warm cache skip it.
@@ -80,6 +156,7 @@
   model_hash <- digest::digest(
     c(
       code,
+      as.character(standalone_functions),
       external_cpp_contents,
       model_support,
       as.character(utils::packageVersion("newstan")),
@@ -88,36 +165,12 @@
       .newstan_compiler_identity(),
       as.character(use_opencl),
       opencl_libs,
-      # Stable sort by name: reordering unrelated `cpp_options` entries must
-      # not change the hash; reordering two assignments to the *same* name
-      # must.
-      if (length(extra_assignments)) {
-        extra_names <- vapply(extra_assignments, `[[`, character(1), "name")
-        ord <- order(extra_names)
-        vapply(
-          extra_assignments[ord],
-          function(a) paste(a$name, a$op, a$value),
-          character(1)
-        )
-      } else {
-        character()
-      }
+      .newstan_cpp_options_hash_component(extra_assignments)
     ),
     algo = "xxhash64"
   )
 
-  # sourceCpp's own default cacheDir is a per-session temp directory, so
-  # without an explicit on-disk cache_dir every session would recompile
-  # every model from scratch instead of reusing the .so across sessions.
-  cache_dir <- getOption(
-    "newstan_cache_dir",
-    file.path(tools::R_user_dir("newstan", "cache"), "models")
-  )
-  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-  if (file.access(cache_dir, 2) != 0) {
-    # Soft degrade: unwritable cache dir falls back to the session temp dir.
-    cache_dir <- tempdir()
-  }
+  cache_dir <- .newstan_models_cache_dir()
 
   cpp_file <- file.path(cache_dir, paste0("stan_", model_hash, ".cpp"))
   # Only invoked on a cache miss (nothing on disk matches `model_hash`).
@@ -133,13 +186,71 @@
       external_cpp = external_cpp,
       use_opencl = use_opencl
     )
-    writeLines(c(cpp_code, model_support), cpp_file)
+    if (standalone_functions) {
+      # external_cpp = NULL: its content is already in `cpp_code` above (the
+      # model stanc call already prepended it) -- prepending it a second
+      # time would duplicate it verbatim in the file. allow_undefined is
+      # therefore set explicitly rather than left to stanc()'s own
+      # external_cpp-implies-allow-undefined inference, which only fires
+      # when `external_cpp` is actually passed.
+      functions_out <- stanc(
+        code,
+        standalone_functions = TRUE,
+        use_opencl = use_opencl,
+        allow_undefined = length(external_cpp) > 0
+      )
+      processed <- .newstan_process_standalone_cpp(
+        functions_out,
+        c(
+          .newstan_model_support_exports,
+          "newstan_exposed_functions",
+          "newstan_rng_set_seed"
+        )
+      )
+      wrapper_section <- processed$wrapper_section
+      if (length(external_cpp) > 0) {
+        # stanc's standalone-functions codegen always has a wrapper call
+        # `model_namespace::<fn>(...)`, assuming <fn> is defined inside
+        # model_namespace -- true for ordinary Stan functions, but not for
+        # one implemented via `external_cpp`: that implementation is
+        # prepended by the *first* stanc() call above *before*
+        # `namespace model_namespace {` opens (i.e. at file/global scope),
+        # so `model_namespace::<fn>` doesn't exist there and would fail to
+        # link. Detected by comparing each exposed function's first
+        # occurrence in `cpp_code` against where model_namespace opens: an
+        # external_cpp implementation's first (and only) occurrence is the
+        # prepended definition, strictly before that point, while an
+        # ordinary Stan function's every occurrence is inside
+        # model_namespace. Unqualifying the call is safe either way: from
+        # within `model_namespace`, the model's own generated code already
+        # calls these external functions unqualified (relying on ordinary
+        # scope fallback to file/global scope) -- see `cpp_code` itself --
+        # and this wrapper lives at file scope too, so the same unqualified
+        # call resolves identically.
+        namespace_pos <- regexpr(
+          "namespace model_namespace",
+          cpp_code,
+          fixed = TRUE
+        )[[1]]
+        for (fn_name in processed$functions$name) {
+          first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), cpp_code)[[1]]
+          if (first_pos > 0 && first_pos < namespace_pos) {
+            wrapper_section <- gsub(
+              paste0("model_namespace::", fn_name, "("),
+              paste0(fn_name, "("),
+              wrapper_section,
+              fixed = TRUE
+            )
+          }
+        }
+      }
+      writeLines(c(cpp_code, model_support, wrapper_section), cpp_file)
+    } else {
+      writeLines(c(cpp_code, model_support), cpp_file)
+    }
   }
 
-  cppflags <- paste(
-    paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
-    "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS"
-  )
+  cppflags <- .newstan_base_cppflags()
   if (use_opencl) {
     # Platform/device are pinned to 0/0 at compile time only to satisfy
     # opencl_context.hpp's `#error`-style guards -- they don't constrain
@@ -169,19 +280,7 @@
     mustWork = TRUE
   )
 
-  tbb_libs <- utils::tail(
-    utils::capture.output(RcppParallel::RcppParallelLibs()),
-    1
-  )
-  if (!length(tbb_libs)) {
-    tbb_libs <- ""
-  }
-  if (
-    .Platform$OS.type == "windows" &&
-      utils::packageVersion("RcppParallel") >= '6.0.0'
-  ) {
-    tbb_libs <- "-ltbb12 -ltbbmalloc"
-  }
+  tbb_libs <- .newstan_tbb_libs()
 
   # libnewstan_runner.a is always compiled without STAN_OPENCL, while an
   # OpenCL-enabled model TU defines it; safe only as long as services touch
@@ -219,51 +318,12 @@
     )
   }
 
-  # `Rcpp::sourceCpp()` never propagates the compiler's actual diagnostics --
-  # it always raises a generic synthetic error -- so PCH staleness must be
-  # checked directly below rather than inferred from the error message.
-  tryCatch(
-    compile_model(cppflags),
-    error = function(error) {
-      if (!pch_enabled) {
-        stop(error)
-      }
-
-      pch_path <- .newstan_pch_current(base_cppflags)
-      stale <- is.na(pch_path) ||
-        !file.exists(pch_path) ||
-        {
-          deps <- c(
-            system.file(
-              "include",
-              "newstan",
-              "model_pch.hpp",
-              package = "newstan",
-              mustWork = TRUE
-            ),
-            vapply(
-              c("Rcpp", "RcppEigen", "BH", "RcppParallel"),
-              function(p) system.file("include", package = p),
-              character(1)
-            )
-          )
-          any(file.mtime(deps) > file.mtime(pch_path))
-        }
-      if (!stale) {
-        stop(error)
-      }
-
-      if (verbose) {
-        message(
-          "[newstan] Compile failed; rebuilding precompiled model header and retrying..."
-        )
-      }
-      pch_flags <- .newstan_pch_flags(base_cppflags, verbose, rebuild = TRUE)
-      if (!nzchar(pch_flags)) {
-        stop(error)
-      }
-      compile_model(paste(pch_flags, base_cppflags))
-    }
+  .newstan_compile_with_pch_retry(
+    compile_model,
+    cppflags,
+    base_cppflags,
+    pch_enabled,
+    verbose
   )
 
   env
@@ -286,6 +346,14 @@
 #' @param compile (logical) Should the model be compiled? The default is
 #'   `TRUE`. If `FALSE` compilation can be done later via the
 #'   [`$compile()`][model-method-compile] method.
+#' @param compile_standalone (logical) Should the Stan program's `functions`
+#'   block be exposed as part of this compilation? The default is `FALSE`.
+#'   When `TRUE`, `$functions` is already populated when `stan_model()`
+#'   returns -- equivalent to `FALSE` here plus calling
+#'   [`$expose_stan_functions()`][model-method-expose-stan-functions]
+#'   immediately after, but without a second compile. See
+#'   [`$expose_stan_functions()`][model-method-expose-stan-functions] for
+#'   what gets exposed and how.
 #' @param model_name (string) The name to use for the model. If `NULL` (the
 #'   default), the model name is derived from the Stan file name (if provided)
 #'   or set to `"model"`.
@@ -389,7 +457,8 @@ stan_model <- function(
   precompiled_headers = TRUE,
   quiet = TRUE,
   external_cpp = NULL,
-  use_opencl = FALSE
+  use_opencl = FALSE,
+  compile_standalone = FALSE
 ) {
   StanModel$new(
     stan_file = stan_file,
@@ -404,7 +473,8 @@ stan_model <- function(
     precompiled_headers = precompiled_headers,
     quiet = quiet,
     external_cpp = external_cpp,
-    use_opencl = use_opencl
+    use_opencl = use_opencl,
+    compile_standalone = compile_standalone
   )
 }
 

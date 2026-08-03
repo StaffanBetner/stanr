@@ -10,6 +10,11 @@ has not been modified since it was last compiled? The default is \code{FALSE}.}
 
 \item{quiet}{(logical) Should verbose output from compilation be suppressed?
 The default is \code{TRUE}.}
+
+\item{compile_standalone}{(logical) Should the Stan program's \code{functions}
+block be exposed as part of this compilation? Defaults to whatever was
+set at \code{\link[=stan_model]{stan_model()}} construction time. See
+\code{\link[=model-method-expose-stan-functions]{$expose_stan_functions()}}.}
 }
 \value{
 The \code{\link{StanModel}} object, invisibly.
@@ -26,6 +31,7 @@ in the call to \code{stan_model()} and subsequently call \verb{$compile()} direc
 
 Other StanModel methods:
 \code{\link{model-method-diagnose}},
+\code{\link{model-method-expose-stan-functions}},
 \code{\link{model-method-generate-quantities}},
 \code{\link{model-method-laplace}},
 \code{\link{model-method-model-info}},

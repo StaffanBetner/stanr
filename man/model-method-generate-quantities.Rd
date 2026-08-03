@@ -33,6 +33,7 @@ Returns a \code{\link{StanGQ}} object.
 Other StanModel methods:
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
+\code{\link{model-method-expose-stan-functions}},
 \code{\link{model-method-laplace}},
 \code{\link{model-method-model-info}},
 \code{\link{model-method-optimize}},
