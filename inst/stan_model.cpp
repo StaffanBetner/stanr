@@ -101,20 +101,6 @@ Rcpp::NumericVector model_constrain(Rcpp::XPtr<stan::model::model_base> model,
 }
 
 // [[Rcpp::export]]
-Rcpp::CharacterVector model_compile_info(Rcpp::XPtr<stan::model::model_base> model) {
-  return newstan::model_compile_info(*model);
-}
-
-// [[Rcpp::export]]
-bool model_has_opencl() {
-#ifdef STAN_OPENCL
-  return true;
-#else
-  return false;
-#endif
-}
-
-// [[Rcpp::export]]
 void select_opencl_device(int platform_id, int device_id) {
 #ifdef STAN_OPENCL
   stan::math::opencl_context.select_device(platform_id, device_id);

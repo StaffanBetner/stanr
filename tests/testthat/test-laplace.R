@@ -16,6 +16,7 @@ test_that("laplace evaluates model-side gradients in the generated model library
   expect_s3_class(result, "StanLaplace")
   expect_s3_class(result$summary(), "draws_summary")
   expect_equal(posterior::ndraws(result$draws()), 2L)
+  expect_equal(result$metadata()$arguments$num_draws, 2)
 })
 
 test_that("laplace with mode = NULL works for models with vector/array parameters", {

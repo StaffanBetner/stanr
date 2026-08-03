@@ -13,7 +13,7 @@ namespace newstan {
   template <class Model>
   Rcpp::List run_laplace(Model& model, Rcpp::List args) {
     const Eigen::VectorXd mode = Rcpp::as<Eigen::VectorXd>(args["mode"]);
-    const int draws = Rcpp::as<int>(args["draws"]);
+    const int draws = Rcpp::as<int>(args["num_draws"]);
     const bool jacobian = Rcpp::as<bool>(args["jacobian"]);
     const bool calculate_lp = Rcpp::as<bool>(args["calculate_lp"]);
     const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);

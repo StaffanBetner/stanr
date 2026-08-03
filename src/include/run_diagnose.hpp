@@ -36,7 +36,6 @@ namespace newstan {
 
     logger.flush();
 
-    // Return raw output messages for parsing in R, along with n_failed
     Rcpp::CharacterVector messages(
         param_writer.messages().begin(),
         param_writer.messages().end()

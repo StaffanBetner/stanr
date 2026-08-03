@@ -9,6 +9,9 @@ test_that("optimizing returns expected structure", {
   expect_type(result$mle(), "double")
   expect_named(result$summary(), c("variable", "estimate"))
   expect_equal(result$return_codes(), 0L)
+  expect_false("converged__" %in% names(result$mle()))
+  expect_false("converged__" %in% result$summary()$variable)
+  expect_false("converged__" %in% posterior::variables(result$draws()))
 })
 
 test_that("optimizing with lbfgs algorithm works", {
@@ -101,6 +104,7 @@ test_that("optimizing with save_iterations = TRUE exposes the full optimization 
   expect_equal(result$return_codes(), 0L)
   draws <- unclass(as.matrix(result$draws()))
   expect_true(nrow(draws) > 1)
+  expect_false("converged__" %in% posterior::variables(result$draws()))
 
   last_row <- draws[nrow(draws), ]
   expect_equal(

@@ -208,6 +208,75 @@ test_that("sampling with inv_metric (diag_e) works", {
   expect_true(posterior::ndraws(result$draws()) > 0)
 })
 
+test_that("sampling with inv_metric (diag_e, too short) fails with a clear message", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 1,
+    engine = "nuts",
+    metric = "diag_e",
+    inv_metric = numeric(0),
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_true(all(result$return_codes() != 0L))
+  expect_match(
+    paste(result$output(), collapse = "\n"),
+    "inverse Euclidean metric"
+  )
+})
+
+test_that("sampling with inv_metric (diag_e, too long) fails with a clear message", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 1,
+    engine = "nuts",
+    metric = "diag_e",
+    inv_metric = c(1, 1),
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_true(all(result$return_codes() != 0L))
+  expect_match(
+    paste(result$output(), collapse = "\n"),
+    "inverse Euclidean metric"
+  )
+})
+
+test_that("sampling with inv_metric (dense_e, wrong shape) fails with a clear message", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 1,
+    engine = "nuts",
+    metric = "dense_e",
+    inv_metric = matrix(1, 2, 2),
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_true(all(result$return_codes() != 0L))
+  expect_match(
+    paste(result$output(), collapse = "\n"),
+    "Cannot get inverse metric"
+  )
+})
+
 test_that("fit$inv_metric() returns per-chain matrices for a diag_e adaptive fit", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -334,6 +403,10 @@ test_that("sampling with static HMC engine works (unit_e, adapt)", {
 
   expect_equal(result$return_codes(), 0L)
   expect_true(posterior::ndraws(result$draws()) > 0)
+  expect_false("int_time__" %in% posterior::variables(result$draws()))
+  expect_true(
+    "int_time__" %in% posterior::variables(result$sampler_diagnostics())
+  )
 })
 
 test_that("sampling with static HMC engine works (unit_e, no adapt)", {
@@ -526,6 +599,51 @@ test_that("sampling with an invalid metric errors before reaching C++", {
   )
 })
 
+test_that("num_threads takes effect on every fit", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result_one <- mod$sample(
+    data = data,
+    iter_warmup = 20,
+    iter_sampling = 20,
+    chains = 1,
+    num_threads = 1,
+    seed = 42,
+    show_messages = FALSE
+  )
+  expect_true(all(result_one$return_codes() == 0L))
+
+  result_two <- mod$sample(
+    data = data,
+    iter_warmup = 20,
+    iter_sampling = 20,
+    chains = 1,
+    num_threads = 2,
+    seed = 42,
+    show_messages = FALSE
+  )
+  expect_true(all(result_two$return_codes() == 0L))
+})
+
+test_that("sampling with num_threads = 0 errors", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 20,
+      iter_sampling = 20,
+      chains = 1,
+      num_threads = 0,
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "must be positive"
+  )
+})
+
 # ---------------------------------------------------------------------------
 # $diagnostic_summary() method
 # ---------------------------------------------------------------------------
@@ -555,9 +673,8 @@ test_that("diagnostic_summary() returns one row per chain with expected columns"
   expect_type(summary_df$num_divergent, "integer")
   expect_type(summary_df$num_max_treedepth, "integer")
 
-  # Cross-check against the old whole-run-total behavior: summing the
-  # per-chain counts must equal counting divergences/treedepth hits across
-  # the combined draws_matrix (what the previous implementation returned).
+  # Summing the per-chain counts must equal counting divergences/treedepth
+  # hits across the combined draws.
   diagnostics <- result$sampler_diagnostics(format = "draws_matrix")
   expect_equal(
     sum(summary_df$num_divergent),
@@ -568,7 +685,6 @@ test_that("diagnostic_summary() returns one row per chain with expected columns"
     sum(diagnostics[, "treedepth__"] >= 10L)
   )
 
-  # `sampler_diagnostics()` itself must be unaffected by this change.
   expect_s3_class(result$sampler_diagnostics(), "draws_array")
   expect_s3_class(
     result$sampler_diagnostics(format = "draws_matrix"),

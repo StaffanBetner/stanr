@@ -341,7 +341,6 @@ StanModel <- R6Class(
       private$code_ <- code
       private$model_name_ <- model_name
       private$include_paths_ <- include_paths
-      private$user_header_ <- user_header
       private$cpp_options_ <- cpp_options
       private$stanc_options_ <- stanc_options
       private$force_recompile_ <- force_recompile
@@ -360,7 +359,6 @@ StanModel <- R6Class(
     code_ = NULL,
     model_name_ = NULL,
     include_paths_ = NULL,
-    user_header_ = NULL,
     cpp_options_ = NULL,
     stanc_options_ = NULL,
     force_recompile_ = FALSE,
@@ -630,13 +628,19 @@ StanModel$set("private", "select_opencl", stan_model_select_opencl)
 #'   Stan program.
 #' @param seed (integer) The random seed for reproducibility.
 #' @param refresh (integer) How often (in iterations) to print progress.
-#' @param init Initial values for parameters. Can be a list (single chain),
-#'   a list of lists (one per chain), or a function that takes an optional
-#'   `chain_id` argument and returns a list.
+#' @param init Initial values for parameters. Either a non-negative number,
+#'   used as the range of CmdStan-style random initialization
+#'   (`Uniform(-init, init)` on the unconstrained scale; the default is 2),
+#'   or a named list / named numeric vector of constrained parameter values.
+#'   Supplied values are shared by all chains; parameters not covered by the
+#'   supplied values are randomly initialized with the default range.
 #' @param chains (integer) The number of MCMC chains.
 #' @param chain_ids (integer vector) The IDs for each chain.
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains.
+#'   chains. The request is capped at the machine's hardware concurrency, and
+#'   any other active TBB `global_control` in the process (e.g. from
+#'   `RcppParallel::setThreadOptions()`) can lower the effective count
+#'   further.
 #' @param iter_warmup (integer) The number of warmup iterations.
 #' @param iter_sampling (integer) The number of sampling iterations.
 #' @param save_warmup (logical) Should warmup samples be saved?
@@ -667,12 +671,7 @@ StanModel$set("private", "select_opencl", stan_model_select_opencl)
 #' @param adapt_gamma (number) Adaptation hyperparameter for dual averaging.
 #' @param adapt_kappa (number) Adaptation hyperparameter for dual averaging.
 #' @param adapt_t0 (number) Adaptation hyperparameter for dual averaging.
-#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
-#'   the OpenCL platform/device to run on. Only meaningful for a model
-#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
-#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
-#'   `select_opencl_device()` is never called and the platform/device baked
-#'   in at compile time (0/0) is used.
+#' @template param-opencl_ids
 #'
 #' @return A [`StanMCMC`] object containing posterior draws and diagnostics.
 #'
@@ -687,7 +686,7 @@ stan_model_sample <- function(
   refresh = 100L,
   init = 2,
   save_latent_dynamics = FALSE,
-  output_dir = getOption("newstan_output_dir"),
+  output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
   chains = 4,
@@ -711,7 +710,7 @@ stan_model_sample <- function(
   fixed_param = FALSE,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = getOption("newstan_save_config", FALSE),
+  save_cmdstan_config = FALSE,
   engine = "nuts",
   int_time = 2 * pi,
   step_size_jitter = 0,
@@ -838,7 +837,7 @@ stan_model_sample <- function(
     } else {
       draw_names <- dimnames(result$samples)[[3]]
       if (!fixed_param && engine == "static") {
-        diagnostic_vars <- c("accept_stat__", "stepsize__")
+        diagnostic_vars <- c("accept_stat__", "stepsize__", "int_time__")
       } else {
         diagnostic_vars <- c(
           "accept_stat__",
@@ -936,12 +935,7 @@ StanModel$set("public", "sample", stan_model_sample)
 #'   including the initial point) instead of a single row for the final
 #'   estimate. [`$mle()`][fit-method-mle] is unaffected either way and always
 #'   reflects the final iteration.
-#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
-#'   the OpenCL platform/device to run on. Only meaningful for a model
-#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
-#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
-#'   `select_opencl_device()` is never called and the platform/device baked
-#'   in at compile time (0/0) is used.
+#' @template param-opencl_ids
 #'
 #' @return A [`StanMLE`] object containing the point estimate.
 #'
@@ -955,7 +949,7 @@ stan_model_optimize <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  output_dir = getOption("newstan_output_dir"),
+  output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
   threads = NULL,
@@ -972,7 +966,7 @@ stan_model_optimize <- function(
   history_size = 5L,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = getOption("newstan_save_config", FALSE),
+  save_cmdstan_config = FALSE,
   save_iterations = FALSE
 ) {
   .newstan_reject_backend_files(
@@ -1083,12 +1077,7 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #' @param draws (integer) The number of draws from the Laplace approximation.
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
-#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
-#'   the OpenCL platform/device to run on. Only meaningful for a model
-#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
-#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
-#'   `select_opencl_device()` is never called and the platform/device baked
-#'   in at compile time (0/0) is used.
+#' @template param-opencl_ids
 #'
 #' @return A [`StanLaplace`] object containing approximate posterior draws.
 #'
@@ -1102,7 +1091,7 @@ stan_model_laplace <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  output_dir = getOption("newstan_output_dir"),
+  output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
   threads = NULL,
@@ -1113,7 +1102,7 @@ stan_model_laplace <- function(
   draws = 1000L,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = getOption("newstan_save_config", FALSE),
+  save_cmdstan_config = FALSE,
   calculate_lp = TRUE
 ) {
   .newstan_reject_backend_files(
@@ -1186,7 +1175,7 @@ stan_model_laplace <- function(
       method = "laplace",
       mode = as.double(mode_val),
       jacobian = jacobian,
-      draws = as.integer(draws),
+      num_draws = as.integer(draws),
       calculate_lp = calculate_lp,
       seed = seed,
       refresh = refresh,
@@ -1252,12 +1241,7 @@ StanModel$set("public", "laplace", stan_model_laplace)
 #' @param tol_rel_obj (number) Relative tolerance for ELBO convergence.
 #' @param eval_elbo (integer) How often to evaluate the ELBO.
 #' @param draws (integer) The number of draws from the variational approximation.
-#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
-#'   the OpenCL platform/device to run on. Only meaningful for a model
-#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
-#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
-#'   `select_opencl_device()` is never called and the platform/device baked
-#'   in at compile time (0/0) is used.
+#' @template param-opencl_ids
 #'
 #' @return A [`StanVB`] object containing approximate posterior draws.
 #'
@@ -1272,7 +1256,7 @@ stan_model_variational <- function(
   refresh = 100L,
   init = 2,
   save_latent_dynamics = FALSE,
-  output_dir = getOption("newstan_output_dir"),
+  output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
   threads = NULL,
@@ -1289,7 +1273,7 @@ stan_model_variational <- function(
   draws = 1000L,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = getOption("newstan_save_config", FALSE)
+  save_cmdstan_config = FALSE
 ) {
   .newstan_reject_backend_files(
     output_dir,
@@ -1396,12 +1380,7 @@ StanModel$set("public", "variational", stan_model_variational)
 #' @param psis_resample (logical) Should Pareto smoothed importance sampling
 #'   resampling be used?
 #' @param calculate_lp (logical) Should the log density be calculated?
-#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
-#'   the OpenCL platform/device to run on. Only meaningful for a model
-#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
-#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
-#'   `select_opencl_device()` is never called and the platform/device baked
-#'   in at compile time (0/0) is used.
+#' @template param-opencl_ids
 #'
 #' @return A [`StanPathfinder`] object containing approximate posterior draws.
 #'
@@ -1415,7 +1394,7 @@ stan_model_pathfinder <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  output_dir = getOption("newstan_output_dir"),
+  output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
   threads = NULL,
@@ -1437,7 +1416,7 @@ stan_model_pathfinder <- function(
   calculate_lp = TRUE,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = getOption("newstan_save_config", FALSE)
+  save_cmdstan_config = FALSE
 ) {
   .newstan_reject_backend_files(
     output_dir,
@@ -1539,12 +1518,7 @@ StanModel$set("public", "pathfinder", stan_model_pathfinder)
 #' @param fitted_params A [`StanFit`] object or a draws matrix containing
 #'   parameter values to use for the generated quantities block.
 #' @param num_threads (integer) The total number of threads to use.
-#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
-#'   the OpenCL platform/device to run on. Only meaningful for a model
-#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
-#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
-#'   `select_opencl_device()` is never called and the platform/device baked
-#'   in at compile time (0/0) is used.
+#' @template param-opencl_ids
 #'
 #' @return A [`StanGQ`] object containing the generated quantities.
 #'
@@ -1556,7 +1530,7 @@ stan_model_generate_quantities <- function(
   fitted_params,
   data = list(),
   seed = NULL,
-  output_dir = getOption("newstan_output_dir"),
+  output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
   num_threads = getOption("mc.cores", 1),
@@ -1659,7 +1633,7 @@ stan_model_diagnose <- function(
   data = list(),
   seed = NULL,
   init = 2,
-  output_dir = getOption("newstan_output_dir"),
+  output_dir = NULL,
   output_basename = NULL,
   epsilon = 1e-6,
   error = 1e-6,
@@ -1751,10 +1725,7 @@ StanModel$set("public", "new_model", stan_model_new_model)
 
 stan_model_run_model <- function(model, args) {
   private$ensure_compiled()
-  withr::with_envvar(
-    c(STAN_NUM_THREADS = args$num_threads),
-    private$compiled_env_$run_model(model, args)
-  )
+  private$compiled_env_$run_model(model, args)
 }
 StanModel$set("public", "run_model", stan_model_run_model)
 

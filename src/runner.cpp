@@ -18,7 +18,18 @@ namespace newstan {
 
 Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
   int num_threads = Rcpp::as<int>(args["num_threads"]);
-  stan::math::init_threadpool_tbb(num_threads);
+  if (num_threads < 1) {
+    Rcpp::stop("num_threads must be a positive integer.");
+  }
+  // First call fixes the static TBB ceiling for the whole session, so set
+  // it to hardware concurrency (-1), not this run's request.
+  stan::math::init_threadpool_tbb(-1);
+  // TBB's effective limit is the minimum over live global_control objects,
+  // so this scopes the current run down to num_threads and is released on
+  // return. It stays alive for the whole service call: even the
+  // worker-thread services block here until the coordinator joins.
+  tbb::global_control run_limit(
+      tbb::global_control::max_allowed_parallelism, num_threads);
 
   std::string method = Rcpp::as<std::string>(args["method"]);
 

@@ -14,7 +14,9 @@ abs-determinant of the Jacobian of the inverse transformation?}
 
 \item{draws}{A posterior draws object, or \code{NULL} to use the fit's draws.}
 
-\item{format}{(string) The output format from the \pkg{posterior} package.}
+\item{format}{(string) The output format from the \pkg{posterior} package.
+Defaults to \code{NULL}, which uses the fit's default draws format (see
+\code{\link[=fit-method-draws]{$draws()}}).}
 
 \item{inc_warmup}{(logical) Include warmup draws?}
 
@@ -52,7 +54,7 @@ constrain_variables(unconstrained_variables,
                     transformed_parameters = TRUE,
                     generated_quantities = TRUE)
 unconstrain_variables(variables)
-unconstrain_draws(draws = NULL, format, inc_warmup = FALSE)
+unconstrain_draws(draws = NULL, format = NULL, inc_warmup = FALSE)
 variable_skeleton(transformed_parameters = TRUE,
                   generated_quantities = TRUE)
 }\if{html}{\out{</div>}}

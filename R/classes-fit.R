@@ -236,7 +236,10 @@ StanFit <- R6Class(
       }
       # Fits restored via readRDS() carry a stale external pointer (an Rcpp
       # XPtr doesn't survive serialization); probing it throws, which signals
-      # a one-time recompile-and-reinitialize.
+      # a one-time rebuild of the compiled environment -- the sourceCpp
+      # wrappers hold native-symbol pointers that don't survive
+      # serialization. The binary itself doesn't need rebuilding: the
+      # cached `.so` is keyed on `model_hash` and is still valid.
       valid <- tryCatch(
         {
           probe(private$model_ptr_)
@@ -245,7 +248,7 @@ StanFit <- R6Class(
         error = function(e) FALSE
       )
       if (!valid) {
-        private$model_$compile(force_recompile = TRUE, quiet = TRUE)
+        private$model_$compile(force_recompile = FALSE, quiet = TRUE)
         private$initialize_pointer(force = TRUE)
       }
       private$native_generation_ <- private$model_$compile_generation()
@@ -550,7 +553,7 @@ StanFit$set("public", "save_object", fit_save_object)
 #'                       transformed_parameters = TRUE,
 #'                       generated_quantities = TRUE)
 #'   unconstrain_variables(variables)
-#'   unconstrain_draws(draws = NULL, format, inc_warmup = FALSE)
+#'   unconstrain_draws(draws = NULL, format = NULL, inc_warmup = FALSE)
 #'   variable_skeleton(transformed_parameters = TRUE,
 #'                     generated_quantities = TRUE)
 #'   ```
@@ -562,6 +565,8 @@ StanFit$set("public", "save_object", fit_save_object)
 #' @param variables (named list) Constrained parameter values to unconstrain.
 #' @param draws A posterior draws object, or `NULL` to use the fit's draws.
 #' @param format (string) The output format from the \pkg{posterior} package.
+#'   Defaults to `NULL`, which uses the fit's default draws format (see
+#'   [`$draws()`][fit-method-draws]).
 #' @param inc_warmup (logical) Include warmup draws?
 #' @param transformed_parameters (logical) Include transformed parameters?
 #' @param generated_quantities (logical) Include generated quantities?
@@ -665,9 +670,10 @@ StanFit$set("public", "unconstrain_variables", fit_unconstrain_variables)
 
 fit_unconstrain_draws <- function(
   draws = NULL,
-  format = getOption("newstan_draws_format", "draws_array"),
+  format = NULL,
   inc_warmup = FALSE
 ) {
+  format <- format %||% private$default_format_
   inc_warmup <- .newstan_flag(inc_warmup, "inc_warmup")
   source <- draws %||%
     self$draws(
@@ -1127,7 +1133,7 @@ StanMLE <- R6Class(
     ) {
       par <- payload$par %||% numeric()
       if (!is.null(names(par))) {
-        par <- par[names(par) != "lp__"]
+        par <- par[!(names(par) %in% c("lp__", "converged__"))]
         names(par) <- .newstan_bracket_names(names(par))
       }
       payload$par <- par
@@ -1135,6 +1141,10 @@ StanMLE <- R6Class(
         # Full optimization path (one row per saved iteration): expose it via
         # $draws() instead of the single synthesized row below.
         iterations <- payload$iterations
+        iterations <- iterations[,
+          colnames(iterations) != "converged__",
+          drop = FALSE
+        ]
         colnames(iterations) <- .newstan_bracket_names(colnames(iterations))
         payload$draws <- iterations
       } else if (length(par)) {

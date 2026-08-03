@@ -12,16 +12,22 @@ Stan program.}
 
 \item{refresh}{(integer) How often (in iterations) to print progress.}
 
-\item{init}{Initial values for parameters. Can be a list (single chain),
-a list of lists (one per chain), or a function that takes an optional
-\code{chain_id} argument and returns a list.}
+\item{init}{Initial values for parameters. Either a non-negative number,
+used as the range of CmdStan-style random initialization
+(\code{Uniform(-init, init)} on the unconstrained scale; the default is 2),
+or a named list / named numeric vector of constrained parameter values.
+Supplied values are shared by all chains; parameters not covered by the
+supplied values are randomly initialized with the default range.}
 
 \item{chains}{(integer) The number of MCMC chains.}
 
 \item{chain_ids}{(integer vector) The IDs for each chain.}
 
 \item{num_threads}{(integer) The total number of threads to use across all
-chains.}
+chains. The request is capped at the machine's hardware concurrency, and
+any other active TBB \code{global_control} in the process (e.g. from
+\code{RcppParallel::setThreadOptions()}) can lower the effective count
+further.}
 
 \item{iter_warmup}{(integer) The number of warmup iterations.}
 

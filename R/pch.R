@@ -214,13 +214,7 @@
 #'   `-I` directories, this sibling lookup happens beside whatever path we
 #'   pass -- so a symlink to the installed header placed inside the user
 #'   cache dir, together with a `.gch` built beside that symlink, is
-#'   sufficient. Older versions of this function instead relied on
-#'   *implicit* inclusion (the TU's own `#include <stan/model/...>` line
-#'   resolving via `-I` search order to a symlink overlay reproducing the
-#'   installed include-tree layout, with a `.gch` hidden beside it there);
-#'   `-include` supersedes that entirely, since GCC's sibling-`.gch` lookup
-#'   only cares about the literal path handed to `-include`, not about how
-#'   (or whether) anything on the include-search path resolves it.
+#'   sufficient.
 #'
 #' @noRd
 .newstan_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
@@ -319,11 +313,7 @@
   # replicate `include/newstan/...` structure the way implicit-inclusion PCH
   # discovery via `-I` would require.
   cache_header <- file.path(cache_dir, "model_pch.hpp")
-  pch <- if (compiler_type == "gcc") {
-    paste0(cache_header, ".gch")
-  } else {
-    file.path(cache_dir, "model_pch.hpp.gch")
-  }
+  pch <- paste0(cache_header, ".gch")
 
   if (rebuild && file.exists(pch)) {
     unlink(pch)

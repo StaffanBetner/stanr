@@ -79,7 +79,6 @@ class r_sample_writer : public stan::callbacks::writer {
   void operator()(const std::vector<std::string>& names) override {
     n_cols_ = static_cast<int>(names.size());
     colnames_ = names;
-    // Pre-allocate Eigen matrix with expected capacity
     if (expected_rows_ > 0) {
       values_.resize(expected_rows_, n_cols_);
     }

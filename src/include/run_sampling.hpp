@@ -68,11 +68,12 @@ namespace newstan {
       if (metric == "diag_e") {
         Rcpp::NumericVector vector = Rcpp::as<Rcpp::NumericVector>(metric_value);
         values.assign(vector.begin(), vector.end());
-        dimensions = {num_params};
+        dimensions = {static_cast<size_t>(vector.size())};
       } else {
         Rcpp::NumericMatrix matrix = Rcpp::as<Rcpp::NumericMatrix>(metric_value);
         values.assign(matrix.begin(), matrix.end());
-        dimensions = {num_params, num_params};
+        dimensions = {static_cast<size_t>(matrix.nrow()),
+                      static_cast<size_t>(matrix.ncol())};
       }
       contexts.emplace_back(
           std::make_shared<newstan::r_metric_context>(std::move(values),
@@ -218,8 +219,6 @@ namespace newstan {
       } else {
         // --- NUTS without adaptation (fixed stepsize) ---
         if (metric == "unit_e") {
-          // The multi-chain overload accepts num_chains == 1 fine, so it is
-          // always used regardless of chain count.
           return_code = stan::services::sample::hmc_nuts_unit_e(
               model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
               init_radius, num_warmup, num_samples, num_thin, save_warmup, refresh,

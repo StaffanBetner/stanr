@@ -65,7 +65,7 @@ test_that(".newstan_r_config() memoizes per variable and routes through .newstan
 })
 
 
-# Task 2.3: the compile-failure retry gate in .compile_stan_model_environment()
+# The compile-failure retry gate in .compile_stan_model_environment()
 # (R/stan_model.R) should only rebuild the PCH when there's evidence it's
 # stale, not on every sourceCpp() failure. These tests fake out the actual
 # subprocess compiles (via .newstan_system2, as above) *and* Rcpp::sourceCpp()

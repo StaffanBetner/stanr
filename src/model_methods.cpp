@@ -344,9 +344,4 @@ Rcpp::NumericVector model_constrain(
   return result;
 }
 
-Rcpp::CharacterVector model_compile_info(
-    const stan::model::model_base& model) {
-  return Rcpp::wrap(model.model_compile_info());
-}
-
 }  // namespace newstan
