@@ -408,6 +408,32 @@ stan_model <- function(
   )
 }
 
+#' Paths of DLLs currently mapped into this session from under `dir`.
+#'
+#' Windows refuses to unlink a DLL while it is mapped into the process, so
+#' `unlink(recursive = TRUE)` over a cache tree removes everything *except*
+#' the loaded model artifacts and the directories holding them. This reports
+#' which files those are, so `newstan_clear_cache()` can name them rather
+#' than appear to have succeeded. POSIX unlinks a mapped file without
+#' complaint, so in practice this is only ever non-empty on Windows.
+#'
+#' @noRd
+.newstan_loaded_dlls_under <- function(dir) {
+  if (!dir.exists(dir)) {
+    return(character())
+  }
+  normalize <- function(path) {
+    normalizePath(path, winslash = "/", mustWork = FALSE)
+  }
+  loaded <- vapply(
+    getLoadedDLLs(),
+    function(dll) normalize(dll[["path"]]),
+    character(1),
+    USE.NAMES = FALSE
+  )
+  loaded[startsWith(loaded, paste0(normalize(dir), "/"))]
+}
+
 #' Clear newstan's persistent compilation caches
 #'
 #' @description Deletes newstan's on-disk caches of compiled Stan models and
@@ -428,6 +454,16 @@ stan_model <- function(
 #'   `pch`, giving the cache paths targeted for removal (present whether or
 #'   not they existed beforehand).
 #'
+#' @section Models compiled in this session:
+#'   Windows will not delete a DLL that is still mapped into the running
+#'   process, so a model compiled earlier in this session keeps its own
+#'   compiled artifact (and the directories containing it) alive: everything
+#'   else is removed and those files remain. This function warns, naming
+#'   what survived -- restart R and call it again to reclaim the rest.
+#'   Models are *not* unloaded automatically, because any [`StanModel`] still
+#'   referring to one would be left calling into unmapped memory. POSIX
+#'   unlinks a mapped file without complaint, so this does not arise there.
+#'
 #' @seealso [stan_model()]
 #'
 #' @export
@@ -435,12 +471,32 @@ newstan_clear_cache <- function() {
   cache_root <- tools::R_user_dir("newstan", "cache")
   models_dir <- file.path(cache_root, "models")
   pch_dir <- file.path(cache_root, "pch")
+  targets <- c(models_dir, pch_dir)
 
-  if (dir.exists(models_dir)) {
-    unlink(models_dir, recursive = TRUE)
+  for (target in targets) {
+    if (dir.exists(target)) {
+      unlink(target, recursive = TRUE)
+    }
   }
-  if (dir.exists(pch_dir)) {
-    unlink(pch_dir, recursive = TRUE)
+
+  # `unlink()` signals failure only through its return code, and on Windows
+  # it partially succeeds -- everything comes out except DLLs still mapped
+  # into this session. Report that instead of returning as though the cache
+  # were gone (see the "Models compiled in this session" section above).
+  leftover <- targets[dir.exists(targets)]
+  if (length(leftover)) {
+    blocking <- unlist(lapply(leftover, .newstan_loaded_dlls_under))
+    warning(
+      "Could not fully clear the newstan cache. Still present:\n",
+      paste0("  ", leftover, collapse = "\n"),
+      if (length(blocking)) {
+        paste0(
+          "\nStill loaded in this R session (restart R to release):\n",
+          paste0("  ", blocking, collapse = "\n")
+        )
+      },
+      call. = FALSE
+    )
   }
 
   invisible(c(models = models_dir, pch = pch_dir))

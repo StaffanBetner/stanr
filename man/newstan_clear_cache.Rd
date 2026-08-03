@@ -26,6 +26,18 @@ newstan does not own that directory (it may be shared with other
 software or point outside the user cache root entirely), so this
 function only ever removes paths it created by default.
 }
+\section{Models compiled in this session}{
+
+Windows will not delete a DLL that is still mapped into the running
+process, so a model compiled earlier in this session keeps its own
+compiled artifact (and the directories containing it) alive: everything
+else is removed and those files remain. This function warns, naming
+what survived -- restart R and call it again to reclaim the rest.
+Models are \emph{not} unloaded automatically, because any \code{\link{StanModel}} still
+referring to one would be left calling into unmapped memory. POSIX
+unlinks a mapped file without complaint, so this does not arise there.
+}
+
 \seealso{
 \code{\link[=stan_model]{stan_model()}}
 }

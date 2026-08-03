@@ -236,11 +236,21 @@ test_that("force_recompile refreshes the cached artifact in place under cache_di
   # inside cache_dir (sourceCpp itself may version the built filename, e.g.
   # sourceCpp_2.so -> sourceCpp_3.so, removing the old one -- see
   # Rcpp:::.sourceCppDynlibInsert / .sourceCppFindCacheEntryIndex). What
-  # matters is that exactly one built artifact exists in that directory
-  # both before and after (no stale duplicate lingers alongside the fresh
-  # one), and the surviving artifact is freshly built by this rebuild.
-  expect_equal(length(artifact_after), 1L)
-  expect_gt(file.info(artifact_after)$mtime, rebuild_started)
+  # matters on every platform is that this rebuild produced exactly one
+  # fresh artifact in that directory.
+  fresh <- artifact_after[file.info(artifact_after)$mtime > rebuild_started]
+  expect_length(fresh, 1L)
+
+  # `mod` above still holds the superseded build mapped into this session.
+  # Rcpp retires it with file.remove(), which POSIX honours even while the
+  # file is mapped, so only the fresh artifact survives there. Windows
+  # refuses to unlink a mapped DLL (sourceCpp's own removal fails with
+  # "Permission denied"), so the superseded artifact legitimately lingers
+  # until the session ends -- a platform property, not a stale duplicate
+  # newstan failed to clean up.
+  if (.Platform$OS.type != "windows") {
+    expect_equal(length(artifact_after), 1L)
+  }
 })
 
 test_that("model_hash is computed before stanc() is called, so a warm cache skips stanc entirely", {
@@ -414,14 +424,41 @@ test_that("newstan_clear_cache() removes the models/pch cache dirs and a later c
   models_dir <- file.path(cache_root, "models")
   expect_true(dir.exists(models_dir))
 
-  freed <- newstan_clear_cache()
+  # `mod` is still loaded in this session. Windows will not unlink a mapped
+  # DLL, so there newstan_clear_cache() removes all it can and warns about
+  # the remainder; POSIX unlinks the mapped file and the tree goes entirely.
+  on_windows <- .Platform$OS.type == "windows"
+  if (on_windows) {
+    expect_warning(
+      freed <- newstan_clear_cache(),
+      "Could not fully clear the newstan cache"
+    )
+  } else {
+    freed <- newstan_clear_cache()
+  }
   expect_setequal(names(freed), c("models", "pch"))
   expect_equal(unname(freed["models"]), models_dir)
-  expect_false(dir.exists(models_dir))
+
+  # The pch dir only ever holds .gch/.hpp files, never anything loadable, so
+  # it comes out completely on both platforms.
   expect_false(dir.exists(file.path(cache_root, "pch")))
 
-  # Calling it again with nothing cached is a harmless no-op.
-  expect_no_error(newstan_clear_cache())
+  if (on_windows) {
+    # Everything that is not a still-mapped DLL must be gone.
+    survivors <- normalizePath(
+      list.files(models_dir, recursive = TRUE, full.names = TRUE),
+      winslash = "/",
+      mustWork = FALSE
+    )
+    expect_true(all(survivors %in% newstan:::.newstan_loaded_dlls_under(
+      models_dir
+    )))
+  } else {
+    expect_false(dir.exists(models_dir))
+  }
+
+  # Calling it again with nothing left to release is a harmless no-op.
+  expect_no_error(suppressWarnings(newstan_clear_cache()))
 
   mod2 <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod2$is_compiled())
