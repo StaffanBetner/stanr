@@ -152,6 +152,17 @@ class r_sample_writer : public stan::callbacks::writer {
     }
   }
 
+  // Copy column v (n_rows_ contiguous doubles) into slice [ , chain, v] of a
+  // preallocated iterations x chains x variables array. Main R thread only.
+  void copy_to_r_array_chain(double* dest, int n_iterations, int n_chains,
+                             int chain_index) const {
+    for (int v = 0; v < n_cols_; ++v) {
+      std::memcpy(dest + (static_cast<size_t>(v) * n_chains + chain_index) * n_iterations,
+                  values_.col(v).data(),
+                  static_cast<size_t>(n_rows_) * sizeof(double));
+    }
+  }
+
   const std::vector<std::string>& colnames() const { return colnames_; }
   const std::vector<std::string>& messages() const { return messages_; }
   int n_rows() const { return n_rows_; }

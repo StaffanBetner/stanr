@@ -42,22 +42,8 @@
   # An Rcpp `XPtr`'s underlying C++ address does not survive
   # `serialize()`/`readRDS()`: the restored pointer's address is written
   # back as null, so native calls made through it fail loudly (rather than
-  # silently) after a restore. `format()` on an external pointer renders
-  # its raw address via the platform's `%p` (typically `"<pointer: 0x0>"`,
-  # or `"<pointer: (nil)>"` on some platforms) -- treat a literal R `NULL`
-  # or an all-zero/`nil` address as null.
-  if (is.null(ptr)) {
-    return(TRUE)
-  }
-  # Defensive: if `ptr` is ever something `format()` can't render into a
-  # single string the way an external pointer does (shouldn't happen --
-  # `model_ptr_` is always `NULL` or an `XPtr`), treat it as null rather
-  # than risk a native call through something unexpected.
-  text <- tryCatch(format(ptr), error = function(e) NA_character_)
-  if (length(text) != 1L || is.na(text)) {
-    return(TRUE)
-  }
-  grepl("0x0*>?\\s*$", text) || grepl("(nil)", text, fixed = TRUE)
+  # silently) after a restore.
+  is.null(ptr) || .Call(newstan_xptr_is_null, ptr)
 }
 
 .newstan_rename_draw_columns <- function(x) {
@@ -843,16 +829,14 @@ StanMCMC <- R6Class(
           }
         }
       }
-      # `StanMCMC`'s served default format is `draws_array` (below); convert
-      # here at construction time so `private$draws_`/`private$diagnostics_`
-      # are already stored in that format and `$draws()`/`$summary()` don't
-      # have to re-convert the whole object on every call. The `save_warmup`
-      # branch above already produces arrays; this also covers the (more
-      # common) non-warmup path, where `payload$draws`/`payload$diagnostics`
-      # would otherwise still be the `draws_df` produced by
-      # `stan_model_sample()`. `as_draws_array()` on an input that is already
-      # a `draws_array` is a no-op (verified `identical()`), so this is safe
-      # to call unconditionally regardless of which branch ran above.
+      # `StanMCMC`'s served default format is `draws_array`. `payload$draws`/
+      # `payload$diagnostics` are already `draws_array` objects by this point
+      # (built via `as_draws_array()` in `stan_model_sample()`'s
+      # `payload_fn`, and the `save_warmup` branch above also produces
+      # arrays), so these calls are no-ops. Kept unconditionally as a cheap
+      # identity/safety net so `private$draws_`/`private$diagnostics_` are
+      # guaranteed to be in the expected format regardless of which branch
+      # ran above, without needing to reason about every payload source.
       if (!is.null(payload$draws)) {
         payload$draws <- posterior::as_draws_array(payload$draws)
       }
@@ -1175,7 +1159,13 @@ StanMLE <- R6Class(
         names(par) <- .newstan_bracket_names(names(par))
       }
       payload$par <- par
-      if (length(par)) {
+      if (!is.null(payload$iterations)) {
+        # Full optimization path (one row per saved iteration): expose it via
+        # $draws() instead of the single synthesized row below.
+        iterations <- payload$iterations
+        colnames(iterations) <- .newstan_bracket_names(colnames(iterations))
+        payload$draws <- iterations
+      } else if (length(par)) {
         payload$draws <- matrix(
           c(payload$value %||% NA_real_, unname(par)),
           nrow = 1L,
@@ -1209,9 +1199,14 @@ StanMLE <- R6Class(
 #' @param variables (character vector) Which variables to extract. If `NULL`,
 #'   all variables are returned.
 #'
-#' @return A named numeric vector of parameter estimates.
+#' @return A named numeric vector of parameter estimates. Always reflects the
+#'   final optimization iteration, regardless of whether
+#'   [`$optimize()`][model-method-optimize] was run with `save_iterations =
+#'   TRUE`.
 #'
-#' @seealso [`$draws()`][fit-method-draws]
+#' @seealso [`$draws()`][fit-method-draws], which under
+#'   `save_iterations = TRUE` returns the full optimization path (one row per
+#'   saved iteration) instead of a single row for the final estimate.
 #'
 NULL
 

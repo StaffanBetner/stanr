@@ -19,6 +19,8 @@ string.
 \item \verb{$is_compiled()} returns \code{TRUE} if the model has been compiled.
 \item \verb{$cpp_options()} returns a named list of C++ options.
 \item \verb{$stanc_options()} returns a named list of stanc options.
+\item \verb{$use_opencl()} returns \code{TRUE} if the model was created with
+\code{use_opencl = TRUE} and \code{FALSE} otherwise.
 }
 }
 \description{
@@ -35,6 +37,7 @@ stan_version()
 is_compiled()
 cpp_options()
 stanc_options()
+use_opencl()
 }\if{html}{\out{</div>}}
 }
 \seealso{

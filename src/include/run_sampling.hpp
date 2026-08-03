@@ -354,7 +354,7 @@ namespace newstan {
         });
 
     // --- Combine results (R thread only) ---
-    Rcpp::List combined = stack_writer_chains(sample_writers);
+    Rcpp::NumericVector combined = writer_chains_to_array(sample_writers);
     Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
 
     bool metric_captured = false;

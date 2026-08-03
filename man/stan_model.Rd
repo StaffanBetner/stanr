@@ -16,7 +16,8 @@ stan_model(
   force_recompile = getOption("newstan_force_recompile", FALSE),
   precompiled_headers = TRUE,
   quiet = TRUE,
-  external_cpp = NULL
+  external_cpp = NULL,
+  use_opencl = FALSE
 )
 }
 \arguments{
@@ -56,6 +57,23 @@ The default is \code{TRUE}.}
 
 \item{external_cpp}{(character vector) Paths to C++ files to prepend to the
 generated model code. Useful for defining custom functions.}
+
+\item{use_opencl}{(logical) Should the model be compiled with OpenCL
+support? The default is \code{FALSE}. When \code{TRUE}, \code{stanc} generates
+OpenCL-accelerated code for the functions that support it (most notably
+\code{bernoulli_logit_glm} and other GLM likelihoods), and the compiled model
+can run its computation on an OpenCL device. Which platform/device is
+used at runtime is controlled by the \code{opencl_ids} argument of the fit
+methods (e.g. \code{\link[=model-method-sample]{$sample()}}), not by this argument;
+\code{opencl_ids = NULL} (the default there) means \code{select_opencl_device()}
+is simply never called, so the platform/device baked in at compile time
+(0/0) is used. The library used to link OpenCL support can be overridden
+via \code{options(newstan_opencl_libs = ...)} -- the default is \code{"-framework OpenCL"} on macOS and \code{"-lOpenCL"} elsewhere. This override is
+particularly relevant on Apple Silicon: the system OpenCL framework
+exposes no double-precision (\code{fp64}) device there, and Stan requires
+doubles, so real OpenCL testing on Apple Silicon requires an
+OpenCL implementation with \code{fp64} support (e.g. POCL) and pointing
+\code{newstan_opencl_libs} at its ICD loader instead of the system framework.}
 }
 \value{
 A \code{\link{StanModel}} object.
@@ -66,7 +84,10 @@ Stan program, \code{include_paths}, \code{external_cpp}, and installed newstan/S
 versions are unchanged) under \code{getOption("newstan_cache_dir")}, which
 defaults to a subdirectory of \code{\link[tools:R_user_dir]{tools::R_user_dir()}}. Use
 \code{\link[=newstan_clear_cache]{newstan_clear_cache()}} to remove the cached models and precompiled
-headers.
+headers. On a cache hit, the Stan-to-C++ transpiler is skipped entirely,
+so any transpiler warnings (e.g. from pedantic mode or deprecated
+syntax) are only surfaced the first time a given model is compiled, not
+on subsequent cache hits.
 }
 \description{
 Create a new \code{\link{StanModel}} object from a Stan program file or
@@ -76,6 +97,16 @@ model using Stan's inference algorithms.
 
 See the \code{compile} argument for control over whether and how compilation
 happens.
+}
+\details{
+\code{libnewstan_runner.a} (the static archive with the sampling/
+optimize/etc. service runners, linked into every model regardless of
+\code{use_opencl}) is always compiled without \code{STAN_OPENCL}, while an
+OpenCL-enabled model translation unit defines it; this is believed safe
+because services only touch the model through the
+\verb{stan::model::model_base} virtual interface (no \code{matrix_cl} types cross
+that boundary), but is a latent ODR (One Definition Rule) hazard if
+that assumption is ever found to not hold.
 }
 \examples{
 \dontrun{

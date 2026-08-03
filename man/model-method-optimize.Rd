@@ -27,7 +27,19 @@ abs-determinant of the Jacobian of the inverse transformation?}
 
 \item{history_size}{(integer) Number of corrections in LBFGS approximation.}
 
-\item{save_iterations}{(logical) Should optimization iterations be saved?}
+\item{save_iterations}{(logical) Should optimization iterations be saved?
+When \code{TRUE}, \code{\link[=fit-method-draws]{$draws()}} on the returned \code{\link{StanMLE}}
+exposes the full optimization path (one row per saved iteration,
+including the initial point) instead of a single row for the final
+estimate. \code{\link[=fit-method-mle]{$mle()}} is unaffected either way and always
+reflects the final iteration.}
+
+\item{opencl_ids}{(integer vector) \code{c(platform_id, device_id)} identifying
+the OpenCL platform/device to run on. Only meaningful for a model
+compiled with \code{use_opencl = TRUE} (see \code{\link[=stan_model]{stan_model()}}); errors if the
+model was not compiled with OpenCL support. Defaults to \code{NULL}, meaning
+\code{select_opencl_device()} is never called and the platform/device baked
+in at compile time (0/0) is used.}
 }
 \value{
 A \code{\link{StanMLE}} object containing the point estimate.

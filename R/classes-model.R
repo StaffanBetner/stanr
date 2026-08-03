@@ -31,14 +31,12 @@
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  opencl_ids = NULL,
   save_cmdstan_config = FALSE
 ) {
   unsupported <- c(
     if (!is.null(output_dir)) "output_dir",
     if (!is.null(output_basename)) "output_basename",
     if (!is.null(sig_figs)) "sig_figs",
-    if (!is.null(opencl_ids)) "opencl_ids",
     if (isTRUE(save_cmdstan_config)) "save_cmdstan_config"
   )
   if (length(unsupported)) {
@@ -59,8 +57,7 @@
   seed,
   init = NULL,               # NULL when native_args don't need init (laplace, generate_quantities)
   native_args_fn,            # function(seed, resolved_init, model) -> list
-  payload_fn,                # function(result) -> list of method-specific fields
-  classes                    # e.g. c("StanSample", "StanService", "list"); NULL leaves payload unclassed
+  payload_fn                 # function(result) -> list of method-specific fields
 ) {
   started <- proc.time()[["elapsed"]]
   seed <- .newstan_seed(seed)
@@ -68,17 +65,14 @@
   model <- self$new_model(data, seed)
   native_args <- native_args_fn(seed, resolved_init, model)
   result <- self$run_model(model, native_args)
-  payload <- structure(
-    c(
-      payload_fn(result),
-      list(
-        return_code = result$return_code,
-        args = service_args(native_args),
-        output = result$output %||% character(),
-        model_ptr = model
-      )
-    ),
-    class = classes
+  payload <- c(
+    payload_fn(result),
+    list(
+      return_code = result$return_code,
+      args = service_args(native_args),
+      output = result$output %||% character(),
+      model_ptr = model
+    )
   )
   list(
     payload = payload,
@@ -199,7 +193,8 @@ StanModel <- R6Class(
       force_recompile = getOption("newstan_force_recompile", FALSE),
       precompiled_headers = TRUE,
       quiet = TRUE,
-      external_cpp = NULL
+      external_cpp = NULL,
+      use_opencl = FALSE
     ) {
       compile <- .newstan_flag(compile, "compile")
       force_recompile <- .newstan_flag(force_recompile, "force_recompile")
@@ -208,6 +203,7 @@ StanModel <- R6Class(
         "precompiled_headers"
       )
       quiet <- .newstan_flag(quiet, "quiet")
+      use_opencl <- .newstan_flag(use_opencl, "use_opencl")
       if (is.null(stan_file) == is.null(code)) {
         stop("Supply exactly one of `stan_file` and `code`.", call. = FALSE)
       }
@@ -281,6 +277,7 @@ StanModel <- R6Class(
       private$precompiled_headers_ <- precompiled_headers
       private$quiet_ <- quiet
       private$external_cpp_ <- external_cpp
+      private$use_opencl_ <- use_opencl
       if (compile) {
         self$compile()
       }
@@ -299,6 +296,7 @@ StanModel <- R6Class(
     precompiled_headers_ = TRUE,
     quiet_ = TRUE,
     external_cpp_ = NULL,
+    use_opencl_ = FALSE,
     compiled_env_ = NULL,
     compile_generation_ = 0L,
     variables_ = NULL,
@@ -348,6 +346,7 @@ StanModel <- R6Class(
 #'   is_compiled()
 #'   cpp_options()
 #'   stanc_options()
+#'   use_opencl()
 #'   ```
 #'
 #' @return
@@ -365,6 +364,8 @@ StanModel <- R6Class(
 #' * `$is_compiled()` returns `TRUE` if the model has been compiled.
 #' * `$cpp_options()` returns a named list of C++ options.
 #' * `$stanc_options()` returns a named list of stanc options.
+#' * `$use_opencl()` returns `TRUE` if the model was created with
+#'   `use_opencl = TRUE` and `FALSE` otherwise.
 #'
 #' @seealso [`$compile()`][model-method-compile] and [stan_model()]
 #'
@@ -405,6 +406,9 @@ StanModel$set("public", "cpp_options", stan_model_cpp_options)
 
 stan_model_stanc_options <- function() private$stanc_options_
 StanModel$set("public", "stanc_options", stan_model_stanc_options)
+
+stan_model_use_opencl <- function() private$use_opencl_
+StanModel$set("public", "use_opencl", stan_model_use_opencl)
 
 #' Input and output variables of a Stan program
 #'
@@ -512,11 +516,29 @@ stan_model_compile <- function(
     external_cpp = private$external_cpp_,
     verbose = !quiet,
     precompiled_headers = private$precompiled_headers_,
-    force_recompile = force_recompile
+    force_recompile = force_recompile,
+    use_opencl = private$use_opencl_
   )
   invisible(self)
 }
 StanModel$set("public", "compile", stan_model_compile)
+
+# Selects the OpenCL platform/device for the model's native computations to
+# run on. Triggers lazy compilation via `native_function()` if needed, and
+# runs on the R thread before `new_model()` -- with `use_opencl` codegen,
+# data transfer to the OpenCL device happens inside the model constructor
+# itself, so device selection must happen first. Errors cleanly (via the
+# C++ stub's `Rcpp::stop()`) if the compiled model was not built with
+# `use_opencl = TRUE`.
+stan_model_select_opencl <- function(opencl_ids) {
+  ids <- as.integer(opencl_ids)
+  if (length(ids) != 2L || anyNA(ids) || any(ids < 0L)) {
+    stop("`opencl_ids` must be c(platform_id, device_id).", call. = FALSE)
+  }
+  self$native_function("select_opencl_device")(ids[[1]], ids[[2]])
+  invisible(NULL)
+}
+StanModel$set("private", "select_opencl", stan_model_select_opencl)
 
 # StanModel fitting methods ----------------------------------------------------
 
@@ -572,6 +594,12 @@ StanModel$set("public", "compile", stan_model_compile)
 #' @param adapt_gamma (number) Adaptation hyperparameter for dual averaging.
 #' @param adapt_kappa (number) Adaptation hyperparameter for dual averaging.
 #' @param adapt_t0 (number) Adaptation hyperparameter for dual averaging.
+#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
+#'   the OpenCL platform/device to run on. Only meaningful for a model
+#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
+#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
+#'   `select_opencl_device()` is never called and the platform/device baked
+#'   in at compile time (0/0) is used.
 #'
 #' @return A [`StanMCMC`] object containing posterior draws and diagnostics.
 #'
@@ -622,7 +650,6 @@ stan_model_sample <- function(
     output_dir,
     output_basename,
     sig_figs,
-    opencl_ids,
     save_cmdstan_config
   )
   save_latent_dynamics <- .newstan_flag(
@@ -634,6 +661,9 @@ stan_model_sample <- function(
   fixed_param <- .newstan_flag(fixed_param, "fixed_param")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (!is.null(opencl_ids)) {
+    private$select_opencl(opencl_ids)
+  }
   if (save_latent_dynamics) {
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
   }
@@ -725,7 +755,7 @@ stan_model_sample <- function(
     if (result$return_code != 0) {
       list(draws = NULL, diagnostics = NULL)
     } else {
-      draw_names <- colnames(result$samples)
+      draw_names <- dimnames(result$samples)[[3]]
       if (!fixed_param && engine == "static") {
         diagnostic_vars <- c("accept_stat__", "stepsize__")
       } else {
@@ -738,9 +768,7 @@ stan_model_sample <- function(
           "energy__"
         )
       }
-      par_vars <- draw_names[
-        !(draw_names %in% diagnostic_vars) & draw_names != ".chain"
-      ]
+      par_vars <- draw_names[!(draw_names %in% diagnostic_vars)]
 
       if (fixed_param) {
         diagnostics <- posterior::draws_df(
@@ -750,9 +778,11 @@ stan_model_sample <- function(
           "divergent__" = NA,
           "energy__" = NA
         )
-        draws <- posterior::as_draws_df(result$samples[, par_vars, drop = FALSE])
+        draws <- posterior::as_draws_array(
+          result$samples[, , par_vars, drop = FALSE]
+        )
       } else {
-        all_draws <- posterior::as_draws_df(result$samples)
+        all_draws <- posterior::as_draws_array(result$samples)
         diagnostics <- posterior::subset_draws(all_draws, variable = diagnostic_vars)
         draws <- posterior::subset_draws(all_draws, par_vars)
       }
@@ -772,8 +802,7 @@ stan_model_sample <- function(
     seed = seed,
     init = init,
     native_args_fn = native_args_fn,
-    payload_fn = payload_fn,
-    classes = c("StanSample", "StanService", "list")
+    payload_fn = payload_fn
   )
 
   StanMCMC$new(
@@ -818,6 +847,17 @@ StanModel$set("public", "sample", stan_model_sample)
 #' @param tol_param (number) Absolute tolerance for changes in parameter values.
 #' @param history_size (integer) Number of corrections in LBFGS approximation.
 #' @param save_iterations (logical) Should optimization iterations be saved?
+#'   When `TRUE`, [`$draws()`][fit-method-draws] on the returned [`StanMLE`]
+#'   exposes the full optimization path (one row per saved iteration,
+#'   including the initial point) instead of a single row for the final
+#'   estimate. [`$mle()`][fit-method-mle] is unaffected either way and always
+#'   reflects the final iteration.
+#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
+#'   the OpenCL platform/device to run on. Only meaningful for a model
+#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
+#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
+#'   `select_opencl_device()` is never called and the platform/device baked
+#'   in at compile time (0/0) is used.
 #'
 #' @return A [`StanMLE`] object containing the point estimate.
 #'
@@ -855,17 +895,14 @@ stan_model_optimize <- function(
     output_dir,
     output_basename,
     sig_figs,
-    opencl_ids,
     save_cmdstan_config
   )
   jacobian <- .newstan_flag(jacobian, "jacobian")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
-  if (jacobian) {
-    stop(
-      "Jacobian-adjusted optimization is not yet supported by the native service.",
-      call. = FALSE
-    )
+  save_iterations <- .newstan_flag(save_iterations, "save_iterations")
+  if (!is.null(opencl_ids)) {
+    private$select_opencl(opencl_ids)
   }
 
   threads <- as.integer(threads %||% 1L)
@@ -886,7 +923,8 @@ stan_model_optimize <- function(
       tol_rel_grad = as.double(tol_rel_grad),
       tol_param = as.double(tol_param),
       history_size = as.integer(history_size),
-      save_iterations = FALSE,
+      save_iterations = save_iterations,
+      jacobian = as.logical(jacobian),
       refresh = refresh,
       verbose = as.logical(show_messages),
       show_exceptions = as.logical(show_exceptions),
@@ -903,7 +941,11 @@ stan_model_optimize <- function(
     } else {
       numeric(0)
     }
-    list(par = par_vec, value = result$value)
+    payload <- list(par = par_vec, value = result$value)
+    if (save_iterations) {
+      payload$iterations <- par_mat
+    }
+    payload
   }
 
   res <- .newstan_run_service(
@@ -912,8 +954,7 @@ stan_model_optimize <- function(
     seed = seed,
     init = init,
     native_args_fn = native_args_fn,
-    payload_fn = payload_fn,
-    classes = c("StanOptimize", "StanService", "list")
+    payload_fn = payload_fn
   )
 
   StanMLE$new(
@@ -953,6 +994,12 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #' @param draws (integer) The number of draws from the Laplace approximation.
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
+#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
+#'   the OpenCL platform/device to run on. Only meaningful for a model
+#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
+#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
+#'   `select_opencl_device()` is never called and the platform/device baked
+#'   in at compile time (0/0) is used.
 #'
 #' @return A [`StanLaplace`] object containing approximate posterior draws.
 #'
@@ -984,7 +1031,6 @@ stan_model_laplace <- function(
     output_dir,
     output_basename,
     sig_figs,
-    opencl_ids,
     save_cmdstan_config
   )
   if (!is.null(mode) && !is.null(opt_args)) {
@@ -994,6 +1040,9 @@ stan_model_laplace <- function(
   calculate_lp <- .newstan_flag(calculate_lp, "calculate_lp")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (!is.null(opencl_ids)) {
+    private$select_opencl(opencl_ids)
+  }
   # Resolved once so the internal mode-finding optimize() run (if any) and
   # the laplace run itself agree on data/seed/init.
   resolved_data <- data
@@ -1072,8 +1121,7 @@ stan_model_laplace <- function(
     seed = resolved_seed,
     init = NULL,
     native_args_fn = native_args_fn,
-    payload_fn = payload_fn,
-    classes = c("StanLaplace", "StanService", "list")
+    payload_fn = payload_fn
   )
 
   StanLaplace$new(
@@ -1116,6 +1164,12 @@ StanModel$set("public", "laplace", stan_model_laplace)
 #' @param tol_rel_obj (number) Relative tolerance for ELBO convergence.
 #' @param eval_elbo (integer) How often to evaluate the ELBO.
 #' @param draws (integer) The number of draws from the variational approximation.
+#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
+#'   the OpenCL platform/device to run on. Only meaningful for a model
+#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
+#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
+#'   `select_opencl_device()` is never called and the platform/device baked
+#'   in at compile time (0/0) is used.
 #'
 #' @return A [`StanVB`] object containing approximate posterior draws.
 #'
@@ -1153,7 +1207,6 @@ stan_model_variational <- function(
     output_dir,
     output_basename,
     sig_figs,
-    opencl_ids,
     save_cmdstan_config
   )
   save_latent_dynamics <- .newstan_flag(
@@ -1163,6 +1216,9 @@ stan_model_variational <- function(
   adapt_engaged <- .newstan_flag(adapt_engaged, "adapt_engaged")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (!is.null(opencl_ids)) {
+    private$select_opencl(opencl_ids)
+  }
   if (save_latent_dynamics) {
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
   }
@@ -1205,8 +1261,7 @@ stan_model_variational <- function(
     seed = seed,
     init = init,
     native_args_fn = native_args_fn,
-    payload_fn = payload_fn,
-    classes = c("StanVariational", "StanService", "list")
+    payload_fn = payload_fn
   )
 
   StanVB$new(
@@ -1245,6 +1300,12 @@ StanModel$set("public", "variational", stan_model_variational)
 #' @param psis_resample (logical) Should Pareto smoothed importance sampling
 #'   resampling be used?
 #' @param calculate_lp (logical) Should the log density be calculated?
+#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
+#'   the OpenCL platform/device to run on. Only meaningful for a model
+#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
+#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
+#'   `select_opencl_device()` is never called and the platform/device baked
+#'   in at compile time (0/0) is used.
 #'
 #' @return A [`StanPathfinder`] object containing approximate posterior draws.
 #'
@@ -1286,7 +1347,6 @@ stan_model_pathfinder <- function(
     output_dir,
     output_basename,
     sig_figs,
-    opencl_ids,
     save_cmdstan_config
   )
   save_single_paths <- .newstan_flag(save_single_paths, "save_single_paths")
@@ -1294,6 +1354,9 @@ stan_model_pathfinder <- function(
   calculate_lp <- .newstan_flag(calculate_lp, "calculate_lp")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (!is.null(opencl_ids)) {
+    private$select_opencl(opencl_ids)
+  }
 
   threads <- as.integer(threads %||% 1L)
   refresh <- as.integer(refresh)
@@ -1357,8 +1420,7 @@ stan_model_pathfinder <- function(
     seed = seed,
     init = init,
     native_args_fn = native_args_fn,
-    payload_fn = payload_fn,
-    classes = c("StanPathfinder", "StanService", "list")
+    payload_fn = payload_fn
   )
 
   StanPathfinder$new(
@@ -1392,6 +1454,12 @@ StanModel$set("public", "pathfinder", stan_model_pathfinder)
 #' @param fitted_params A [`StanFit`] object or a draws matrix containing
 #'   parameter values to use for the generated quantities block.
 #' @param num_threads (integer) The total number of threads to use.
+#' @param opencl_ids (integer vector) `c(platform_id, device_id)` identifying
+#'   the OpenCL platform/device to run on. Only meaningful for a model
+#'   compiled with `use_opencl = TRUE` (see [stan_model()]); errors if the
+#'   model was not compiled with OpenCL support. Defaults to `NULL`, meaning
+#'   `select_opencl_device()` is never called and the platform/device baked
+#'   in at compile time (0/0) is used.
 #'
 #' @return A [`StanGQ`] object containing the generated quantities.
 #'
@@ -1415,11 +1483,13 @@ stan_model_generate_quantities <- function(
     output_dir,
     output_basename,
     sig_figs,
-    opencl_ids,
     FALSE
   )
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (!is.null(opencl_ids)) {
+    private$select_opencl(opencl_ids)
+  }
 
   num_threads <- as.integer(num_threads %||% 1L)
 
@@ -1462,8 +1532,7 @@ stan_model_generate_quantities <- function(
     seed = seed,
     init = NULL,
     native_args_fn = native_args_fn,
-    payload_fn = payload_fn,
-    classes = c("StanGeneratedQuantities", "StanService", "list")
+    payload_fn = payload_fn
   )
 
   StanGQ$new(
@@ -1555,17 +1624,13 @@ stan_model_diagnose <- function(
     )
   }
 
-  # `diagnose` historically returns a plain, unclassed list payload; passing
-  # classes = NULL to the shared runner preserves that (no class attribute
-  # is attached).
   res <- .newstan_run_service(
     self = self,
     data = data,
     seed = seed,
     init = init,
     native_args_fn = native_args_fn,
-    payload_fn = payload_fn,
-    classes = NULL
+    payload_fn = payload_fn
   )
 
   StanDiagnose$new(

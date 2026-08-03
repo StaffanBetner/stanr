@@ -1,8 +1,11 @@
 #include <Rinternals.h>
 #include <R_ext/Visibility.h>
 
+extern "C" SEXP newstan_xptr_is_null(SEXP ptr);
+
 extern "C"  {
   static const R_CallMethodDef CallEntries[] = {
+    {"newstan_xptr_is_null", (DL_FUNC) &newstan_xptr_is_null, 1},
     {NULL, NULL, 0}
   };
 

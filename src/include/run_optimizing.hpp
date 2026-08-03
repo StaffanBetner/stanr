@@ -11,32 +11,17 @@
 #include <newstan/r_data_context.hpp>
 
 namespace newstan {
-  template <class Model>
-  Rcpp::List run_optimizing(Model& model, Rcpp::List args) {
-    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
-
-    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    const double init_radius = Rcpp::as<double>(args["init_radius"]);
-    const int iter = Rcpp::as<int>(args["iter"]);
-    const bool save_iterations = Rcpp::as<bool>(args["save_iterations"]);
-    const bool verbose = Rcpp::as<bool>(args["verbose"]);
-    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
-
-    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
-
-    newstan::r_data_context init_ctx(init_list);
-    newstan::r_discard_writer init_writer;
-    // With saved iterations Stan writes the initial point plus at most iter
-    // updates; otherwise it writes only the final point.
-    newstan::r_sample_writer sample_writer(save_iterations ? iter + 1 : 1);
-    newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt;
-
-    int return_code = stan::services::error_codes::CONFIG;
-
+  template <bool Jacobian, class Model, class InitContext, class InitWriter,
+            class SampleWriter, class Logger, class Interrupt>
+  int run_optimizing_algorithm(Model& model, const std::string& algorithm,
+                                Rcpp::List args, InitContext& init_ctx,
+                                unsigned int seed, unsigned int chain_id,
+                                double init_radius, int iter,
+                                bool save_iterations, Interrupt& interrupt,
+                                Logger& logger, InitWriter& init_writer,
+                                SampleWriter& sample_writer) {
     if (algorithm == "newton") {
-      return_code = stan::services::optimize::newton(
+      return stan::services::optimize::newton<Model, Jacobian>(
           model, init_ctx, seed, chain_id, init_radius,
           iter, save_iterations,
           interrupt, logger,
@@ -50,7 +35,7 @@ namespace newstan {
       const double tol_param = Rcpp::as<double>(args["tol_param"]);
       const int refresh = Rcpp::as<int>(args["refresh"]);
 
-      return_code = stan::services::optimize::bfgs(
+      return stan::services::optimize::bfgs<Model, Jacobian>(
           model, init_ctx, seed, chain_id, init_radius,
           init_alpha, tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
           iter, save_iterations, refresh,
@@ -66,7 +51,7 @@ namespace newstan {
       const int history_size = Rcpp::as<int>(args["history_size"]);
       const int refresh = Rcpp::as<int>(args["refresh"]);
 
-      return_code = stan::services::optimize::lbfgs(
+      return stan::services::optimize::lbfgs<Model, Jacobian>(
           model, init_ctx, seed, chain_id, init_radius,
           history_size, init_alpha, tol_obj, tol_rel_obj, tol_grad, tol_rel_grad, tol_param,
           iter, save_iterations, refresh,
@@ -76,8 +61,42 @@ namespace newstan {
       std::ostringstream msg;
       msg << "Unknown optimization algorithm: " << algorithm;
       logger.error(msg.str());
-      return_code = stan::services::error_codes::CONFIG;
+      return stan::services::error_codes::CONFIG;
     }
+  }
+
+  template <class Model>
+  Rcpp::List run_optimizing(Model& model, Rcpp::List args) {
+    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
+
+    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
+    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
+    const double init_radius = Rcpp::as<double>(args["init_radius"]);
+    const int iter = Rcpp::as<int>(args["iter"]);
+    const bool save_iterations = Rcpp::as<bool>(args["save_iterations"]);
+    const bool jacobian = Rcpp::as<bool>(args["jacobian"]);
+    const bool verbose = Rcpp::as<bool>(args["verbose"]);
+    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
+
+    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
+
+    newstan::r_data_context init_ctx(init_list);
+    newstan::r_discard_writer init_writer;
+    // With saved iterations Stan writes the initial point plus at most iter
+    // updates; otherwise it writes only the final point.
+    newstan::r_sample_writer sample_writer(save_iterations ? iter + 1 : 1);
+    newstan::r_logger logger(verbose, show_exceptions);
+    newstan::r_interrupt interrupt;
+
+    int return_code = jacobian
+        ? run_optimizing_algorithm<true>(
+              model, algorithm, args, init_ctx, seed, chain_id, init_radius,
+              iter, save_iterations, interrupt, logger, init_writer,
+              sample_writer)
+        : run_optimizing_algorithm<false>(
+              model, algorithm, args, init_ctx, seed, chain_id, init_radius,
+              iter, save_iterations, interrupt, logger, init_writer,
+              sample_writer);
 
     // Extract results from sample_writer
     Rcpp::NumericMatrix mat = sample_writer.to_r_matrix();

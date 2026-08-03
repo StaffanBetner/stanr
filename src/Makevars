@@ -35,7 +35,7 @@ SUNDIALS_NVECSERIAL := \
 
 SUNDIALS_SOURCES = $(SUNDIALS_CVODES) $(SUNDIALS_IDAS) $(SUNDIALS_KINSOL) $(SUNDIALS_NVECSERIAL)
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
-OBJECTS = runner.o init.o model_methods.o r_data_context.o
+OBJECTS = runner.o init.o model_methods.o r_data_context.o xptr.o
 
 $(SHLIB): static
 $(OBJECTS): $(SUNDIALS_OBJECTS)
@@ -45,6 +45,7 @@ package:
 	@mkdir -p ../inst/include
 	@cp -Rf stan/src/stan ../inst/include/stan
 	@cp -Rf math/stan/. ../inst/include/stan
+	@cp -Rf math/lib/opencl_*/CL ../inst/include/
 	@cp -Rf math/lib/sundials_*/include/* ../inst/include/
 	@cp -Rf math/lib/sundials_*/src/sundials .
 	@rm -rf ../inst/include/newstan

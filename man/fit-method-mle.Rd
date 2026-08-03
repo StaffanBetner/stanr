@@ -9,14 +9,18 @@
 all variables are returned.}
 }
 \value{
-A named numeric vector of parameter estimates.
+A named numeric vector of parameter estimates. Always reflects the
+final optimization iteration, regardless of whether
+\code{\link[=model-method-optimize]{$optimize()}} was run with \code{save_iterations = TRUE}.
 }
 \description{
 Extract the maximum likelihood or maximum a posteriori estimate
 from a \code{\link{StanMLE}} object as a named numeric vector.
 }
 \seealso{
-\code{\link[=fit-method-draws]{$draws()}}
+\code{\link[=fit-method-draws]{$draws()}}, which under
+\code{save_iterations = TRUE} returns the full optimization path (one row per
+saved iteration) instead of a single row for the final estimate.
 
 Other StanFit methods:
 \code{\link{fit-method-diagnose}},

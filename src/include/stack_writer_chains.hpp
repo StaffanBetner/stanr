@@ -5,63 +5,55 @@
 #include <RcppEigen.h>
 #include <Eigen/Dense>
 #include <cstring>
+#include <stdexcept>
+#include <string>
 
 namespace newstan {
 
-  // Helper: stack per-chain Eigen matrices and add a .chain column.
-  // Uses Eigen vertical concatenation for fast, vectorized stacking.
+  // Stack per-chain writers into a single iterations x chains x variables
+  // R array (Fortran/column-major order, matching posterior::draws_array).
+  // Avoids building an intermediate combined Eigen matrix or data.frame.
   template <typename Writer>
-  inline Rcpp::DataFrame stack_writer_chains(
+  inline Rcpp::NumericVector writer_chains_to_array(
     const std::vector<Writer>& writers) {
 
     const int num_chains = static_cast<int>(writers.size());
-    int total_rows = 0;
-    int n_cols = 0;
+
+    const int n_iterations = num_chains > 0 ? writers[0].n_rows() : 0;
+    const int n_cols = num_chains > 0 ? writers[0].n_cols() : 0;
+
     for (int i = 0; i < num_chains; ++i) {
-      total_rows += writers[i].n_rows();
-      if (i == 0) n_cols = writers[i].n_cols();
-    }
-
-    if (total_rows == 0) {
-      return Rcpp::DataFrame::create();
-    }
-
-    // Build the final R columns directly.  Avoiding an intermediate combined
-    // Eigen matrix saves a full-draw-set allocation and copy.
-    Rcpp::List df_list(n_cols + 1);
-    for (int j = 0; j < n_cols; ++j) {
-      df_list[j] = Rcpp::NumericVector(total_rows);
-    }
-
-    int offset = 0;
-    for (int i = 0; i < num_chains; ++i) {
-      writers[i].copy_to_r_columns(df_list, offset);
-      offset += writers[i].n_rows();
-    }
-
-    // Append chain ID as the last column
-    Rcpp::IntegerVector chain_col(total_rows);
-    offset = 0;
-    for (int i = 0; i < num_chains; ++i) {
-      int n = writers[i].n_rows();
-      std::fill(chain_col.begin() + offset, chain_col.begin() + offset + n, i + 1);
-      offset += n;
-    }
-    df_list[n_cols] = chain_col;
-
-    Rcpp::DataFrame df = Rcpp::DataFrame(df_list);
-
-    // Set column names from first chain's writer + ".chain"
-    Rcpp::CharacterVector names(n_cols + 1);
-    if (num_chains > 0 && !writers[0].colnames().empty()) {
-      for (int j = 0; j < n_cols; ++j) {
-        names[j] = writers[0].colnames()[j];
+      if (writers[i].n_rows() != n_iterations || writers[i].n_cols() != n_cols) {
+        throw std::runtime_error(
+            "writer_chains_to_array: chain " + std::to_string(i) +
+            " has dimensions (" + std::to_string(writers[i].n_rows()) + ", " +
+            std::to_string(writers[i].n_cols()) +
+            ") which do not match chain 0's dimensions (" +
+            std::to_string(n_iterations) + ", " + std::to_string(n_cols) + ").");
       }
     }
-    names[n_cols] = ".chain";
-    df.names() = names;
 
-    return df;
+    Rcpp::CharacterVector colnames;
+    if (num_chains > 0 && !writers[0].colnames().empty()) {
+      colnames = Rcpp::CharacterVector(
+          writers[0].colnames().begin(), writers[0].colnames().end());
+    } else {
+      colnames = Rcpp::CharacterVector(n_cols);
+    }
+
+    Rcpp::NumericVector result(
+        static_cast<R_xlen_t>(n_iterations) * num_chains * n_cols);
+
+    if (n_iterations > 0) {
+      for (int i = 0; i < num_chains; ++i) {
+        writers[i].copy_to_r_array_chain(REAL(result), n_iterations, num_chains, i);
+      }
+    }
+
+    result.attr("dim") = Rcpp::IntegerVector::create(n_iterations, num_chains, n_cols);
+    result.attr("dimnames") = Rcpp::List::create(R_NilValue, R_NilValue, colnames);
+
+    return result;
   }
 }
 

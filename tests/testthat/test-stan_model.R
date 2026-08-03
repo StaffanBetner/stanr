@@ -121,6 +121,120 @@ test_that("force_recompile refreshes the cached artifact in place under cache_di
   expect_gt(file.info(artifact_after)$mtime, rebuild_started)
 })
 
+test_that("model_hash is computed before stanc() is called, so a warm cache skips stanc entirely", {
+  cache_root <- withr::local_tempdir()
+  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+
+  call_count <- 0
+  real_stanc <- stanc
+  testthat::local_mocked_bindings(
+    stanc = function(...) {
+      call_count <<- call_count + 1
+      real_stanc(...)
+    },
+    .package = "newstan"
+  )
+
+  code <- '
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+  '
+  mod <- stan_model(code = code, precompiled_headers = FALSE)
+  expect_true(mod$is_compiled())
+  expect_lte(call_count, 1L)
+
+  # A second compile of identical code in the same session is a cache hit:
+  # stanc() must not be invoked again.
+  mod2 <- stan_model(code = code, precompiled_headers = FALSE)
+  expect_true(mod2$is_compiled())
+  expect_lte(call_count, 1L)
+
+  # force_recompile = TRUE forces regeneration of the cached .cpp (and thus
+  # a fresh stanc() call) even though the hash is unchanged.
+  mod3 <- stan_model(
+    code = code,
+    precompiled_headers = FALSE,
+    force_recompile = TRUE
+  )
+  expect_true(mod3$is_compiled())
+  expect_equal(call_count, 2L)
+})
+
+test_that("changing external_cpp file contents (same path) changes model_hash and triggers a fresh compile", {
+  cache_root <- withr::local_tempdir()
+  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+  cache_dir <- getOption("newstan_cache_dir")
+
+  call_count <- 0
+  real_stanc <- stanc
+  testthat::local_mocked_bindings(
+    stanc = function(...) {
+      call_count <<- call_count + 1
+      real_stanc(...)
+    },
+    .package = "newstan"
+  )
+
+  external_cpp_dir <- withr::local_tempdir()
+  external_cpp_path <- file.path(external_cpp_dir, "external_mean.hpp")
+  writeLines(
+    c(
+      "#include <ostream>",
+      "",
+      "template <typename T__>",
+      "T__ external_mean(const T__& x, std::ostream* pstream__) {",
+      "  return x;",
+      "}"
+    ),
+    external_cpp_path
+  )
+
+  code <- paste(
+    "functions { real external_mean(real x); }",
+    "data { real x; }",
+    "parameters { real mu; }",
+    "model { mu ~ normal(external_mean(x), 1); }",
+    sep = "\n"
+  )
+
+  mod <- stan_model(
+    code = code,
+    external_cpp = external_cpp_path,
+    precompiled_headers = FALSE
+  )
+  expect_true(mod$is_compiled())
+  expect_equal(call_count, 1L)
+
+  cpp_files_before <- list.files(cache_dir, pattern = "[.]cpp$")
+  expect_length(cpp_files_before, 1L)
+
+  # Same path, different contents: the returned value doubles rather than
+  # passing `x` straight through, so the hash (keyed on file contents) must
+  # differ even though `external_cpp_path` is unchanged.
+  writeLines(
+    c(
+      "#include <ostream>",
+      "",
+      "template <typename T__>",
+      "T__ external_mean(const T__& x, std::ostream* pstream__) {",
+      "  return x + x;",
+      "}"
+    ),
+    external_cpp_path
+  )
+
+  mod2 <- stan_model(
+    code = code,
+    external_cpp = external_cpp_path,
+    precompiled_headers = FALSE
+  )
+  expect_true(mod2$is_compiled())
+  expect_equal(call_count, 2L)
+
+  cpp_files_after <- list.files(cache_dir, pattern = "[.]cpp$")
+  expect_length(cpp_files_after, 2L)
+})
+
 test_that("newstan_clear_cache() removes the models/pch cache dirs and a later compile recreates them", {
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)

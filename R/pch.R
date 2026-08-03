@@ -156,6 +156,29 @@
   identity
 }
 
+#' Return the on-disk path of the PCH currently memoized for `cppflags`.
+#'
+#' Reconstructs the exact memo key `.newstan_pch_flags()` uses for a given
+#' `cppflags` (always with `rebuild = FALSE`, matching that function's own
+#' key -- the memo represents steady-state resolved flags regardless of how
+#' they were resolved) and returns the associated PCH path, if any. Used by
+#' `.compile_stan_model_environment()` (R/stan_model.R) to check whether a
+#' just-failed compile's PCH is stale (and therefore worth rebuilding) without
+#' duplicating the digest key construction there.
+#'
+#' Returns `NA_character_` when no PCH is memoized for `cppflags` (either
+#' `.newstan_pch_flags()` was never called with these flags in this session,
+#' or it was and PCH was unavailable, e.g. no `make`).
+#'
+#' @keywords internal
+.newstan_pch_current <- function(cppflags) {
+  memo_key <- paste0(
+    "pch_flags:",
+    digest::digest(list(cppflags, rebuild = FALSE))
+  )
+  .newstan_memo[[memo_key]]$pch %||% NA_character_
+}
+
 #' Return flags that make sourceCpp use a cached model PCH.
 #'
 #' Precompiles `newstan/model_pch.hpp` (`src/include/model_pch.hpp`, mirrored

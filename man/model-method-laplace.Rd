@@ -19,6 +19,13 @@ abs-determinant of the Jacobian of the inverse transformation?}
 
 \item{calculate_lp}{(logical) Should the log density of the Laplace
 approximation be calculated?}
+
+\item{opencl_ids}{(integer vector) \code{c(platform_id, device_id)} identifying
+the OpenCL platform/device to run on. Only meaningful for a model
+compiled with \code{use_opencl = TRUE} (see \code{\link[=stan_model]{stan_model()}}); errors if the
+model was not compiled with OpenCL support. Defaults to \code{NULL}, meaning
+\code{select_opencl_device()} is never called and the platform/device baked
+in at compile time (0/0) is used.}
 }
 \value{
 A \code{\link{StanLaplace}} object containing approximate posterior draws.
