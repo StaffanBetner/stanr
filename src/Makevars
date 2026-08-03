@@ -42,6 +42,7 @@ $(OBJECTS): $(SUNDIALS_OBJECTS)
 $(SUNDIALS_OBJECTS): package
 
 package:
+	@../cleanup
 	@mkdir -p ../inst/include
 	@cp -Rf stan/src/stan ../inst/include/stan
 	@cp -Rf math/stan/. ../inst/include/stan
