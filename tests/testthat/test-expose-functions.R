@@ -104,18 +104,23 @@ test_that("array/nested-vector/int argument and return types", {
   )
 })
 
-test_that("tuple-returning functions are skipped with a warning", {
+test_that("tuple-returning functions are exposed with intact signatures", {
   cpp_code <- read_fixture("expose-fixture-tuple-skip.cpp")
 
-  expect_warning(
-    result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character()),
-    "unsupported types"
-  )
+  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
 
-  expect_equal(result$functions$name, "keep_me")
-  expect_false("two_things" %in% result$functions$name)
-  expect_no_match(result$wrapper_section, "std::tuple", fixed = TRUE)
-  expect_no_match(result$wrapper_section, "two_things", fixed = TRUE)
+  expect_equal(result$functions$name, c("two_things", "keep_me"))
+  expect_true("two_things" %in% result$functions$name)
+  expect_match(
+    result$wrapper_section,
+    "std::tuple<double, double> two_things(const double& a) {",
+    fixed = TRUE
+  )
+  expect_match(
+    result$wrapper_section,
+    "double keep_me(const double& a) {",
+    fixed = TRUE
+  )
 })
 
 test_that("overloaded Stan functions keep only the first, with a warning", {
@@ -160,12 +165,16 @@ test_that("a program with no [[stan::function]] markers errors", {
   )
 })
 
-test_that("a program whose only function is unsupported errors after all drops", {
+test_that("a program whose only function returns a tuple is exposed successfully", {
   cpp_code <- read_fixture("expose-fixture-tuple-only.cpp")
 
-  expect_error(
-    newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character()),
-    "two_things"
+  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
+
+  expect_equal(result$functions$name, "two_things")
+  expect_match(
+    result$wrapper_section,
+    "std::tuple<double, double> two_things(const double& a) {",
+    fixed = TRUE
   )
 })
 
@@ -218,6 +227,82 @@ functions {
 
   expect_equal(env$my_add(2, 3), 5)
   expect_equal(env$vec_add(c(1, 2), c(3, 4)), c(4, 6))
+})
+
+test_that("tuple/complex functions compile and round-trip through Rcpp marshalling", {
+  code <- "
+functions {
+  tuple(real, vector) split_stat(vector x) { return (mean(x), head(x, 2)); }
+  complex_vector rotate(complex_vector z, complex phase) { return z * phase; }
+  complex_matrix cmat_id(complex_matrix m) { return m; }
+  complex_row_vector crv_id(complex_row_vector v) { return v; }
+  array[] tuple(complex, real) mixed_out(tuple(complex_matrix, int) tm) {
+    return {(tm.1[1,1], 1.0), (tm.1[2,2], 2.0)};
+  }
+  real tup_arr_in(data array[] tuple(real, array[] int) v) {
+    real total = 0;
+    for (e in v) {
+      total += e.1;
+      for (j in e.2) {
+        total += j;
+      }
+    }
+    return total;
+  }
+  array[,] tuple(int, real) deep_id(array[,] tuple(int, real) v) { return v; }
+  complex czmul_rng(complex a) { return a * normal_rng(0, 1); }
+}
+"
+  env <- newstan:::.compile_standalone_functions_environment(code)
+
+  # tuple(real, vector) return: unnamed list, element 2 shaped as the
+  # declared vector.
+  expect_equal(env$split_stat(c(1, 2, 3)), list(2, c(1, 2)))
+
+  # complex_vector * complex scalar (elementwise rotation).
+  expect_equal(
+    env$rotate(c(1 + 2i, 3 - 1i), 1i),
+    c(-2 + 1i, 1 + 3i)
+  )
+
+  cm <- matrix(c(1 + 1i, 2 + 2i, 3 + 3i, 4 + 4i), nrow = 2)
+  expect_equal(env$cmat_id(cm), cm)
+
+  # complex_row_vector round-trips as a 1xn matrix -- the same shape
+  # RcppEigen already uses for a plain (real) row_vector.
+  crv <- c(1 + 1i, 2 + 2i)
+  expect_equal(env$crv_id(crv), matrix(crv, nrow = 1))
+
+  # tuple(complex_matrix, int) argument; array[] tuple(complex, real)
+  # return -- an unnamed list of unnamed lists (AoS), picking diagonal
+  # entries of the matrix slot and ignoring the int slot.
+  expect_equal(
+    env$mixed_out(list(cm, 7L)),
+    list(list(cm[1, 1], 1), list(cm[2, 2], 2))
+  )
+
+  # data-qualified array[] tuple(real, array[] int) argument: a list of
+  # tuple-shaped lists in, a plain scalar out.
+  expect_equal(
+    env$tup_arr_in(list(list(1.5, c(1L, 2L)), list(2.5, c(3L)))),
+    1.5 + 1 + 2 + 2.5 + 3
+  )
+
+  # array[,] tuple(int, real): list (over first index) of lists (over
+  # second index) of tuples -- exact round trip through an identity
+  # function.
+  deep_in <- list(
+    list(list(1L, 1.5), list(2L, 2.5)),
+    list(list(3L, 3.5), list(4L, 4.5))
+  )
+  expect_equal(env$deep_id(deep_in), deep_in)
+
+  # `_rng` function taking complex: reproducible with an explicit seed.
+  env$newstan_rng_set_seed(1L)
+  v1 <- env$czmul_rng(2 + 0i)
+  env$newstan_rng_set_seed(1L)
+  v2 <- env$czmul_rng(2 + 0i)
+  expect_equal(v1, v2)
 })
 
 test_that("compiling the same code twice without force_recompile reuses the cached .cpp file", {
@@ -696,4 +781,25 @@ model {
 
   expect_true(is.function(mod$functions$force_recompile_add))
   expect_equal(mod$functions$force_recompile_add(4, 5), 9)
+})
+
+test_that("compile_standalone = TRUE combined-TU model exposes a tuple function correctly", {
+  mod <- stan_model(
+    code = "
+functions {
+  tuple(real, real) combined_tuple_fn(real a) { return (a, a * 2); }
+}
+parameters {
+  real theta;
+}
+model {
+  theta ~ normal(0, 1);
+}
+",
+    compile_standalone = TRUE
+  )
+
+  expect_true(mod$is_compiled())
+  expect_true(is.function(mod$functions$combined_tuple_fn))
+  expect_equal(mod$functions$combined_tuple_fn(3), list(3, 6))
 })

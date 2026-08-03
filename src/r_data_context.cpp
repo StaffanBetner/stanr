@@ -81,17 +81,86 @@ r_data_context::r_data_context(Rcpp::List list) {
         }
         complexes.emplace_back(element.r, element.i);
       }
+      // `dims` here is the pre-trailing-2 vector: enclosing array dims (for
+      // a dotted tuple-slot leaf) or the plain declared dims (top-level).
+      const size_t pre_trailing_dims = dims.size();
       // Stan's var_context convention represents a complex scalar as a
       // final real/imaginary dimension of size two. vals_c() removes that
       // storage dimension and returns one std::complex per logical value.
       dims.push_back(2);
-      values_.emplace(name, value_entry{{}, std::move(complexes),
-                                        std::nullopt, std::move(dims)});
+
+      if (name.find('.') == std::string::npos) {
+        // Top-level (undotted) complex entry: today's dense storage.
+        values_.emplace(name, value_entry{{}, std::move(complexes),
+                                          std::nullopt, std::move(dims)});
+      } else {
+        // Tuple-slot complex leaf (dotted name; Part B/A4 of the
+        // complex-tuple interop plan): stanc 2.39's generated reader
+        // consumes vals_c() for a tuple-slot complex leaf in per-enclosing-
+        // array-element windows that are only half used. Build that
+        // windowed layout here so the dotted flat vector produced by the R
+        // flattener (Part B) lines up with what the generated reader
+        // actually indexes.
+        //
+        // k = count of enclosing array dims (read from the
+        // `newstan_array_dims` attribute the R flattener attaches; default
+        // to all pre-trailing dims -- m = 1 -- when absent, which is the
+        // manual dotted-name escape hatch's documented limitation).
+        size_t k = pre_trailing_dims;
+        SEXP array_dims_attr
+            = Rf_getAttrib(value, Rf_install("newstan_array_dims"));
+        if (!Rf_isNull(array_dims_attr)) {
+          if (Rf_length(array_dims_attr) != 1
+              || !(Rf_isInteger(array_dims_attr)
+                   || Rf_isReal(array_dims_attr))) {
+            Rcpp::stop("'newstan_array_dims' attribute for variable '" + name
+                       + "' must be a length-1 integer or double.");
+          }
+          const double k_val = Rf_isInteger(array_dims_attr)
+              ? static_cast<double>(INTEGER(array_dims_attr)[0])
+              : REAL(array_dims_attr)[0];
+          if (!std::isfinite(k_val) || k_val < 0
+              || std::trunc(k_val) != k_val) {
+            Rcpp::stop("Invalid 'newstan_array_dims' attribute for variable '"
+                       + name + "'.");
+          }
+          k = static_cast<size_t>(k_val);
+        }
+        if (k > pre_trailing_dims) {
+          Rcpp::stop("'newstan_array_dims' attribute for variable '" + name
+                     + "' exceeds its declared dimensions.");
+        }
+
+        size_t enclosing_elements = 1;
+        for (size_t d = 0; d < k; ++d) enclosing_elements *= dims[d];
+        if (enclosing_elements == 0) {
+          Rcpp::stop("Variable '" + name
+                     + "' has a zero-size enclosing array dimension.");
+        }
+        if (complexes.size() % enclosing_elements != 0) {
+          Rcpp::stop(
+              "Variable '" + name + "' has " + std::to_string(complexes.size())
+              + " complex value(s), not divisible by the "
+              + std::to_string(enclosing_elements) + " enclosing array "
+                "element(s) implied by its 'newstan_array_dims' attribute.");
+        }
+        const size_t m = complexes.size() / enclosing_elements;
+        const size_t n = enclosing_elements;
+        std::vector<std::complex<double>> padded(2 * m * n);
+        for (size_t e = 0; e < n; ++e) {
+          for (size_t j = 0; j < m; ++j) {
+            padded[2 * m * e + j] = complexes[m * e + j];
+          }
+        }
+        values_.emplace(name, value_entry{{}, std::move(padded),
+                                          std::nullopt, std::move(dims)});
+      }
     } else {
       Rcpp::stop("Variable '" + name
                  + "' must be an integer, numeric, or complex atomic "
-                   "vector or array; tuple/list values are not yet "
-                   "supported.");
+                   "vector or array. A list value here means R-side tuple "
+                   "flattening was bypassed, or '" + name
+                 + "' is not declared as a tuple.");
     }
   }
 }

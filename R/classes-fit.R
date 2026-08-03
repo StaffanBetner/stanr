@@ -266,39 +266,56 @@ StanFit <- R6Class(
       }
       invisible(NULL)
     },
-    relist_constrained = function(flat, skeleton) {
-      flat_names <- .newstan_bracket_names(names(flat))
-      result <- lapply(names(skeleton), function(name) {
-        indices <- flat_names == name |
-          startsWith(flat_names, paste0(name, "["))
-        values <- unname(flat[indices])
-        template <- skeleton[[name]]
-        if (!is.null(dim(template))) {
-          array(values, dim = dim(template))
-        } else if (length(template) == 1L) {
-          values[[1]]
-        } else {
-          values
-        }
-      })
-      names(result) <- names(skeleton)
-      result
-    },
-    metadata_skeleton = function(
-      metadata,
+    relist_constrained = function(
+      flat,
+      sized,
       transformed_parameters,
       generated_quantities
     ) {
-      keep <- metadata$stages == "parameter" |
-        (isTRUE(transformed_parameters) &
-          metadata$stages == "transformed_parameter") |
-        (isTRUE(generated_quantities) &
-          metadata$stages == "generated_quantity")
-      result <- lapply(which(keep), function(i) {
-        dims <- metadata$dimensions[[i]]
-        if (!length(dims)) NA_real_ else array(NA_real_, dim = dims)
+      # Positional reader over the flat native vector `model_constrain`
+      # returns (full native order -- A5's flat constrained-draws order,
+      # distinct from Part B's input-side blocked-AoS order); no name
+      # matching (A6: dotted metadata names vs colon-separated flat names
+      # never line up, which is exactly why the old name-matching
+      # implementation broke on tuples).
+      keep <- vapply(
+        sized,
+        .newstan_sized_stage_kept,
+        logical(1),
+        transformed_parameters = transformed_parameters,
+        generated_quantities = generated_quantities
+      )
+      kept <- sized[keep]
+      reader <- .newstan_flat_reader(as.numeric(unname(flat)))
+      result <- lapply(kept, function(entry) {
+        .newstan_consume_node(entry$node, reader)
       })
-      names(result) <- metadata$names[keep]
+      if (reader$position() != length(flat)) {
+        stop(
+          "newstan internal error: the constrained output length (",
+          length(flat), ") did not match the expected variable structure ",
+          "(consumed ", reader$position(), ").",
+          call. = FALSE
+        )
+      }
+      names(result) <- names(kept)
+      result
+    },
+    metadata_skeleton = function(
+      sized,
+      transformed_parameters,
+      generated_quantities
+    ) {
+      keep <- vapply(
+        sized,
+        .newstan_sized_stage_kept,
+        logical(1),
+        transformed_parameters = transformed_parameters,
+        generated_quantities = generated_quantities
+      )
+      kept <- sized[keep]
+      result <- lapply(kept, function(entry) .newstan_skeleton_node(entry$node))
+      names(result) <- names(kept)
       result
     }
   ),
@@ -642,11 +659,14 @@ fit_constrain_variables <- function(
     as.logical(transformed_parameters),
     as.logical(generated_quantities)
   )
-  skeleton <- self$variable_skeleton(
+  metadata <- private$native_call("model_param_metadata")
+  sized <- .newstan_sized_structure(private$model_, metadata)
+  private$relist_constrained(
+    flat,
+    sized,
     transformed_parameters,
     generated_quantities
   )
-  private$relist_constrained(flat, skeleton)
 }
 StanFit$set("public", "constrain_variables", fit_constrain_variables)
 
@@ -656,6 +676,13 @@ fit_unconstrain_variables <- function(variables) {
       "`variables` must be a named list of constrained values.",
       call. = FALSE
     )
+  }
+  # Tuple-typed entries arrive as bare R lists (Part C); flatten them into
+  # the dotted per-leaf entries `r_data_context` expects (Part B) before the
+  # native call. Gate the stanc-info cost behind a cheap list check.
+  if (any(vapply(variables, is.list, logical(1)))) {
+    declared <- private$model_$variables()
+    variables <- .newstan_flatten_tuple_values(variables, declared$parameters)
   }
   tryCatch(
     private$native_call("model_unconstrain", variables),
@@ -743,8 +770,9 @@ fit_variable_skeleton <- function(
     "generated_quantities"
   )
   metadata <- private$native_call("model_param_metadata")
+  sized <- .newstan_sized_structure(private$model_, metadata)
   private$metadata_skeleton(
-    metadata,
+    sized,
     transformed_parameters = transformed_parameters,
     generated_quantities = generated_quantities
   )

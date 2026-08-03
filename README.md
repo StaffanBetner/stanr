@@ -447,6 +447,47 @@ list(
 #> 1         0 1.83245 -4.34465    -4.34465 2.2707e-09
 ```
 
+## Tuples and Complex Numbers
+
+Stan `tuple(...)` values map to/from **unnamed** R lists (one element
+per slot; arrays of tuples become lists of such lists), and `complex` /
+`complex_vector` / `complex_row_vector` / `complex_matrix` map to/from
+R’s native complex type – for `data =`, `init =`, draws, and exposed
+functions alike.
+
+``` r
+tuple_complex_code <- "
+functions {
+  tuple(real, vector) split_stat(vector x) {
+    return (mean(x), head(x, 2));
+  }
+  complex_vector rotate(complex_vector z, complex phase) {
+    return z * phase;
+  }
+}
+"
+
+tc_mod <- stan_model(
+  code = tuple_complex_code,
+  model_name = "tuple_complex",
+  compile = FALSE
+)
+tc_mod$expose_stan_functions()
+
+# tuple(real, vector) comes back as an unnamed list: the scalar slot, then
+# the vector slot.
+tc_mod$functions$split_stat(c(1, 2, 3, 4))
+#> [[1]]
+#> [1] 2.5
+#> 
+#> [[2]]
+#> [1] 1 2
+
+# complex_vector arguments/returns round-trip as native R complex vectors.
+tc_mod$functions$rotate(c(1 + 2i, 3 - 1i), 1i)
+#> [1] -2+1i  1+3i
+```
+
 ## Stan Compilation Helpers
 
 `stanc()` compiles Stan code to C++ and returns the generated C++ source

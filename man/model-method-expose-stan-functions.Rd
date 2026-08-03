@@ -44,11 +44,12 @@ R's own RNG stream (so calling \code{set.seed()} before exposing makes draws
 reproducible); passing \code{seed} explicitly to a call reseeds the
 generator immediately before that call.
 
-A function whose argument or return types can't be represented in R
-(e.g. a Stan \code{tuple}) is skipped, with a warning naming it; the
-program's other functions are still exposed. An overloaded Stan
-function (same name, different signature) exposes only the
-first-defined overload, also with a warning.
+Stan \code{tuple(...)} arguments/returns map to/from \strong{unnamed} R lists (one
+element per slot; arrays of tuples become lists of such lists), and
+\code{complex} / \code{complex_vector} / \code{complex_row_vector} / \code{complex_matrix}
+map to/from R's native complex type. An overloaded Stan function (same
+name, different signature) exposes only the first-defined overload, with
+a warning.
 }
 \section{Caching}{
  Compiled functions are cached on disk the same way

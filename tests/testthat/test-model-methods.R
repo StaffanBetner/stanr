@@ -419,3 +419,286 @@ test_that("ensure_native()'s probe is invoked exactly once across N consecutive 
 
   expect_equal(call_count, 1)
 })
+
+# --- Phase 3 (complex-tuple interop plan): variable_skeleton()/               --
+# constrain_variables() over tuple- and complex-typed variables, plus         --
+# regression cover for the bracket-name paths (unconstrain_draws/optimize/    --
+# laplace/generate_quantities) that Phase 3 doesn't touch but that consume    --
+# the same fit. Reuses the two battery models already compiled for Phase 2's --
+# test-tuple-data.R (test-models/tuple_complex_battery.stan and              --
+# tuple_complex_unbounded.stan) via the shared `test_model()` cache.         --
+
+test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tuple/complex shapes exactly", {
+  # Unbounded parameters (`tuple(real, vector[2]) t; complex z;`) make
+  # unconstrain -> constrain the identity transform, so this is a property
+  # test, not just a shape check.
+  mod <- test_model("tuple_complex_unbounded")
+  fit <- mod$sample(
+    data = list(),
+    iter_warmup = 1,
+    iter_sampling = 1,
+    chains = 1,
+    seed = 11,
+    show_messages = FALSE,
+    init = list(t = list(0, c(0, 0)), z = 0 + 0i)
+  )
+  expect_equal(fit$return_codes(), 0L)
+
+  x <- list(t = list(1.25, c(-0.5, 3)), z = 2 - 1.5i)
+  upars <- fit$unconstrain_variables(x)
+  back <- fit$constrain_variables(upars)
+
+  expect_named(back, c("t", "z"))
+  expect_equal(back$t[[1]], x$t[[1]], tolerance = 1e-10)
+  expect_equal(as.numeric(back$t[[2]]), x$t[[2]], tolerance = 1e-10)
+  expect_equal(back$z, x$z, tolerance = 1e-10)
+  # Part C canonical shape: a single-dim tuple-slot leaf is a bare vector,
+  # not a 1-d array (distinct from the legacy top-level-real convention).
+  expect_null(dim(back$t[[2]]))
+})
+
+test_that("variable_skeleton() has the exact golden nested-list/array shape for the tuple/complex battery model", {
+  mod <- test_model("tuple_complex_battery")
+  fit <- mod$sample(
+    data = list(
+      zd = 1 + 2i,
+      zv = c(1 + 1i, 2 - 2i),
+      zm = matrix(c(1 + 1i, 2 + 2i, 3 + 3i, 4 + 4i), 2, 2),
+      za = c(5 + 5i, 6 - 6i),
+      td = list(1.5, c(2.5, 3.5)),
+      tad = list(list(10L, 1 + 1i), list(20L, 2 + 2i)),
+      acv = list(
+        list(complex(real = 1:3, imaginary = 11:13), 100),
+        list(complex(real = 4:6, imaginary = 14:16), 200)
+      ),
+      t2d = list(
+        list(list(11L, 1.1), list(12L, 1.2)),
+        list(list(21L, 2.1), list(22L, 2.2))
+      ),
+      nt = list(999, list(list(1, 1 + 2i), list(2, 3 + 4i)))
+    ),
+    iter_warmup = 1,
+    iter_sampling = 1,
+    chains = 1,
+    seed = 12,
+    show_messages = FALSE
+  )
+  expect_equal(fit$return_codes(), 0L)
+
+  skeleton <- fit$variable_skeleton()
+
+  expected <- list(
+    x = NA_real_,
+    zd_out = NA_complex_,
+    zv_out = rep(NA_complex_, 2),
+    zm_out = array(NA_complex_, dim = c(2, 2)),
+    za_out = rep(NA_complex_, 2),
+    td_out = list(NA_real_, rep(NA_real_, 2)),
+    tad_out = list(
+      list(NA_real_, NA_complex_),
+      list(NA_real_, NA_complex_)
+    ),
+    acv_out = list(
+      list(rep(NA_complex_, 3), NA_real_),
+      list(rep(NA_complex_, 3), NA_real_)
+    ),
+    t2d_out = list(
+      list(list(NA_real_, NA_real_), list(NA_real_, NA_real_)),
+      list(list(NA_real_, NA_real_), list(NA_real_, NA_real_))
+    ),
+    nt_out = list(
+      NA_real_,
+      list(
+        list(NA_real_, NA_complex_),
+        list(NA_real_, NA_complex_)
+      )
+    )
+  )
+  expect_equal(skeleton, expected)
+
+  # `x` is the only `parameter`-stage variable; everything else lives in
+  # `generated quantities` (the battery model has no `transformed
+  # parameters` block).
+  expect_named(fit$variable_skeleton(FALSE, FALSE), "x")
+})
+
+test_that("unconstrain_draws() still works on a tuple/complex-model fit (regression: bracket-name path untouched by Phase 3)", {
+  mod <- test_model("tuple_complex_unbounded")
+  fit <- mod$sample(
+    data = list(),
+    iter_warmup = 2,
+    iter_sampling = 2,
+    chains = 1,
+    seed = 13,
+    show_messages = FALSE,
+    init = list(t = list(0, c(0, 0)), z = 0 + 0i)
+  )
+  expect_equal(fit$return_codes(), 0L)
+
+  unconstrained <- fit$unconstrain_draws(format = "draws_matrix")
+  expect_s3_class(unconstrained, "draws_matrix")
+  expect_identical(nrow(unconstrained), 2L)
+
+  expected_names <- .newstan_bracket_names(
+    fit$.__enclos_env__$private$native_call("model_unconstrained_names")
+  )
+  expect_identical(posterior::variables(unconstrained), expected_names)
+  expect_false(anyNA(unconstrained))
+})
+
+test_that("$optimize() and $laplace() succeed on a tuple/complex model (regression: bracket-name paths untouched by Phase 3)", {
+  mod <- test_model("tuple_complex_unbounded")
+  init <- list(t = list(0, c(0, 0)), z = 0 + 0i)
+
+  fit_opt <- mod$optimize(
+    data = list(),
+    seed = 14,
+    init = init,
+    refresh = 0,
+    show_messages = FALSE,
+    show_exceptions = FALSE
+  )
+  expect_s3_class(fit_opt, "StanMLE")
+  # Every parameter has a std_normal() prior and no data -- the MLE is 0 for
+  # every unconstrained (and, since these parameters are unbounded, every
+  # constrained) dimension.
+  expect_equal(unname(fit_opt$mle()), rep(0, 5), tolerance = 1e-4)
+  # Bracket names derived from the native call, never hand-typed (house
+  # rule: `.newstan_bracket_names` is load-bearing and untouched by Phase 3).
+  expected_names <- .newstan_bracket_names(
+    fit_opt$.__enclos_env__$private$native_call(
+      "model_constrained_names",
+      FALSE,
+      FALSE
+    )
+  )
+  expect_named(fit_opt$mle(), expected_names)
+
+  fit_lap <- mod$laplace(
+    data = list(),
+    seed = 15,
+    mode = fit_opt,
+    draws = 50,
+    refresh = 0,
+    show_messages = FALSE,
+    show_exceptions = FALSE
+  )
+  expect_s3_class(fit_lap, "StanLaplace")
+  draws <- fit_lap$draws(format = "draws_matrix")
+  expect_identical(nrow(draws), 50L)
+  expect_true(all(expected_names %in% posterior::variables(draws)))
+})
+
+test_that("generate_quantities() runs on draws from a tuple/complex-model $sample() fit", {
+  mod <- test_model("tuple_complex_battery")
+  data <- list(
+    zd = 1 + 2i,
+    zv = c(1 + 1i, 2 - 2i),
+    zm = matrix(c(1 + 1i, 2 + 2i, 3 + 3i, 4 + 4i), 2, 2),
+    za = c(5 + 5i, 6 - 6i),
+    td = list(1.5, c(2.5, 3.5)),
+    tad = list(list(10L, 1 + 1i), list(20L, 2 + 2i)),
+    acv = list(
+      list(complex(real = 1:3, imaginary = 11:13), 100),
+      list(complex(real = 4:6, imaginary = 14:16), 200)
+    ),
+    t2d = list(
+      list(list(11L, 1.1), list(12L, 1.2)),
+      list(list(21L, 2.1), list(22L, 2.2))
+    ),
+    nt = list(999, list(list(1, 1 + 2i), list(2, 3 + 4i)))
+  )
+  fit <- mod$sample(
+    data = data,
+    iter_warmup = 1,
+    iter_sampling = 2,
+    chains = 1,
+    seed = 16,
+    show_messages = FALSE
+  )
+  expect_equal(fit$return_codes(), 0L)
+
+  gq <- mod$generate_quantities(
+    fitted_params = fit,
+    data = data,
+    seed = 17,
+    show_messages = FALSE
+  )
+  expect_s3_class(gq, "StanGQ")
+
+  gq_draws <- as.data.frame(gq$draws(format = "draws_df"))
+  fit_draws <- as.data.frame(fit$draws(format = "draws_df"))
+  # Derive the "*_out" column names from the actual draws (never hand-typed
+  # bracket strings, per house rule -- `.newstan_bracket_names` is
+  # load-bearing and untouched by Phase 3). The echoed "*_out" quantities
+  # are pure functions of `data` (not of the sampled parameter `x`), so
+  # re-running generated quantities from the fit's own draws must reproduce
+  # the fit's own values exactly, for every echoed column.
+  out_names <- posterior::variables(gq$draws(format = "draws_df"))
+  out_names <- out_names[
+    grepl("^(zd|zv|zm|za|td|tad|acv|t2d|nt)_out", out_names)
+  ]
+  expect_true(length(out_names) > 0)
+  expect_setequal(out_names, colnames(fit_draws)[
+    grepl("^(zd|zv|zm|za|td|tad|acv|t2d|nt)_out", colnames(fit_draws))
+  ])
+  expect_equal(
+    unname(vapply(out_names, function(nm) as.numeric(gq_draws[1, nm]), numeric(1))),
+    unname(vapply(out_names, function(nm) as.numeric(fit_draws[1, nm]), numeric(1)))
+  )
+})
+
+test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/complex-in-tuple-array values exactly (not just shape)", {
+  # The golden-shape test above exercises `.newstan_skeleton_node()` (no
+  # values), and the generate_quantities()/draws test above exercises the
+  # pre-existing, Phase-3-untouched `$draws()` bracket-name path -- neither
+  # calls `.newstan_consume_node()`, the new element-major reconstruction
+  # `constrain_variables()` actually uses. This test does, on every
+  # array-of-tuple shape the battery model declares (`acv_out`: complex
+  # inside a 1-D tuple array; `t2d_out`: a 2-D tuple array; `tad_out`: a
+  # simple 1-D tuple array; `nt_out`: a tuple nesting a 1-D tuple array),
+  # checking reconstructed *values* land at the exact right position, not
+  # just that the shape matches.
+  mod <- test_model("tuple_complex_battery")
+  data <- list(
+    zd = 1 + 2i,
+    zv = c(1 + 1i, 2 - 2i),
+    zm = matrix(c(1 + 1i, 2 + 2i, 3 + 3i, 4 + 4i), 2, 2),
+    za = c(5 + 5i, 6 - 6i),
+    td = list(1.5, c(2.5, 3.5)),
+    tad = list(list(10L, 1 + 1i), list(20L, 2 + 2i)),
+    acv = list(
+      list(complex(real = 1:3, imaginary = 11:13), 100),
+      list(complex(real = 4:6, imaginary = 14:16), 200)
+    ),
+    t2d = list(
+      list(list(11L, 1.1), list(12L, 1.2)),
+      list(list(21L, 2.1), list(22L, 2.2))
+    ),
+    nt = list(999, list(list(1, 1 + 2i), list(2, 3 + 4i)))
+  )
+  fit <- mod$sample(
+    data = data,
+    iter_warmup = 1,
+    iter_sampling = 1,
+    chains = 1,
+    seed = 18,
+    show_messages = FALSE
+  )
+  expect_equal(fit$return_codes(), 0L)
+
+  # The generated quantities are pure echoes of `data`, independent of `x`;
+  # any valid unconstrained `x` reproduces them exactly via constrain_variables().
+  upars <- fit$unconstrain_variables(list(x = 0))
+  back <- fit$constrain_variables(upars)
+
+  expect_equal(back$acv_out, data$acv)
+  expect_equal(back$t2d_out, data$t2d)
+  expect_equal(back$tad_out, data$tad)
+  expect_equal(back$nt_out, data$nt)
+  expect_equal(back$td_out, data$td)
+  expect_equal(back$zd_out, data$zd)
+  expect_equal(back$zv_out, data$zv)
+  expect_equal(back$zm_out, data$zm)
+  expect_equal(back$za_out, data$za)
+})

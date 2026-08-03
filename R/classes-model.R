@@ -148,6 +148,20 @@
   started <- proc.time()[["elapsed"]]
   seed <- .newstan_seed(seed)
   resolved_init <- if (!is.null(init)) resolve_init(init)
+  # Tuple-typed data/init values arrive as bare R lists (Part C); flatten them
+  # into the dotted per-leaf entries `r_data_context` expects (Part B) before
+  # they reach any native call. `self$variables()` pays the stanc-info cost,
+  # so gate it behind a cheap check for any list-valued entry.
+  has_list <- function(x) any(vapply(x, is.list, logical(1)))
+  if (has_list(data) || (!is.null(resolved_init) && has_list(resolved_init$values))) {
+    declared <- self$variables()
+    data <- .newstan_flatten_tuple_values(data, declared$data)
+    if (!is.null(resolved_init)) {
+      resolved_init$values <- .newstan_flatten_tuple_values(
+        resolved_init$values, declared$parameters
+      )
+    }
+  }
   model <- self$new_model(data, seed)
   native_args <- native_args_fn(seed, resolved_init, model)
   result <- self$run_model(model, native_args)
@@ -697,11 +711,12 @@ StanModel$set("private", "select_opencl", stan_model_select_opencl)
 #'   reproducible); passing `seed` explicitly to a call reseeds the
 #'   generator immediately before that call.
 #'
-#'   A function whose argument or return types can't be represented in R
-#'   (e.g. a Stan `tuple`) is skipped, with a warning naming it; the
-#'   program's other functions are still exposed. An overloaded Stan
-#'   function (same name, different signature) exposes only the
-#'   first-defined overload, also with a warning.
+#'   Stan `tuple(...)` arguments/returns map to/from **unnamed** R lists (one
+#'   element per slot; arrays of tuples become lists of such lists), and
+#'   `complex` / `complex_vector` / `complex_row_vector` / `complex_matrix`
+#'   map to/from R's native complex type. An overloaded Stan function (same
+#'   name, different signature) exposes only the first-defined overload, with
+#'   a warning.
 #'
 #' @param global (logical) Should the exposed functions also be assigned
 #'   into the global environment? The default, `FALSE`, only populates
@@ -772,16 +787,10 @@ StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 #'   No-U-Turn Sampler (NUTS) to draw from the posterior distribution.
 #'   Returns a [`StanMCMC`] object.
 #'
-#' @param data (named list) Values for all or part of the data `block` in the
-#'   Stan program.
+#' @template param-data
 #' @param seed (integer) The random seed for reproducibility.
 #' @param refresh (integer) How often (in iterations) to print progress.
-#' @param init Initial values for parameters. Either a non-negative number,
-#'   used as the range of CmdStan-style random initialization
-#'   (`Uniform(-init, init)` on the unconstrained scale; the default is 2),
-#'   or a named list / named numeric vector of constrained parameter values.
-#'   Supplied values are shared by all chains; parameters not covered by the
-#'   supplied values are randomly initialized with the default range.
+#' @template param-init
 #' @param chains (integer) The number of MCMC chains.
 #' @param chain_ids (integer vector) The IDs for each chain.
 #' @param num_threads (integer) The total number of threads to use across all
@@ -1060,6 +1069,8 @@ StanModel$set("public", "sample", stan_model_sample)
 #'   `"optimize"` method to find the maximum a posteriori (MAP) estimate or
 #'   maximum likelihood estimate (MLE). Returns a [`StanMLE`] object.
 #'
+#' @template param-data
+#' @template param-init
 #' @param algorithm (string) The optimization algorithm: `"lbfgs"`, `"bfgs"`,
 #'   or `"newton"`.
 #' @param jacobian (logical) Should the log density be adjusted by the
@@ -1212,6 +1223,8 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #'   `"laplace"` method to draw from a Gaussian approximation to the posterior
 #'   centered at the mode. Returns a [`StanLaplace`] object.
 #'
+#' @template param-data
+#' @template param-init
 #' @param mode A numeric vector of parameter values at the mode, or a
 #'   [`StanMLE`] object from [`$optimize()`][model-method-optimize]. If `NULL`,
 #'   optimization is run first.
@@ -1388,6 +1401,8 @@ StanModel$set("public", "laplace", stan_model_laplace)
 #'   Variational Inference (ADVI) to approximate the posterior distribution.
 #'   Returns a [`StanVB`] object.
 #'
+#' @template param-data
+#' @template param-init
 #' @param algorithm (string) The variational inference algorithm: `"meanfield"`
 #'   or `"fullrank"`.
 #' @param iter (integer) The number of ADVI iterations.
@@ -1535,6 +1550,8 @@ StanModel$set("public", "variational", stan_model_variational)
 #'   approach to approximate the posterior distribution. Returns a
 #'   [`StanPathfinder`] object.
 #'
+#' @template param-data
+#' @template param-init
 #' @param num_paths (integer) The number of paths to use.
 #' @param single_path_draws (integer) Number of draws per path.
 #' @param draws (integer) Total number of draws from the approximation.
@@ -1688,6 +1705,7 @@ StanModel$set("public", "pathfinder", stan_model_pathfinder)
 #' @param fitted_params A [`StanFit`] object, or anything accepted by
 #'   [posterior::as_draws_matrix()], containing draws with every model
 #'   parameter present by name (e.g. `beta[1]`, not a positional column).
+#' @template param-data
 #' @param num_threads (integer) The total number of threads to use.
 #' @template param-opencl_ids
 #'

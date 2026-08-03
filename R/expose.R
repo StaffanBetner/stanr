@@ -39,7 +39,6 @@
   }
 
   wrappers <- list()
-  dropped_unsupported <- character()
 
   for (i in seq_along(marker_idx)) {
     start <- marker_idx[[i]] + 1L
@@ -88,13 +87,6 @@
     before_paren <- trimws(substr(signature, 1L, paren_pos - 1L))
     name <- regmatches(before_paren, regexpr("[A-Za-z0-9_]+$", before_paren))
 
-    if (
-      grepl("std::tuple", signature, fixed = TRUE) ||
-        grepl("std::complex", signature, fixed = TRUE)
-    ) {
-      dropped_unsupported <- c(dropped_unsupported, name)
-      next
-    }
     if (name %in% reserved_names) {
       stop(
         "Stan function `",
@@ -139,25 +131,6 @@
     )
   }
 
-  if (length(wrappers) == 0L) {
-    stop(
-      "None of this Stan program's function(s) (",
-      paste(dropped_unsupported, collapse = ", "),
-      ") could be exposed as R functions: all use unsupported types ",
-      "(std::tuple / std::complex).",
-      call. = FALSE
-    )
-  }
-
-  if (length(dropped_unsupported)) {
-    warning(
-      "Stan function(s) using unsupported types (std::tuple / std::complex) ",
-      "were not exposed: ",
-      paste(dropped_unsupported, collapse = ", "),
-      call. = FALSE
-    )
-  }
-
   surv_names <- vapply(wrappers, `[[`, character(1), "name")
   surv_is_rng <- vapply(wrappers, `[[`, logical(1), "is_rng")
 
@@ -173,6 +146,10 @@
   # vector/matrix/row_vector args or returns are exported as
   # `Eigen::Matrix<...>`, and only RcppEigen.h provides the `Rcpp::as()`/
   # `Rcpp::wrap()` specializations that marshal those to/from SEXP.
+  # newstan/rcpp_tuple_interop.hpp adds the Rcpp::wrap()/Exporter overloads
+  # for std::tuple (and std::vector<tuple> nestings) that Stan's tuple
+  # wrappers need; it must come after RcppEigen.h/Rcpp.h (both TU modes
+  # satisfy this -- see Part A7 of the interop plan).
   # The `Rcpp::depends` attributes (matching inst/stan_model.cpp's own) are
   # what let `Rcpp::sourceCpp()` resolve RcppEigen/BH/RcppParallel include
   # paths itself; harmless if this ends up appended after inst/stan_model.cpp
@@ -180,6 +157,7 @@
   prelude <- paste(
     c(
       "#include <RcppEigen.h>",
+      "#include <newstan/rcpp_tuple_interop.hpp>",
       "// [[Rcpp::depends(BH)]]",
       "// [[Rcpp::depends(RcppEigen)]]",
       "// [[Rcpp::depends(RcppParallel)]]",

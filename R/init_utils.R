@@ -17,7 +17,7 @@ resolve_init <- function(init) {
   if (is.list(init)) {
     return(list(radius = 2, values = init))
   }
-  if (is.numeric(init)) {
+  if (is.numeric(init) || is.complex(init)) {
     if (is.null(names(init)) || any(!nzchar(names(init)))) {
       stop(
         "Numeric init must be a named vector of constrained parameters.",

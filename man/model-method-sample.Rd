@@ -6,7 +6,32 @@
 \title{Run MCMC sampling}
 \arguments{
 \item{data}{(named list) Values for all or part of the data \code{block} in the
-Stan program.}
+Stan program. Each element is named after the corresponding Stan
+variable and shaped as follows:\tabular{ll}{
+   Stan type \tab R shape \cr
+   \code{complex} \tab complex scalar (e.g. \code{1+2i}) \cr
+   \code{complex_vector[n]}, \code{complex_row_vector[n]}, \verb{array[n] complex} \tab complex vector of length \code{n} \cr
+   \code{complex_matrix[r, c]} \tab complex matrix, \code{r} x \code{c} \cr
+   \code{tuple(T1, ..., Tk)} \tab \strong{unnamed} list of length \code{k}, element \code{j} shaped as \code{Tj} \cr
+   \verb{array[n] tuple(...)} \tab list of \code{n} tuple-shaped lists \cr
+   \verb{array[n, m] tuple(...)} \tab list (over the first index) of lists (over the second index) of tuples \cr
+}
+
+
+Real-valued input is accepted wherever a \code{complex} type is declared --
+it is coerced automatically, including inside tuple slots. All other
+Stan types use their ordinary R representation (numeric/integer scalars,
+vectors, matrices, arrays).
+
+As a power-user escape hatch, tuple variables can instead be supplied
+pre-flattened using dotted names (e.g. \code{list(t.1 = ..., t.2 = ...)} for
+a tuple \code{t}), bypassing the list-shape conversion above; this is not the
+primary documented path. One caveat applies: a dotted entry for a
+\code{complex} tuple slot that omits the internal \code{newstan_array_dims}
+attribute is assumed to hold exactly one complex value per enclosing
+array element, which is only correct when that slot is itself a plain
+(non-container) \code{complex} -- for anything else (e.g. a
+\code{complex_vector} tuple slot), use the list shapes above instead.}
 
 \item{seed}{(integer) The random seed for reproducibility.}
 
@@ -17,7 +42,10 @@ used as the range of CmdStan-style random initialization
 (\code{Uniform(-init, init)} on the unconstrained scale; the default is 2),
 or a named list / named numeric vector of constrained parameter values.
 Supplied values are shared by all chains; parameters not covered by the
-supplied values are randomly initialized with the default range.}
+supplied values are randomly initialized with the default range. A named
+list may include tuple-shaped list entries and R complex values for
+\code{tuple(...)}/\code{complex} parameters, using the same canonical shapes
+(and the same dotted-name escape hatch) documented for \code{data}.}
 
 \item{chains}{(integer) The number of MCMC chains.}
 
