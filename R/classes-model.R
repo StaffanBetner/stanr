@@ -1,223 +1,3 @@
-`%||%` <- function(x, y) if (is.null(x)) y else x
-
-.newstan_flag <- function(x, name) {
-  if (!is.logical(x) || length(x) != 1L || is.na(x)) {
-    stop("`", name, "` must be TRUE or FALSE.", call. = FALSE)
-  }
-  x
-}
-
-.newstan_int <- function(x, name, min = 0L) {
-  if (
-    !is.numeric(x) ||
-      length(x) != 1L ||
-      is.na(x) ||
-      x != floor(x) ||
-      x < min ||
-      x > .Machine$integer.max
-  ) {
-    stop("`", name, "` must be a single integer >= ", min, ".", call. = FALSE)
-  }
-  as.integer(x)
-}
-
-# Parses `cpp_options` into an ordered list of `list(name, op, value)`
-# assignments, mirroring the semantics of lines in a Makevars file: a named
-# list element is an overriding (`=`) assignment, and so is an unnamed string
-# written as `"<NAME> = <value>"`; an unnamed string written as
-# `"<NAME> += <value>"` is an appending assignment. Entries are returned in
-# the order given -- a later assignment to the same name is meant to take
-# effect after an earlier one, exactly as repeated lines in a Makevars file
-# would (so, unlike a plain named list, the same name may legitimately appear
-# more than once, e.g. an overriding `CXXFLAGS = "-O3"` followed by an
-# appending `"CXXFLAGS += -Wall"`).
-.newstan_parse_cpp_options <- function(cpp_options) {
-  if (!is.list(cpp_options)) {
-    stop("`cpp_options` must be a list.", call. = FALSE)
-  }
-  if (!length(cpp_options)) {
-    return(list())
-  }
-  nms <- names(cpp_options)
-  if (is.null(nms)) {
-    nms <- rep("", length(cpp_options))
-  }
-  nms[is.na(nms)] <- ""
-  lapply(seq_along(cpp_options), function(i) {
-    nm <- nms[[i]]
-    value <- cpp_options[[i]]
-    if (nzchar(nm)) {
-      if (
-        !(is.character(value) || is.logical(value) || is.numeric(value)) ||
-          length(value) != 1L ||
-          is.na(value)
-      ) {
-        stop(
-          "`cpp_options` values must each be a single non-missing string, ",
-          "number, or logical.",
-          call. = FALSE
-        )
-      }
-      list(
-        name = nm,
-        op = "=",
-        value = if (is.logical(value)) {
-          toupper(as.character(value))
-        } else {
-          as.character(value)
-        }
-      )
-    } else {
-      if (!is.character(value) || length(value) != 1L || is.na(value)) {
-        stop(
-          "Unnamed `cpp_options` entries must each be a single string of ",
-          "the form '<NAME> = <value>' or '<NAME> += <value>'.",
-          call. = FALSE
-        )
-      }
-      m <- regmatches(
-        value,
-        regexec("^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(\\+=|=)\\s*(.*)$", value)
-      )[[1]]
-      if (!length(m)) {
-        stop(
-          "Unnamed `cpp_options` entries must each be a single string of ",
-          "the form '<NAME> = <value>' or '<NAME> += <value>', got: \"",
-          value,
-          "\".",
-          call. = FALSE
-        )
-      }
-      list(name = m[[2]], op = m[[3]], value = trimws(m[[4]]))
-    }
-  })
-}
-
-.newstan_seed <- function(seed) {
-  if (is.null(seed)) {
-    seed <- as.integer(stats::runif(1, 1, .Machine$integer.max))
-  }
-  if (
-    !is.numeric(seed) ||
-      length(seed) != 1L ||
-      is.na(seed) ||
-      seed < 0 ||
-      seed > .Machine$integer.max ||
-      seed != floor(seed)
-  ) {
-    stop(
-      "`seed` must be NULL or a single integer between 0 and 2^31 - 1.",
-      call. = FALSE
-    )
-  }
-  as.integer(seed)
-}
-
-.newstan_reject_backend_files <- function(
-  output_dir = NULL,
-  output_basename = NULL,
-  sig_figs = NULL,
-  save_cmdstan_config = FALSE
-) {
-  unsupported <- c(
-    if (!is.null(output_dir)) "output_dir",
-    if (!is.null(output_basename)) "output_basename",
-    if (!is.null(sig_figs)) "sig_figs",
-    if (isTRUE(save_cmdstan_config)) "save_cmdstan_config"
-  )
-  if (length(unsupported)) {
-    stop(
-      "The in-process backend does not yet support: ",
-      paste(unsupported, collapse = ", "),
-      ".",
-      call. = FALSE
-    )
-  }
-}
-
-# Shared execution path for all StanModel service methods: seed resolution,
-# native model construction, service dispatch, timing, and payload assembly.
-.newstan_run_service <- function(
-  self,
-  data,
-  seed,
-  init = NULL, # resolves to default init; unused by laplace/generate_quantities
-  native_args_fn, # function(seed, resolved_init, model) -> list
-  payload_fn # function(result) -> list of method-specific fields
-) {
-  started <- proc.time()[["elapsed"]]
-  seed <- .newstan_seed(seed)
-  resolved_init <- resolve_init(init)
-  # Tuple-typed data/init values arrive as bare unnamed R lists; flatten
-  # them into the dotted per-leaf entries `r_data_context` expects before
-  # they reach any native call. `self$variables()` pays the stanc-info cost,
-  # so gate it behind a cheap check for any list-valued entry.
-  has_list <- function(x) any(vapply(x, is.list, logical(1)))
-  if (has_list(data) || has_list(resolved_init$values)) {
-    declared <- self$variables()
-    data <- .newstan_flatten_tuple_values(data, declared$data)
-    resolved_init$values <- .newstan_flatten_tuple_values(
-      resolved_init$values,
-      declared$parameters
-    )
-  }
-  model <- self$new_model(data, seed)
-  native_args <- native_args_fn(seed, resolved_init, model)
-  result <- self$run_model(model, native_args)
-  payload <- c(
-    payload_fn(result),
-    list(
-      return_code = result$return_code,
-      args = service_args(native_args),
-      output = result$output %||% character(),
-      model_ptr = model
-    )
-  )
-  list(
-    payload = payload,
-    seed = seed,
-    elapsed = proc.time()[["elapsed"]] - started
-  )
-}
-
-#' Return the bundled Stan library version.
-#'
-#' Memoized for the life of the R session (single key, this function takes
-#' no arguments): the bundled header cannot change within a session.
-#'
-#' @noRd
-.newstan_stan_version <- function() {
-  cached <- .newstan_memo$stan_version
-  if (!is.null(cached)) {
-    return(cached)
-  }
-  header <- system.file("include", "stan", "version.hpp", package = "newstan")
-  value <- if (!nzchar(header) || !file.exists(header)) {
-    NA_character_
-  } else {
-    lines <- readLines(header, warn = FALSE)
-    macro_value <- function(macro) {
-      line <- grep(
-        paste0("^#define[[:space:]]+", macro, "[[:space:]]+"),
-        lines,
-        value = TRUE
-      )
-      if (!length(line)) {
-        return(NA_character_)
-      }
-      sub(paste0("^#define[[:space:]]+", macro, "[[:space:]]+"), "", line[[1]])
-    }
-    paste(
-      macro_value("STAN_MAJOR"),
-      macro_value("STAN_MINOR"),
-      macro_value("STAN_PATCH"),
-      sep = "."
-    )
-  }
-  .newstan_memo$stan_version <- value
-  value
-}
-
 # StanModel class definition ---------------------------------------------------
 
 #' StanModel objects
@@ -848,9 +628,6 @@ stan_model_sample <- function(
   refresh = 100L,
   init = 2,
   save_latent_dynamics = FALSE,
-  output_dir = NULL,
-  output_basename = NULL,
-  sig_figs = NULL,
   chains = 4,
   chain_ids = seq_len(chains),
   num_threads = RcppParallel::defaultNumThreads(),
@@ -872,7 +649,6 @@ stan_model_sample <- function(
   fixed_param = FALSE,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = FALSE,
   engine = "nuts",
   int_time = 2 * pi,
   step_size_jitter = 0,
@@ -880,12 +656,6 @@ stan_model_sample <- function(
   adapt_kappa = 0.75,
   adapt_t0 = 10
 ) {
-  .newstan_reject_backend_files(
-    output_dir,
-    output_basename,
-    sig_figs,
-    save_cmdstan_config
-  )
   save_latent_dynamics <- .newstan_flag(
     save_latent_dynamics,
     "save_latent_dynamics"
@@ -1109,9 +879,6 @@ stan_model_optimize <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  output_dir = NULL,
-  output_basename = NULL,
-  sig_figs = NULL,
   num_threads = RcppParallel::defaultNumThreads(),
   opencl_ids = NULL,
   algorithm = "lbfgs",
@@ -1126,15 +893,8 @@ stan_model_optimize <- function(
   history_size = 5L,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = FALSE,
   save_iterations = FALSE
 ) {
-  .newstan_reject_backend_files(
-    output_dir,
-    output_basename,
-    sig_figs,
-    save_cmdstan_config
-  )
   jacobian <- .newstan_flag(jacobian, "jacobian")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
@@ -1257,9 +1017,6 @@ stan_model_laplace <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  output_dir = NULL,
-  output_basename = NULL,
-  sig_figs = NULL,
   num_threads = RcppParallel::defaultNumThreads(),
   opencl_ids = NULL,
   mode = NULL,
@@ -1268,15 +1025,8 @@ stan_model_laplace <- function(
   draws = 1000L,
   show_messages = TRUE,
   show_exceptions = TRUE,
-  save_cmdstan_config = FALSE,
   calculate_lp = TRUE
 ) {
-  .newstan_reject_backend_files(
-    output_dir,
-    output_basename,
-    sig_figs,
-    save_cmdstan_config
-  )
   if (!is.null(mode) && !is.null(opt_args)) {
     stop("`mode` and `opt_args` cannot both be supplied.", call. = FALSE)
   }
@@ -1437,9 +1187,6 @@ stan_model_variational <- function(
   refresh = 100L,
   init = 2,
   save_latent_dynamics = FALSE,
-  output_dir = NULL,
-  output_basename = NULL,
-  sig_figs = NULL,
   num_threads = RcppParallel::defaultNumThreads(),
   opencl_ids = NULL,
   algorithm = "meanfield",
@@ -1453,15 +1200,8 @@ stan_model_variational <- function(
   eval_elbo = 100L,
   draws = 1000L,
   show_messages = TRUE,
-  show_exceptions = TRUE,
-  save_cmdstan_config = FALSE
+  show_exceptions = TRUE
 ) {
-  .newstan_reject_backend_files(
-    output_dir,
-    output_basename,
-    sig_figs,
-    save_cmdstan_config
-  )
   save_latent_dynamics <- .newstan_flag(
     save_latent_dynamics,
     "save_latent_dynamics"
@@ -1585,9 +1325,6 @@ stan_model_pathfinder <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  output_dir = NULL,
-  output_basename = NULL,
-  sig_figs = NULL,
   num_threads = RcppParallel::defaultNumThreads(),
   opencl_ids = NULL,
   init_alpha = 0.001,
@@ -1606,15 +1343,8 @@ stan_model_pathfinder <- function(
   psis_resample = TRUE,
   calculate_lp = TRUE,
   show_messages = TRUE,
-  show_exceptions = TRUE,
-  save_cmdstan_config = FALSE
+  show_exceptions = TRUE
 ) {
-  .newstan_reject_backend_files(
-    output_dir,
-    output_basename,
-    sig_figs,
-    save_cmdstan_config
-  )
   save_single_paths <- .newstan_flag(save_single_paths, "save_single_paths")
   psis_resample <- .newstan_flag(psis_resample, "psis_resample")
   calculate_lp <- .newstan_flag(calculate_lp, "calculate_lp")
@@ -1730,19 +1460,11 @@ stan_model_generate_quantities <- function(
   fitted_params,
   data = list(),
   seed = NULL,
-  output_dir = NULL,
-  output_basename = NULL,
-  sig_figs = NULL,
   num_threads = RcppParallel::defaultNumThreads(),
   opencl_ids = NULL,
   show_messages = TRUE,
   show_exceptions = TRUE
 ) {
-  .newstan_reject_backend_files(
-    output_dir,
-    output_basename,
-    sig_figs
-  )
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
   if (!is.null(opencl_ids)) {
@@ -1825,14 +1547,11 @@ stan_model_diagnose <- function(
   data = list(),
   seed = NULL,
   init = 2,
-  output_dir = NULL,
-  output_basename = NULL,
   epsilon = 1e-6,
   error = 1e-6,
   show_messages = TRUE,
   show_exceptions = TRUE
 ) {
-  .newstan_reject_backend_files(output_dir, output_basename)
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
 
