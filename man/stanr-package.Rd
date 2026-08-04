@@ -10,12 +10,26 @@ A modern, simpler R interface for Stan. Bundles all required
 Stan headers internally, depending only on BH (Boost), RcppEigen
 (Eigen), and RcppParallel (TBB) for external dependencies.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/andrjohns/stanr}
+  \item Report bugs at \url{https://github.com/andrjohns/stanr/issues}
+}
+
+}
 \author{
 \strong{Maintainer}: Andrew R. Johnson \email{andrew.johnson@arjohnsonau.com} (\href{https://orcid.org/0000-0001-7000-8065}{ORCID})
 
 Authors:
 \itemize{
   \item Andrew R. Johnson \email{andrew.johnson@arjohnsonau.com} (\href{https://orcid.org/0000-0001-7000-8065}{ORCID})
+}
+
+Other contributors:
+\itemize{
+  \item Stan Development Team (Stan sources and headers) [copyright holder]
+  \item Lawrence Livermore National Security (SUNDIALS sources and headers) [copyright holder]
 }
 
 }

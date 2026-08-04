@@ -37,6 +37,7 @@ many of which have their own (linked) documentation pages:
 \subsection{Compilation}{\tabular{ll}{
    \strong{Method} \tab \strong{Description} \cr
    \code{\link[=model-method-check-syntax]{$check_syntax()}} \tab Check the Stan program's syntax without compiling. \cr
+   \code{\link[=model-method-format]{$format()}} \tab Reformat the Stan program using \code{stanc}'s auto-formatter. \cr
    \code{\link[=model-method-compile]{$compile()}} \tab Compile the Stan program. \cr
    \code{\link[=model-method-model-info]{$is_compiled()}} \tab Check whether the model has been compiled. \cr
 }

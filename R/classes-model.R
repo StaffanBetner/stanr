@@ -36,6 +36,7 @@
 #'  |**Method**|**Description**|
 #'  |:----------|:---------------|
 #'  [`$check_syntax()`][model-method-check-syntax] | Check the Stan program's syntax without compiling. |
+#'  [`$format()`][model-method-format] | Reformat the Stan program using `stanc`'s auto-formatter. |
 #'  [`$compile()`][model-method-compile] | Compile the Stan program. |
 #'  [`$is_compiled()`][model-method-model-info] | Check whether the model has been compiled. |
 #'
@@ -475,6 +476,101 @@ stan_model_check_syntax <- function(pedantic = FALSE, quiet = FALSE) {
   invisible(TRUE)
 }
 StanModel$set("public", "check_syntax", stan_model_check_syntax)
+
+#' Format a Stan program
+#'
+#' @name model-method-format
+#' @aliases format
+#' @family StanModel methods
+#'
+#' @description The `$format()` method of a [`StanModel`] object reformats
+#'   the Stan program using `stanc`'s auto-formatter and returns the result as
+#'   a string. Unlike [`$check_syntax()`][model-method-check-syntax], it does
+#'   not work on programs with unresolved `#include` directives, since
+#'   formatting would inline their contents.
+#'
+#' @param overwrite_file (logical) Should the formatted code be written back
+#'   to [`$stan_file()`][model-method-model-info]? The default is `FALSE`.
+#'   Requires a model created with `stan_file`, and does not update this
+#'   object's in-memory code -- construct a new [`StanModel`] to pick up the
+#'   change.
+#' @param canonicalize (logical or character) `FALSE` (the default) formats
+#'   without canonicalizing, `TRUE` also canonicalizes deprecated syntax, and
+#'   a character vector requests specific canonicalizations (e.g.
+#'   `c("braces", "parentheses")`).
+#' @param backup (logical) When `overwrite_file = TRUE`, should the original
+#'   file be backed up first? The default is `TRUE`.
+#' @param max_line_length (integer) Maximum output line width. The default,
+#'   `NULL`, uses `stanc`'s default.
+#' @param quiet (logical) Should the backup message be suppressed? The
+#'   default is `FALSE`.
+#'
+#' @return The formatted Stan code as a string.
+#'
+#' @seealso [`$check_syntax()`][model-method-check-syntax], [`$code()`][model-method-model-info]
+#'
+NULL
+
+stan_model_format <- function(
+  overwrite_file = FALSE,
+  canonicalize = FALSE,
+  backup = TRUE,
+  max_line_length = NULL,
+  quiet = FALSE
+) {
+  overwrite_file <- .stanr_flag(overwrite_file, "overwrite_file")
+  backup <- .stanr_flag(backup, "backup")
+  quiet <- .stanr_flag(quiet, "quiet")
+  if (!isFALSE(canonicalize) && !isTRUE(canonicalize) && !is.character(canonicalize)) {
+    stop(
+      "`canonicalize` must be FALSE, TRUE, or a character vector.",
+      call. = FALSE
+    )
+  }
+  if (!is.null(max_line_length)) {
+    max_line_length <- .stanr_int(max_line_length, "max_line_length", min = 1L)
+  }
+  if (overwrite_file) {
+    if (!self$has_stan_file()) {
+      stop(
+        "`overwrite_file = TRUE` requires a model created with `stan_file`.",
+        call. = FALSE
+      )
+    }
+    if (grepl("#include", private$code_, fixed = TRUE)) {
+      stop(
+        "`overwrite_file = TRUE` is not supported for programs with ",
+        "`#include` directives, since formatting inlines them.",
+        call. = FALSE
+      )
+    }
+  }
+
+  formatted <- stanc_format(
+    private$resolved_code(),
+    canonicalize = canonicalize,
+    max_line_length = max_line_length
+  )
+
+  if (overwrite_file) {
+    if (backup) {
+      backup_file <- paste0(
+        private$stan_file_,
+        ".bak-",
+        format(Sys.time(), "%Y%m%d%H%M%S")
+      )
+      file.copy(private$stan_file_, backup_file)
+      if (!quiet) {
+        message("[stanr] Old version of the model stored to ", backup_file)
+      }
+    }
+    # `formatted` already ends in "\n"; writeLines() would add a second one.
+    writeLines(formatted, private$stan_file_, sep = "")
+  }
+
+  formatted
+}
+StanModel$set("public", "format", stan_model_format)
 
 # Selects the OpenCL platform/device for the model's native computations to
 # run on. Triggers lazy compilation via `native_function()` if needed, and

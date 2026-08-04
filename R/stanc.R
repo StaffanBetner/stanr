@@ -289,3 +289,44 @@ model_variables <- function(
     "generated_quantities"
   )]
 }
+
+#' Reformat Stan code using stanc's auto-formatter
+#'
+#' @param model_code Stan model code as a single string. Must not contain
+#'   unresolved `#include` directives.
+#' @param canonicalize `FALSE` (the default), `TRUE` to also canonicalize
+#'   deprecated syntax, or a character vector naming specific canonicalizations
+#'   (e.g. `"braces"`, `"parentheses"`).
+#' @param max_line_length Maximum output line width, or `NULL` for stanc's
+#'   default.
+#'
+#' @return The formatted Stan code as a single string.
+#' @noRd
+stanc_format <- function(
+  model_code,
+  canonicalize = FALSE,
+  max_line_length = NULL
+) {
+  flags <- "auto-format"
+  if (isTRUE(canonicalize)) {
+    flags <- c(flags, "print-canonical")
+  } else if (is.character(canonicalize)) {
+    flags <- c(flags, paste0("canonicalize=", paste(canonicalize, collapse = ",")))
+  }
+  if (!is.null(max_line_length)) {
+    flags <- c(flags, paste0("max-line-length=", max_line_length))
+  }
+
+  res <- stanc_ctx()$call(
+    "stanc",
+    "model",
+    model_code,
+    as.array(flags)
+  )
+
+  if (!is.null(res$errors)) {
+    stop(paste(res$errors, collapse = "\n"), call. = FALSE)
+  }
+
+  res$result
+}
