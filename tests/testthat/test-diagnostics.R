@@ -2,50 +2,6 @@ local_test_context()
 
 init_test_cache("diagnostics")
 
-# Direct unit coverage for .stanr_parse_diagnose_output() (Task 3.3): the
-# black-box mod$diagnose() tests below exercise it only with real Stan
-# gradient-check output, which never contains more than one "Log
-# probability=" line. The rewrite from per-row rbind() to vector
-# accumulation must still preserve the exact former for-loop semantics --
-# in particular "last valid Log probability= line wins" -- so test that
-# directly here.
-test_that(".stanr_parse_diagnose_output() keeps the last valid Log probability= line and all gradient rows", {
-  lines <- c(
-    "",
-    "Log probability=-1.5",
-    "   param idx           value           model     finite diff           error ",
-    "             0             0.2             1.1             1.2           0.05",
-    "             1            -0.3            -2.2            -2.1            0.1",
-    "Log probability=-2.75",
-    "not a data row at all"
-  )
-
-  parsed <- stanr:::.stanr_parse_diagnose_output(lines)
-
-  expect_equal(parsed$lp, -2.75)
-  expect_true(is.data.frame(parsed$gradients))
-  expect_equal(nrow(parsed$gradients), 2L)
-  expect_equal(
-    colnames(parsed$gradients),
-    c("param_idx", "value", "model", "finite_diff", "error")
-  )
-  expect_equal(parsed$gradients$param_idx, c(0L, 1L))
-  expect_type(parsed$gradients$param_idx, "integer")
-  expect_equal(parsed$gradients$value, c(0.2, -0.3))
-  expect_equal(parsed$gradients$error, c(0.05, 0.1))
-})
-
-test_that(".stanr_parse_diagnose_output() returns the empty-typed skeleton for non-character/empty input", {
-  expected_cols <- c("param_idx", "value", "model", "finite_diff", "error")
-
-  for (bad_input in list(NULL, character(0), 42)) {
-    parsed <- stanr:::.stanr_parse_diagnose_output(bad_input)
-    expect_true(is.na(parsed$lp))
-    expect_equal(nrow(parsed$gradients), 0L)
-    expect_equal(colnames(parsed$gradients), expected_cols)
-  }
-})
-
 # ---------------------------------------------------------------------------
 # Basic functionality
 # ---------------------------------------------------------------------------

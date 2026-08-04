@@ -3,6 +3,7 @@
 
 #include <Rcpp.h>
 #include <memory>
+#include <stan/io/array_var_context.hpp>
 #include <stan/io/var_context.hpp>
 #include <stan/services/sample/fixed_param.hpp>
 #include <stan/services/sample/hmc_nuts_dense_e.hpp>
@@ -26,7 +27,6 @@
 #include "r_metric_writer.hpp"
 #include "r_worker.hpp"
 #include <stanr/r_data_context.hpp>
-#include <stanr/r_metric_context.hpp>
 #include "stack_writer_chains.hpp"
 
 namespace stanr {
@@ -75,9 +75,9 @@ namespace stanr {
         dimensions = {static_cast<size_t>(matrix.nrow()),
                       static_cast<size_t>(matrix.ncol())};
       }
-      contexts.emplace_back(
-          std::make_shared<stanr::r_metric_context>(std::move(values),
-                                                       std::move(dimensions)));
+      contexts.emplace_back(std::make_shared<stan::io::array_var_context>(
+          std::vector<std::string>{"inv_metric"}, values,
+          std::vector<std::vector<size_t>>{dimensions}));
     }
     return contexts;
   }
@@ -135,21 +135,16 @@ namespace stanr {
     const auto init_ctx = std::make_shared<stanr::r_data_context>(init_list);
     std::vector<std::shared_ptr<stanr::r_data_context>> init_ctxs(
         num_chains, init_ctx);
-    std::vector<stanr::r_discard_writer> init_writers;
+    // Base stan::callbacks::writer instances are no-ops: the unconstrained
+    // inits and the separate diagnostics stream (whose columns the sample
+    // writer already receives) are deliberately discarded.
+    std::vector<stan::callbacks::writer> init_writers(num_chains);
+    std::vector<stan::callbacks::writer> diag_writers(num_chains);
+    std::vector<stanr::r_metric_writer> metric_writers(num_chains);
     std::vector<stanr::r_sample_writer> sample_writers;
-    std::vector<stanr::r_discard_writer> diag_writers;
-    std::vector<stanr::r_metric_writer> metric_writers;
-
-    init_writers.reserve(num_chains);
     sample_writers.reserve(num_chains);
-    diag_writers.reserve(num_chains);
-    metric_writers.reserve(num_chains);
-
     for (int i = 0; i < num_chains; ++i) {
-      init_writers.emplace_back();
       sample_writers.emplace_back(expected_rows);
-      diag_writers.emplace_back();
-      metric_writers.emplace_back();
     }
 
     const bool metric_supplied = args.containsElementNamed("inv_metric");

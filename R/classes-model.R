@@ -1735,16 +1735,17 @@ stan_model_diagnose <- function(
   }
 
   payload_fn <- function(result) {
-    n_failed <- as.integer(result$num_failed)
-
-    # The gradient-table text from Stan's test_gradients() is now separate
-    # from `result$output` (the full log, matching every other service).
-    parsed <- .stanr_parse_diagnose_output(result$gradient_lines)
-
     list(
-      num_failed = n_failed,
-      gradients = parsed$gradients,
-      lp = parsed$lp
+      num_failed = as.integer(result$num_failed),
+      gradients = data.frame(
+        param_idx = seq_along(result$value) - 1L,
+        value = result$value,
+        model = result$model,
+        finite_diff = result$finite_diff,
+        error = result$error,
+        check.names = FALSE
+      ),
+      lp = result$lp
     )
   }
 

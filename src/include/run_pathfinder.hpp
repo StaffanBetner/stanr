@@ -4,8 +4,7 @@
 #include <Rcpp.h>
 #include <stan/services/pathfinder/single.hpp>
 #include <stan/services/pathfinder/multi.hpp>
-#include <stan/callbacks/json_writer.hpp>
-#include <sstream>
+#include <stan/callbacks/structured_writer.hpp>
 #include <vector>
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
@@ -50,10 +49,10 @@ namespace stanr {
     if (num_paths <= 1) {
       // Single pathfinder
       stanr::r_data_context init_ctx(init_list);
-      stanr::r_discard_writer init_writer;
+      stan::callbacks::writer init_writer;
       stanr::r_sample_writer sample_writer(num_draws);
-      stan::callbacks::json_writer<std::ostringstream> metric_writer(
-          std::make_unique<std::ostringstream>());
+      // No-op: the LBFGS inverse-metric estimate is not exposed to R.
+      stan::callbacks::structured_writer metric_writer;
 
       return_code = stan::services::pathfinder::pathfinder_lbfgs_single<false, false>(
           model, init_ctx, seed, chain_id, init_radius,
@@ -84,18 +83,12 @@ namespace stanr {
       // intentional no-ops: reporting them as valid would make Stan retain
       // every per-path candidate draw even though none is exposed to R.
       std::vector<stan::callbacks::writer> single_param_writers(num_paths);
-      // Per-path diagnostic writers need structured_writer interface
-      std::vector<stan::callbacks::json_writer<std::ostringstream>> single_diag_writers;
-      single_diag_writers.reserve(num_paths);
-      for (int i = 0; i < num_paths; ++i) {
-        single_diag_writers.emplace_back(std::make_unique<std::ostringstream>());
-      }
+      std::vector<stan::callbacks::structured_writer> single_diag_writers(
+          num_paths);
 
       // Final combined parameter writer
       stanr::r_sample_writer param_writer(num_psis_draws);
-      // Final diagnostic writer (structured_writer)
-      stan::callbacks::json_writer<std::ostringstream> diag_writer(
-          std::make_unique<std::ostringstream>());
+      stan::callbacks::structured_writer diag_writer;
 
       // Init writers (one per path, for writing initial values)
       std::vector<stan::callbacks::writer> init_writers(num_paths);

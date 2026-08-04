@@ -154,26 +154,6 @@ class r_sample_writer : public stan::callbacks::writer {
   bool is_valid() const noexcept override { return true; }
 };
 
-// The Stan sampler writes diagnostics (energy__, divergent__, etc.) to a
-// separate callback even though the sample callback already receives the
-// sampler columns.  Sampling currently exposes one combined sample data
-// frame, so retaining a second matrix only duplicates memory and work.
-//
-// Also used for Stan's init_writer callback: Stan's services write the
-// unconstrained initial values there as a raw numeric row with no preceding
-// column-name header (see stan::services::util::initialize()), and this
-// package has no use for them, so they're discarded here too.
-class r_discard_writer : public stan::callbacks::writer {
- public:
-  void operator()(const std::vector<std::string>&) override {}
-  void operator()(const std::vector<double>&) override {}
-  void operator()() override {}
-  void operator()(const std::string&) override {}
-  void operator()(const Eigen::MatrixXd&) override {}
-  void operator()(const Eigen::Matrix<double, -1, 1>&) override {}
-  void operator()(const Eigen::Matrix<double, 1, -1>&) override {}
-};
-
 }  // namespace stanr
 
 #endif  // STANR_R_OUTPUT_HPP

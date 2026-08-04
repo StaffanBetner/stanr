@@ -32,10 +32,10 @@ namespace stanr {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     stanr::r_data_context init_ctx(init_list);
-    stanr::r_discard_writer init_writer;
+    stan::callbacks::writer init_writer;
     // Stan writes the posterior mean followed by output_samples draws.
     stanr::r_sample_writer sample_writer(output_samples + 1);
-    stanr::r_discard_writer diagnostic_writer;
+    stan::callbacks::writer diagnostic_writer;
     stanr::r_logger logger(verbose, show_exceptions);
     stanr::r_interrupt interrupt(true);
 
