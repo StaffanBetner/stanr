@@ -1,5 +1,5 @@
 # Applies an ordered list of `list(name, op, value)` assignments (as
-# returned by `.newstan_parse_cpp_options()`) to a named `base` Makevars
+# returned by `.stanr_parse_cpp_options()`) to a named `base` Makevars
 # vector, in order: an `"="` assignment replaces `base[[name]]` outright, and
 # a `"+="` assignment appends to it (space-joined) -- or, if `name` isn't yet
 # in `base`, is equivalent to `"="`, matching how an unset Makefile variable
@@ -9,7 +9,7 @@
 # drops all but one same-named entry when the caller already has a personal
 # Makevars file on disk, so a vector with two "CXXFLAGS" entries wouldn't
 # reliably apply both.
-.newstan_apply_makevars <- function(base, assignments) {
+.stanr_apply_makevars <- function(base, assignments) {
   for (a in assignments) {
     if (identical(a$op, "+=") && a$name %in% names(base)) {
       base[[a$name]] <- paste(base[[a$name]], a$value)
@@ -26,7 +26,7 @@
 # the last-flag-wins compiler precedence instead of being silently
 # overridden by Makeconf's -g -O2. USE_CXX17/PKG_CPPFLAGS/PKG_LIBS are not
 # set by Makeconf, so `+=` on them is equivalent to `=`.
-.newstan_sourcecpp <- function(
+.stanr_sourcecpp <- function(
   cpp_file,
   env,
   cppflags,
@@ -39,12 +39,12 @@
   withr::with_envvar(
     c(USE_CXX17 = "1"),
     withr::with_makevars(
-      .newstan_apply_makevars(
+      .stanr_apply_makevars(
         c(
           PKG_CPPFLAGS = cppflags,
           PKG_LIBS = libs,
-          CXXFLAGS = .newstan_opt_flags(),
-          CXX17FLAGS = .newstan_opt_flags()
+          CXXFLAGS = .stanr_opt_flags(),
+          CXX17FLAGS = .stanr_opt_flags()
         ),
         extra_assignments
       ),
@@ -60,7 +60,7 @@
   )
 }
 
-.newstan_tbb_libs <- function() {
+.stanr_tbb_libs <- function() {
   tbb_libs <- utils::tail(
     utils::capture.output(RcppParallel::RcppParallelLibs()),
     1
@@ -79,7 +79,7 @@
 
 # Shared by every compile path (model TU, functions-only TU): both need
 # RcppEigen/BH on top of base R's compiler toolchain.
-.newstan_require_compile_packages <- function() {
+.stanr_require_compile_packages <- function() {
   for (pkg in c("RcppEigen", "BH")) {
     if (!nzchar(system.file(package = pkg))) {
       stop(
@@ -94,16 +94,16 @@
 
 # Non-OpenCL cppflags shared by every compile path; a model compile appends
 # OpenCL-specific flags on top of this when `use_opencl = TRUE`.
-.newstan_base_cppflags <- function() {
+.stanr_base_cppflags <- function() {
   paste(
-    paste0("-I", shQuote(system.file("include", package = "newstan", mustWork = TRUE))),
+    paste0("-I", shQuote(system.file("include", package = "stanr", mustWork = TRUE))),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS"
   )
 }
 
 # Stable sort by name: reordering unrelated `cpp_options` entries must not
 # change the hash; reordering two assignments to the *same* name must.
-.newstan_cpp_options_hash_component <- function(assignments) {
+.stanr_cpp_options_hash_component <- function(assignments) {
   if (length(assignments)) {
     assignment_names <- vapply(assignments, `[[`, character(1), "name")
     ord <- order(assignment_names)
@@ -120,10 +120,10 @@
 # sourceCpp's own default cacheDir is a per-session temp directory, so
 # without an explicit on-disk cache_dir every session would recompile every
 # model from scratch instead of reusing the .so across sessions.
-.newstan_models_cache_dir <- function() {
+.stanr_models_cache_dir <- function() {
   cache_dir <- getOption(
-    "newstan_cache_dir",
-    file.path(tools::R_user_dir("newstan", "cache"), "models")
+    "stanr_cache_dir",
+    file.path(tools::R_user_dir("stanr", "cache"), "models")
   )
   dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
   if (file.access(cache_dir, 2) != 0) {
@@ -136,7 +136,7 @@
 #' Normalized paths of every shared library currently mapped into this session.
 #'
 #' @noRd
-.newstan_loaded_dll_paths <- function() {
+.stanr_loaded_dll_paths <- function() {
   vapply(
     getLoadedDLLs(),
     function(dll) normalizePath(dll[["path"]], winslash = "/", mustWork = FALSE),
@@ -150,25 +150,25 @@
 #' Entries are `list(cpp_file =, dynlibs =, alias =)`: the translation unit
 #' this session compiles that entry from, the shared libraries it has loaded
 #' for it, and how many forced rebuilds it has been redirected through.
-#' Consumed by `.newstan_forced_rebuild_target()`.
+#' Consumed by `.stanr_forced_rebuild_target()`.
 #'
 #' @noRd
-.newstan_dynlib_registry <- function() {
-  if (is.null(.newstan_memo$dynlibs)) {
-    .newstan_memo$dynlibs <- new.env(parent = emptyenv())
+.stanr_dynlib_registry <- function() {
+  if (is.null(.stanr_memo$dynlibs)) {
+    .stanr_memo$dynlibs <- new.env(parent = emptyenv())
   }
-  .newstan_memo$dynlibs
+  .stanr_memo$dynlibs
 }
 
 #' Registry key: the canonical translation unit's path on disk.
 #'
 #' `model_hash` alone is not enough: it does not cover `cache_dir`, and the
-#' same program under a different `newstan_cache_dir` is a different set of
+#' same program under a different `stanr_cache_dir` is a different set of
 #' artifacts with nothing of its own mapped, so it must not inherit another
 #' cache's redirects.
 #'
 #' @noRd
-.newstan_registry_key <- function(model_hash, cache_dir) {
+.stanr_registry_key <- function(model_hash, cache_dir) {
   normalizePath(
     file.path(cache_dir, paste0("stan_", model_hash, ".cpp")),
     winslash = "/",
@@ -183,7 +183,7 @@
 #' canonical entry and silently undo the forced rebuild.
 #'
 #' @noRd
-.newstan_stale_marker <- function(model_hash, cache_dir) {
+.stanr_stale_marker <- function(model_hash, cache_dir) {
   file.path(cache_dir, paste0("stan_", model_hash, ".stale"))
 }
 
@@ -215,18 +215,18 @@
 #' @return `list(cpp_file =, alias =)`, where `alias` is 0 for the canonical
 #'   translation unit and the redirect counter otherwise.
 #' @noRd
-.newstan_forced_rebuild_target <- function(
+.stanr_forced_rebuild_target <- function(
   model_hash,
   cache_dir,
   force_recompile
 ) {
-  canonical <- .newstan_registry_key(model_hash, cache_dir)
-  entry <- .newstan_dynlib_registry()[[canonical]]
+  canonical <- .stanr_registry_key(model_hash, cache_dir)
+  entry <- .stanr_dynlib_registry()[[canonical]]
   cpp_file <- entry$cpp_file %||%
     file.path(cache_dir, paste0("stan_", model_hash, ".cpp"))
   alias <- entry$alias %||% 0L
   mapped <- any(
-    (entry$dynlibs %||% character()) %in% .newstan_loaded_dll_paths()
+    (entry$dynlibs %||% character()) %in% .stanr_loaded_dll_paths()
   )
   if (!force_recompile || !mapped) {
     return(list(cpp_file = cpp_file, alias = alias))
@@ -244,15 +244,15 @@
 #' Record what a completed compile built and loaded.
 #'
 #' @noRd
-.newstan_register_dynlibs <- function(
+.stanr_register_dynlibs <- function(
   model_hash,
   cache_dir,
   cpp_file,
   alias,
   dynlibs
 ) {
-  registry <- .newstan_dynlib_registry()
-  key <- .newstan_registry_key(model_hash, cache_dir)
+  registry <- .stanr_dynlib_registry()
+  key <- .stanr_registry_key(model_hash, cache_dir)
   entry <- registry[[key]] %||% list(dynlibs = character())
   entry$cpp_file <- cpp_file
   entry$alias <- alias
@@ -264,7 +264,7 @@
 # Kept in sync by hand with the `// [[Rcpp::export]]` function names in
 # inst/stan_model.cpp -- reserved so a combined-TU expose can't silently
 # shadow one of them.
-.newstan_model_support_exports <- c(
+.stanr_model_support_exports <- c(
   "new_model",
   "run_model",
   "constrained_param_names",
@@ -293,20 +293,20 @@
   cpp_options = list(),
   standalone_functions = FALSE
 ) {
-  .newstan_require_compile_packages()
+  .stanr_require_compile_packages()
 
   # stanc() is the expensive step, so its inputs are hashed (with the same
   # discriminating power as hashing its output) to let a warm cache skip it.
   model_support <- readLines(
-    system.file("stan_model.cpp", package = "newstan", mustWork = TRUE)
+    system.file("stan_model.cpp", package = "stanr", mustWork = TRUE)
   )
   # external_cpp is hashed by content, not path: stanc splices file contents
   # into the generated C++, so the hash must depend on content, not location.
-  external_cpp_contents <- .newstan_external_cpp_contents(external_cpp)
+  external_cpp_contents <- .stanr_external_cpp_contents(external_cpp)
   # OPENCL_LIBS is consumed for link flags separately from the other
   # `cpp_options` assignments (avoiding double-applying it), and pinned to
   # `""` when OpenCL is off so it can't perturb the cache key.
-  cpp_option_assignments <- .newstan_parse_cpp_options(cpp_options)
+  cpp_option_assignments <- .stanr_parse_cpp_options(cpp_options)
   is_opencl_libs <- vapply(
     cpp_option_assignments,
     function(a) identical(a$name, "OPENCL_LIBS"),
@@ -320,7 +320,7 @@
     } else {
       "-lOpenCL"
     }
-    .newstan_apply_makevars(
+    .stanr_apply_makevars(
       c(OPENCL_LIBS = opencl_default),
       opencl_assignments
     )[["OPENCL_LIBS"]]
@@ -336,20 +336,20 @@
       as.character(standalone_functions),
       external_cpp_contents,
       model_support,
-      as.character(utils::packageVersion("newstan")),
-      .newstan_stan_version(),
+      as.character(utils::packageVersion("stanr")),
+      .stanr_stan_version(),
       R.version$platform,
-      .newstan_compiler_identity(),
+      .stanr_compiler_identity(),
       as.character(use_opencl),
       opencl_libs,
-      .newstan_cpp_options_hash_component(extra_assignments)
+      .stanr_cpp_options_hash_component(extra_assignments)
     ),
     algo = "xxhash64"
   )
 
-  cache_dir <- .newstan_models_cache_dir()
+  cache_dir <- .stanr_models_cache_dir()
 
-  stale_marker <- .newstan_stale_marker(model_hash, cache_dir)
+  stale_marker <- .stanr_stale_marker(model_hash, cache_dir)
   # A forced rebuild redirected to an alias translation unit leaves the
   # canonical cache entry holding the superseded artifact, so it is marked
   # stale on disk. Honour that marker once per session, on the first compile
@@ -358,8 +358,8 @@
   if (
     !force_recompile &&
       is.null(
-        .newstan_dynlib_registry()[[
-          .newstan_registry_key(model_hash, cache_dir)
+        .stanr_dynlib_registry()[[
+          .stanr_registry_key(model_hash, cache_dir)
         ]]
       ) &&
       file.exists(stale_marker)
@@ -367,7 +367,7 @@
     force_recompile <- TRUE
   }
 
-  target <- .newstan_forced_rebuild_target(
+  target <- .stanr_forced_rebuild_target(
     model_hash,
     cache_dir,
     force_recompile
@@ -378,7 +378,7 @@
   # = force_recompile)` below would otherwise silently reuse a stale `.cpp`.
   if (force_recompile || !file.exists(cpp_file)) {
     if (verbose) {
-      message("[newstan] Compiling '", model_name, "'...")
+      message("[stanr] Compiling '", model_name, "'...")
     }
     cpp_code <- stanc(
       code,
@@ -398,12 +398,12 @@
         use_opencl = use_opencl,
         allow_undefined = length(external_cpp) > 0
       )
-      processed <- .newstan_process_standalone_cpp(
+      processed <- .stanr_process_standalone_cpp(
         functions_out,
         c(
-          .newstan_model_support_exports,
-          "newstan_exposed_functions",
-          "newstan_rng_set_seed"
+          .stanr_model_support_exports,
+          "stanr_exposed_functions",
+          "stanr_rng_set_seed"
         )
       )
       wrapper_section <- processed$wrapper_section
@@ -449,7 +449,7 @@
     }
   }
 
-  cppflags <- .newstan_base_cppflags()
+  cppflags <- .stanr_base_cppflags()
   if (use_opencl) {
     # Platform/device are pinned to 0/0 at compile time only to satisfy
     # opencl_context.hpp's `#error`-style guards -- they don't constrain
@@ -465,7 +465,7 @@
   base_cppflags <- cppflags
   pch_enabled <- FALSE
   if (precompiled_headers && length(external_cpp) == 0) {
-    pch_flags <- .newstan_pch_flags(base_cppflags, verbose)
+    pch_flags <- .stanr_pch_flags(base_cppflags, verbose)
     pch_enabled <- nzchar(pch_flags)
     cppflags <- paste(pch_flags, base_cppflags)
   }
@@ -474,14 +474,14 @@
   runtime_archive <- system.file(
     "lib",
     Sys.getenv("R_ARCH"),
-    "libnewstan_runner.a",
-    package = "newstan",
+    "libstanr_runner.a",
+    package = "stanr",
     mustWork = TRUE
   )
 
-  tbb_libs <- .newstan_tbb_libs()
+  tbb_libs <- .stanr_tbb_libs()
 
-  # libnewstan_runner.a is always compiled without STAN_OPENCL, while an
+  # libstanr_runner.a is always compiled without STAN_OPENCL, while an
   # OpenCL-enabled model TU defines it; safe only as long as services touch
   # the model solely through the stan::model::model_base virtual interface.
   libs <- paste(shQuote(runtime_archive), tbb_libs)
@@ -490,7 +490,7 @@
   }
 
   compile_model <- function(compilation_cppflags) {
-    .newstan_sourcecpp(
+    .stanr_sourcecpp(
       cpp_file = cpp_file,
       env = env,
       cppflags = compilation_cppflags,
@@ -506,20 +506,20 @@
   # shared by every model: this has to attribute the shared library to *this*
   # hash. A warm cache still loads its library here, so the first compile of a
   # hash in a session always registers one.
-  loaded_before <- .newstan_loaded_dll_paths()
-  .newstan_compile_with_pch_retry(
+  loaded_before <- .stanr_loaded_dll_paths()
+  .stanr_compile_with_pch_retry(
     compile_model,
     cppflags,
     base_cppflags,
     pch_enabled,
     verbose
   )
-  .newstan_register_dynlibs(
+  .stanr_register_dynlibs(
     model_hash,
     cache_dir,
     cpp_file,
     target$alias,
-    setdiff(.newstan_loaded_dll_paths(), loaded_before)
+    setdiff(.stanr_loaded_dll_paths(), loaded_before)
   )
 
   if (target$alias > 0L) {
@@ -583,7 +583,7 @@
 #' @param stanc_options (list) Stan-to-C++ transpiler options. Not yet supported.
 #' @param force_recompile (logical) Should the model be recompiled even if it
 #'   has not been modified? The default is `FALSE`, but can be set via the
-#'   `newstan_force_recompile` option.
+#'   `stanr_force_recompile` option.
 #' @param precompiled_headers (logical) Should precompiled headers be used to
 #'   speed up compilation? The default is `TRUE`.
 #' @param quiet (logical) Should verbose output from compilation be suppressed?
@@ -612,17 +612,17 @@
 #'
 #'   Compiled models are cached persistently on disk (keyed on a hash of the
 #'   generated C++, so the cache is reused across R sessions as long as the
-#'   Stan program, `include_paths`, `external_cpp`, and installed newstan/Stan
-#'   versions are unchanged) under `getOption("newstan_cache_dir")`, which
+#'   Stan program, `include_paths`, `external_cpp`, and installed stanr/Stan
+#'   versions are unchanged) under `getOption("stanr_cache_dir")`, which
 #'   defaults to a subdirectory of [tools::R_user_dir()]. Use
-#'   [newstan_clear_cache()] to remove the cached models and precompiled
+#'   [stanr_clear_cache()] to remove the cached models and precompiled
 #'   headers. On a cache hit, the Stan-to-C++ transpiler is skipped entirely,
 #'   so any transpiler warnings (e.g. from pedantic mode or deprecated
 #'   syntax) are only surfaced the first time a given model is compiled, not
 #'   on subsequent cache hits.
 #'
 #' @seealso [`StanModel`], [`$compile()`][model-method-compile],
-#'   [`$sample()`][model-method-sample], [newstan_clear_cache()]
+#'   [`$sample()`][model-method-sample], [stanr_clear_cache()]
 #'
 #' @examples
 #' \dontrun{
@@ -655,7 +655,7 @@ stan_model <- function(
   user_header = NULL,
   cpp_options = list(),
   stanc_options = list(),
-  force_recompile = getOption("newstan_force_recompile", FALSE),
+  force_recompile = getOption("stanr_force_recompile", FALSE),
   precompiled_headers = TRUE,
   quiet = TRUE,
   external_cpp = NULL,
@@ -685,33 +685,33 @@ stan_model <- function(
 #' Windows refuses to unlink a DLL while it is mapped into the process, so
 #' `unlink(recursive = TRUE)` over a cache tree removes everything *except*
 #' the loaded model artifacts and the directories holding them. This reports
-#' which files those are, so `newstan_clear_cache()` can name them rather
+#' which files those are, so `stanr_clear_cache()` can name them rather
 #' than appear to have succeeded. POSIX unlinks a mapped file without
 #' complaint, so in practice this is only ever non-empty on Windows.
 #'
 #' @noRd
-.newstan_loaded_dlls_under <- function(dir) {
+.stanr_loaded_dlls_under <- function(dir) {
   if (!dir.exists(dir)) {
     return(character())
   }
-  loaded <- .newstan_loaded_dll_paths()
+  loaded <- .stanr_loaded_dll_paths()
   root <- normalizePath(dir, winslash = "/", mustWork = FALSE)
   loaded[startsWith(loaded, paste0(root, "/"))]
 }
 
-#' Clear newstan's persistent compilation caches
+#' Clear stanr's persistent compilation caches
 #'
-#' @description Deletes newstan's on-disk caches of compiled Stan models and
+#' @description Deletes stanr's on-disk caches of compiled Stan models and
 #'   precompiled model headers (PCH), freeing disk space and forcing the next
 #'   compilation(s) to rebuild from scratch.
 #'
 #'   This always clears the package's own default cache root under
-#'   [tools::R_user_dir("newstan", "cache")][tools::R_user_dir()] -- i.e. its
+#'   [tools::R_user_dir("stanr", "cache")][tools::R_user_dir()] -- i.e. its
 #'   `models` and `pch` subdirectories -- regardless of whether
-#'   `getOption("newstan_cache_dir")` or `getOption("newstan_pch_dir")` has
+#'   `getOption("stanr_cache_dir")` or `getOption("stanr_pch_dir")` has
 #'   been set to point compilation at different directories. An overridden
-#'   `newstan_cache_dir`/`newstan_pch_dir` is deliberately left untouched:
-#'   newstan does not own that directory (it may be shared with other
+#'   `stanr_cache_dir`/`stanr_pch_dir` is deliberately left untouched:
+#'   stanr does not own that directory (it may be shared with other
 #'   software or point outside the user cache root entirely), so this
 #'   function only ever removes paths it created by default.
 #'
@@ -732,8 +732,8 @@ stan_model <- function(
 #' @seealso [stan_model()]
 #'
 #' @export
-newstan_clear_cache <- function() {
-  cache_root <- tools::R_user_dir("newstan", "cache")
+stanr_clear_cache <- function() {
+  cache_root <- tools::R_user_dir("stanr", "cache")
   models_dir <- file.path(cache_root, "models")
   pch_dir <- file.path(cache_root, "pch")
   targets <- c(models_dir, pch_dir)
@@ -750,9 +750,9 @@ newstan_clear_cache <- function() {
   # were gone (see the "Models compiled in this session" section above).
   leftover <- targets[dir.exists(targets)]
   if (length(leftover)) {
-    blocking <- unlist(lapply(leftover, .newstan_loaded_dlls_under))
+    blocking <- unlist(lapply(leftover, .stanr_loaded_dlls_under))
     warning(
-      "Could not fully clear the newstan cache. Still present:\n",
+      "Could not fully clear the stanr cache. Still present:\n",
       paste0("  ", leftover, collapse = "\n"),
       if (length(blocking)) {
         paste0(

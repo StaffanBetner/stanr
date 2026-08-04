@@ -1,11 +1,11 @@
-#ifndef NEWSTAN_MODEL_METHODS_HPP
-#define NEWSTAN_MODEL_METHODS_HPP
+#ifndef STANR_MODEL_METHODS_HPP
+#define STANR_MODEL_METHODS_HPP
 
 #include <Rcpp.h>
 #include <stan/model/model_base.hpp>
 #include <stan/services/util/create_rng.hpp>
 
-namespace newstan {
+namespace stanr {
   Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args);
 
   Rcpp::XPtr<stan::rng_t> make_base_rng(unsigned int seed);
@@ -34,6 +34,6 @@ namespace newstan {
     static std::ostream stream(&buffer);
     return stream;
   }
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_MODEL_METHODS_HPP
+#endif  // STANR_MODEL_METHODS_HPP

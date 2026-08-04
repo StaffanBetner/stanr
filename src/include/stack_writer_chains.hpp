@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_STACK_WRITER_CHAINS_HPP
-#define NEWSTAN_STACK_WRITER_CHAINS_HPP
+#ifndef STANR_STACK_WRITER_CHAINS_HPP
+#define STANR_STACK_WRITER_CHAINS_HPP
 
 #include <Rcpp.h>
 #include <RcppEigen.h>
@@ -11,7 +11,7 @@
 #include <vector>
 #include "r_output.hpp"
 
-namespace newstan {
+namespace stanr {
 
   // Stacks per-chain r_sample_writers into iterations x chains x variables R
   // arrays (Fortran/column-major order, matching posterior::draws_array).

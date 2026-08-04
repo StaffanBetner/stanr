@@ -13,12 +13,12 @@ knitr::opts_chunk$set(
 )
 ```
 
-# newstan
+# stanr
 
 <!-- badges: start -->
 <!-- badges: end -->
 
-`newstan` is an R interface for compiling Stan programs and running Stan
+`stanr` is an R interface for compiling Stan programs and running Stan
 services directly from R. It uses an R6-based API similar to `cmdstanr`:
 `stan_model()` returns a `StanModel` object, and inference methods
 (`$sample()`, `$optimize()`, `$variational()`, etc.) return R6 fit objects
@@ -56,11 +56,11 @@ All fit objects inherit from `StanFit` and share common methods:
 
 ## Installation
 
-You can install the development version of newstan from GitHub:
+You can install the development version of stanr from GitHub:
 
 ``` r
 # install.packages("pak")
-pak::pak("andrjohns/newstan")
+pak::pak("andrjohns/stanr")
 ```
 
 ## Compile a Model
@@ -69,7 +69,7 @@ Models are compiled from a string or from a `.stan` file. `stan_model()`
 returns a `StanModel` R6 object.
 
 ```{r compile-model}
-library(newstan)
+library(stanr)
 
 bernoulli_model <- "
 data {

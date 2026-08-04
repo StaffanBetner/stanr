@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_RUN_LAPLACE_HPP
-#define NEWSTAN_RUN_LAPLACE_HPP
+#ifndef STANR_RUN_LAPLACE_HPP
+#define STANR_RUN_LAPLACE_HPP
 
 #include <Rcpp.h>
 #include <stan/services/optimize/laplace_sample.hpp>
@@ -9,7 +9,7 @@
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
 
-namespace newstan {
+namespace stanr {
   template <class Model>
   Rcpp::List run_laplace(Model& model, Rcpp::List args) {
     const Eigen::VectorXd mode = Rcpp::as<Eigen::VectorXd>(args["mode"]);
@@ -21,11 +21,11 @@ namespace newstan {
     const bool verbose = Rcpp::as<bool>(args["verbose"]);
     const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
 
-    newstan::r_sample_writer sample_writer(draws);
+    stanr::r_sample_writer sample_writer(draws);
     stan::callbacks::json_writer<std::ostringstream> hessian_writer(
         std::make_unique<std::ostringstream>());
-    newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt(true);
+    stanr::r_logger logger(verbose, show_exceptions);
+    stanr::r_interrupt interrupt(true);
 
     int return_code;
     if (jacobian) {

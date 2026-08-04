@@ -87,8 +87,8 @@ StanFit <- R6Class(
       private$model_ptr_ <- payload$model_ptr
       private$elapsed_ <- elapsed
       private$default_format_ <- default_format
-      private$draws_ <- .newstan_normalize_draw_names(payload$draws)
-      private$diagnostics_ <- .newstan_normalize_draw_names(payload$diagnostics)
+      private$draws_ <- .stanr_normalize_draw_names(payload$draws)
+      private$diagnostics_ <- .stanr_normalize_draw_names(payload$diagnostics)
       private$inv_metric_ <- payload$inv_metric
       private$par_ <- payload$par
       chains <- metadata$chains %||% 1L
@@ -148,11 +148,11 @@ StanFit <- R6Class(
         # entries (stored on `private$data_` as bare R lists, unflattened,
         # so `$metadata()$data` keeps returning what the user supplied) must
         # be flattened to their dotted per-leaf form here, the same
-        # conversion `.newstan_run_service()` applies when a fit is built
+        # conversion `.stanr_run_service()` applies when a fit is built
         # fresh instead of restored.
         data <- private$data_
         if (any(vapply(data, is.list, logical(1)))) {
-          data <- .newstan_flatten_tuple_values(
+          data <- .stanr_flatten_tuple_values(
             data,
             private$model_$variables()$data
           )
@@ -178,14 +178,14 @@ StanFit <- R6Class(
       if (
         !is.na(private$native_generation_) &&
           private$native_generation_ == private$model_$compile_generation() &&
-          !.newstan_xptr_is_null(private$model_ptr_)
+          !.stanr_xptr_is_null(private$model_ptr_)
       ) {
         return(invisible(NULL))
       }
       # A generation change means the model was recompiled underneath this
       # fit: `model_ptr_`/`rng_ptr_` came from the superseded artifact and
       # must be rebuilt, not probed through its vtable (see
-      # `.newstan_forced_rebuild_target()`). A restore (`native_generation_`
+      # `.stanr_forced_rebuild_target()`). A restore (`native_generation_`
       # NA) is not a generation change -- there the pointer is genuinely
       # absent and the probe/recovery path below handles it.
       generation_changed <- !is.na(private$native_generation_) &&
@@ -236,19 +236,19 @@ StanFit <- R6Class(
       # align, so name matching cannot work for tuples.
       keep <- vapply(
         sized,
-        .newstan_sized_stage_kept,
+        .stanr_sized_stage_kept,
         logical(1),
         transformed_parameters = transformed_parameters,
         generated_quantities = generated_quantities
       )
       kept <- sized[keep]
-      reader <- .newstan_flat_reader(as.numeric(unname(flat)))
+      reader <- .stanr_flat_reader(as.numeric(unname(flat)))
       result <- lapply(kept, function(entry) {
-        .newstan_consume_node(entry$node, reader)
+        .stanr_consume_node(entry$node, reader)
       })
       if (reader$position() != length(flat)) {
         stop(
-          "newstan internal error: the constrained output length (",
+          "stanr internal error: the constrained output length (",
           length(flat),
           ") did not match the expected variable structure ",
           "(consumed ",
@@ -267,13 +267,13 @@ StanFit <- R6Class(
     ) {
       keep <- vapply(
         sized,
-        .newstan_sized_stage_kept,
+        .stanr_sized_stage_kept,
         logical(1),
         transformed_parameters = transformed_parameters,
         generated_quantities = generated_quantities
       )
       kept <- sized[keep]
-      result <- lapply(kept, function(entry) .newstan_skeleton_node(entry$node))
+      result <- lapply(kept, function(entry) .stanr_skeleton_node(entry$node))
       names(result) <- names(kept)
       result
     }
@@ -312,7 +312,7 @@ StanFit <- R6Class(
 NULL
 
 fit_draws <- function(variables = NULL, inc_warmup = FALSE, format = NULL) {
-  inc_warmup <- .newstan_flag(inc_warmup, "inc_warmup")
+  inc_warmup <- .stanr_flag(inc_warmup, "inc_warmup")
   if (is.null(private$draws_)) {
     stop("This fit does not contain draws.", call. = FALSE)
   }
@@ -334,7 +334,7 @@ fit_draws <- function(variables = NULL, inc_warmup = FALSE, format = NULL) {
   if (!is.null(variables)) {
     draws <- posterior::subset_draws(draws, variable = variables)
   }
-  .newstan_as_draws_format(draws, format %||% private$default_format_)
+  .stanr_as_draws_format(draws, format %||% private$default_format_)
 }
 StanFit$set("public", "draws", fit_draws)
 
@@ -605,11 +605,11 @@ fit_constrain_variables <- function(
   transformed_parameters = TRUE,
   generated_quantities = TRUE
 ) {
-  transformed_parameters <- .newstan_flag(
+  transformed_parameters <- .stanr_flag(
     transformed_parameters,
     "transformed_parameters"
   )
-  generated_quantities <- .newstan_flag(
+  generated_quantities <- .stanr_flag(
     generated_quantities,
     "generated_quantities"
   )
@@ -622,7 +622,7 @@ fit_constrain_variables <- function(
     as.logical(generated_quantities)
   )
   metadata <- private$native_call("model_param_metadata")
-  sized <- .newstan_sized_structure(private$model_, metadata)
+  sized <- .stanr_sized_structure(private$model_, metadata)
   private$relist_constrained(
     flat,
     sized,
@@ -647,7 +647,7 @@ fit_unconstrain_variables <- function(variables) {
   # call. Gate the stanc-info cost behind a cheap list check.
   if (any(vapply(variables, is.list, logical(1)))) {
     declared <- private$model_$variables()
-    variables <- .newstan_flatten_tuple_values(variables, declared$parameters)
+    variables <- .stanr_flatten_tuple_values(variables, declared$parameters)
   }
   tryCatch(
     private$native_call("model_unconstrain", variables),
@@ -669,7 +669,7 @@ fit_unconstrain_draws <- function(
   inc_warmup = FALSE
 ) {
   format <- format %||% private$default_format_
-  inc_warmup <- .newstan_flag(inc_warmup, "inc_warmup")
+  inc_warmup <- .stanr_flag(inc_warmup, "inc_warmup")
   source <- draws %||%
     self$draws(
       inc_warmup = inc_warmup,
@@ -680,7 +680,7 @@ fit_unconstrain_draws <- function(
   native_names <- private$model_$native_function(
     "model_constrained_names"
   )(private$model_ptr_, FALSE, FALSE)
-  draw_names <- .newstan_bracket_names(native_names)
+  draw_names <- .stanr_bracket_names(native_names)
   missing <- setdiff(draw_names, posterior::variables(source))
   if (length(missing)) {
     stop(
@@ -710,7 +710,7 @@ fit_unconstrain_draws <- function(
     private$model_ptr_,
     values
   )
-  colnames(result) <- .newstan_bracket_names(colnames(result))
+  colnames(result) <- .stanr_bracket_names(colnames(result))
   result <- posterior::as_draws_df(data.frame(
     as.data.frame(result, check.names = FALSE),
     .chain = source$.chain,
@@ -718,7 +718,7 @@ fit_unconstrain_draws <- function(
     .draw = source$.draw,
     check.names = FALSE
   ))
-  .newstan_as_draws_format(result, format)
+  .stanr_as_draws_format(result, format)
 }
 StanFit$set("public", "unconstrain_draws", fit_unconstrain_draws)
 
@@ -726,16 +726,16 @@ fit_variable_skeleton <- function(
   transformed_parameters = TRUE,
   generated_quantities = TRUE
 ) {
-  transformed_parameters <- .newstan_flag(
+  transformed_parameters <- .stanr_flag(
     transformed_parameters,
     "transformed_parameters"
   )
-  generated_quantities <- .newstan_flag(
+  generated_quantities <- .stanr_flag(
     generated_quantities,
     "generated_quantities"
   )
   metadata <- private$native_call("model_param_metadata")
-  sized <- .newstan_sized_structure(private$model_, metadata)
+  sized <- .stanr_sized_structure(private$model_, metadata)
   private$metadata_skeleton(
     sized,
     transformed_parameters = transformed_parameters,
@@ -877,9 +877,9 @@ StanMCMC <- R6Class(
         metadata,
         default_format = "draws_array"
       )
-      private$warmup_draws_ <- .newstan_normalize_draw_names(warmup)
+      private$warmup_draws_ <- .stanr_normalize_draw_names(warmup)
       private$warmup_diagnostics_ <-
-        .newstan_normalize_draw_names(warmup_diagnostics)
+        .stanr_normalize_draw_names(warmup_diagnostics)
     }
   ),
   cloneable = FALSE
@@ -930,7 +930,7 @@ mcmc_sampler_diagnostics <- function(
   inc_warmup = FALSE,
   format = "draws_array"
 ) {
-  inc_warmup <- .newstan_flag(inc_warmup, "inc_warmup")
+  inc_warmup <- .stanr_flag(inc_warmup, "inc_warmup")
   diagnostics <- private$diagnostics_
   if (is.null(diagnostics)) {
     stop("This fit does not contain sampler diagnostics.", call. = FALSE)
@@ -949,7 +949,7 @@ mcmc_sampler_diagnostics <- function(
       along = "iteration"
     )
   }
-  .newstan_as_draws_format(diagnostics, format)
+  .stanr_as_draws_format(diagnostics, format)
 }
 StanMCMC$set("public", "sampler_diagnostics", mcmc_sampler_diagnostics)
 
@@ -1001,7 +1001,7 @@ mcmc_diagnostic_summary <- function() {
 StanMCMC$set("public", "diagnostic_summary", mcmc_diagnostic_summary)
 
 mcmc_inv_metric <- function(matrix = TRUE) {
-  matrix <- .newstan_flag(matrix, "matrix")
+  matrix <- .stanr_flag(matrix, "matrix")
   metric <- private$inv_metric_
   if (is.null(metric)) {
     stop(
@@ -1097,7 +1097,7 @@ fit_loo <- function(
   if (!requireNamespace("loo", quietly = TRUE)) {
     stop("The `loo` package is required!", call. = FALSE)
   }
-  moment_match <- .newstan_flag(moment_match, "moment_match")
+  moment_match <- .stanr_flag(moment_match, "moment_match")
   if (length(variables) != 1) {
     stop(
       "Only a single variable name is allowed for the 'variables' argument.",
@@ -1190,7 +1190,7 @@ StanMLE <- R6Class(
       par <- payload$par %||% numeric()
       if (!is.null(names(par))) {
         par <- par[!(names(par) %in% c("lp__", "converged__"))]
-        names(par) <- .newstan_bracket_names(names(par))
+        names(par) <- .stanr_bracket_names(names(par))
       }
       payload$par <- par
       if (!is.null(payload$iterations)) {
@@ -1201,7 +1201,7 @@ StanMLE <- R6Class(
           colnames(iterations) != "converged__",
           drop = FALSE
         ]
-        colnames(iterations) <- .newstan_bracket_names(colnames(iterations))
+        colnames(iterations) <- .stanr_bracket_names(colnames(iterations))
         payload$draws <- iterations
       } else if (length(par)) {
         payload$draws <- matrix(
@@ -1309,7 +1309,7 @@ StanLaplace <- R6Class(
       mode = NULL
     ) {
       private$mode_ <- mode
-      payload$draws <- .newstan_rename_draw_columns(payload$draws)
+      payload$draws <- .stanr_rename_draw_columns(payload$draws)
       super$initialize(
         payload,
         model,
@@ -1371,7 +1371,7 @@ StanVB <- R6Class(
       metadata = list()
     ) {
       draws <- payload$draws
-      draws <- .newstan_rename_draw_columns(draws)
+      draws <- .stanr_rename_draw_columns(draws)
       requested <- payload$args$output_samples
       # ADVI writes the posterior mean as the first row before the requested
       # draws; drop it when present so draw counts match what was requested.
@@ -1430,7 +1430,7 @@ StanPathfinder <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      payload$draws <- .newstan_rename_draw_columns(payload$draws)
+      payload$draws <- .stanr_rename_draw_columns(payload$draws)
       super$initialize(
         payload,
         model,

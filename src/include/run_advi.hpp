@@ -1,15 +1,15 @@
-#ifndef NEWSTAN_RUN_ADVI_HPP
-#define NEWSTAN_RUN_ADVI_HPP
+#ifndef STANR_RUN_ADVI_HPP
+#define STANR_RUN_ADVI_HPP
 
 #include <Rcpp.h>
 #include <stan/services/experimental/advi/fullrank.hpp>
 #include <stan/services/experimental/advi/meanfield.hpp>
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
-#include <newstan/r_data_context.hpp>
+#include <stanr/r_data_context.hpp>
 #include "r_logger.hpp"
 
-namespace newstan {
+namespace stanr {
   template <class Model>
   Rcpp::List run_advi(Model& model, Rcpp::List args) {
     const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
@@ -31,13 +31,13 @@ namespace newstan {
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
-    newstan::r_data_context init_ctx(init_list);
-    newstan::r_discard_writer init_writer;
+    stanr::r_data_context init_ctx(init_list);
+    stanr::r_discard_writer init_writer;
     // Stan writes the posterior mean followed by output_samples draws.
-    newstan::r_sample_writer sample_writer(output_samples + 1);
-    newstan::r_discard_writer diagnostic_writer;
-    newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt(true);
+    stanr::r_sample_writer sample_writer(output_samples + 1);
+    stanr::r_discard_writer diagnostic_writer;
+    stanr::r_logger logger(verbose, show_exceptions);
+    stanr::r_interrupt interrupt(true);
 
     int return_code = stan::services::error_codes::CONFIG;
 

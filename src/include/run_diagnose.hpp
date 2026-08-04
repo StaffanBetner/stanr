@@ -1,14 +1,14 @@
-#ifndef NEWSTAN_RUN_DIAGNOSE_HPP
-#define NEWSTAN_RUN_DIAGNOSE_HPP
+#ifndef STANR_RUN_DIAGNOSE_HPP
+#define STANR_RUN_DIAGNOSE_HPP
 
 #include <Rcpp.h>
 #include <stan/services/diagnose/diagnose.hpp>
 #include "r_output.hpp"
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
-#include <newstan/r_data_context.hpp>
+#include <stanr/r_data_context.hpp>
 
-namespace newstan {
+namespace stanr {
   template <class Model>
   Rcpp::List run_diagnose(Model& model, Rcpp::List args) {
     const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
@@ -21,11 +21,11 @@ namespace newstan {
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
-    newstan::r_data_context init_ctx(init_list);
-    newstan::r_discard_writer init_writer;
-    newstan::r_sample_writer param_writer;
-    newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt(true);
+    stanr::r_data_context init_ctx(init_list);
+    stanr::r_discard_writer init_writer;
+    stanr::r_sample_writer param_writer;
+    stanr::r_logger logger(verbose, show_exceptions);
+    stanr::r_interrupt interrupt(true);
 
     // diagnose returns number of failed parameters (not error code)
     int n_failed = stan::services::diagnose::diagnose(

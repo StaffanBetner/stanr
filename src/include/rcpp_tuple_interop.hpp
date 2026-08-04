@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_RCPP_TUPLE_INTEROP_HPP
-#define NEWSTAN_RCPP_TUPLE_INTEROP_HPP
+#ifndef STANR_RCPP_TUPLE_INTEROP_HPP
+#define STANR_RCPP_TUPLE_INTEROP_HPP
 
 // R list <-> std::tuple marshalling for exposed Stan functions.
 // Adapted from cmdstanr's inst/include/rcpp_tuple_interop.hpp with two
@@ -15,20 +15,20 @@
 #include <utility>
 #include <cstddef>
 
-namespace newstan {
+namespace stanr {
 template <typename T> struct contains_tuple : std::false_type {};
 template <typename... T>
 struct contains_tuple<std::tuple<T...>> : std::true_type {};
 template <typename T>
 struct contains_tuple<std::vector<T>> : contains_tuple<T> {};
-}  // namespace newstan
+}  // namespace stanr
 
 namespace Rcpp {
 // Declarations first: each definition must see both so that
 // tuple-inside-array-inside-tuple nestings resolve.
 template <typename... T> SEXP wrap(const std::tuple<T...>& x);
 template <typename T, typename std::enable_if_t<
-    newstan::contains_tuple<T>::value, bool> = true>
+    stanr::contains_tuple<T>::value, bool> = true>
 SEXP wrap(const std::vector<T>& x);
 
 namespace traits {
@@ -55,7 +55,7 @@ SEXP wrap(const std::tuple<T...>& x) {
 }
 
 template <typename T, typename std::enable_if_t<
-    newstan::contains_tuple<T>::value, bool>>
+    stanr::contains_tuple<T>::value, bool>>
 SEXP wrap(const std::vector<T>& x) {
   Rcpp::List out(x.size());
   for (std::size_t i = 0; i < x.size(); ++i) out[i] = Rcpp::wrap(x[i]);
@@ -63,4 +63,4 @@ SEXP wrap(const std::vector<T>& x) {
 }
 }  // namespace Rcpp
 
-#endif  // NEWSTAN_RCPP_TUPLE_INTEROP_HPP
+#endif  // STANR_RCPP_TUPLE_INTEROP_HPP

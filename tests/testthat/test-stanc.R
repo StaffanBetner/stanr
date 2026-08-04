@@ -39,7 +39,7 @@ test_that("stanc reports an unresolved include and its search path", {
 })
 
 test_that("stanc detects circular includes", {
-  include_dir <- tempfile("newstan-includes-")
+  include_dir <- tempfile("stanr-includes-")
   dir.create(include_dir)
   writeLines('#include "second.stan"', file.path(include_dir, "first.stan"))
   writeLines('#include "first.stan"', file.path(include_dir, "second.stan"))
@@ -114,7 +114,7 @@ test_that("model_variables returns correct structure from stanc info", {
     sep = "\n"
   )
 
-  vars <- newstan:::model_variables(code)
+  vars <- stanr:::model_variables(code)
 
   expect_named(
     vars,
@@ -139,7 +139,7 @@ test_that("model_variables handles arrays and matrices", {
     sep = "\n"
   )
 
-  vars <- newstan:::model_variables(code)
+  vars <- stanr:::model_variables(code)
 
   expect_equal(vars$data$y$dimensions, 2L)
   expect_equal(vars$parameters$theta$dimensions, 3L)
@@ -153,8 +153,8 @@ test_that("model_variables allows undefined functions with flag", {
     sep = "\n"
   )
 
-  expect_error(newstan:::model_variables(code), "declared without")
-  vars <- newstan:::model_variables(code, allow_undefined = TRUE)
+  expect_error(stanr:::model_variables(code), "declared without")
+  vars <- stanr:::model_variables(code, allow_undefined = TRUE)
   expect_named(vars$parameters, "x")
 })
 
@@ -235,7 +235,7 @@ test_that("StanModel caches resolved #include code between $compile() and $varia
   # R/stanc.R). So the *total* call count isn't a reliable signal by itself;
   # what matters is that no call after the first actually does resolution
   # work, i.e. is ever invoked with code that still contains "#include".
-  real_resolve <- newstan:::resolve_stan_includes
+  real_resolve <- stanr:::resolve_stan_includes
   work_call_count <- 0
   total_call_count <- 0
   testthat::local_mocked_bindings(
@@ -246,7 +246,7 @@ test_that("StanModel caches resolved #include code between $compile() and $varia
       }
       real_resolve(model_code, ...)
     },
-    .package = "newstan"
+    .package = "stanr"
   )
 
   mod <- stan_model(

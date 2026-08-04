@@ -2,7 +2,7 @@
 ^src/math/(?!(stan|lib$|lib/opencl_([^\/]*)|lib/sundials_([^\/]*)$|lib/sundials_([^\/]*)/src|lib/sundials_([^\/]*)/include))
 ^src/math/lib/sundials_([^\/]*)/src/sunnonlinsol/fixedpoint/fmod
 ^src/sundials
-^inst/include/(?!newstan)
+^inst/include/(?!stanr)
 ^\.Rproj\.user$
 ^LICENSE\.md$
 ^README\.Rmd$
@@ -25,3 +25,4 @@ inst/lib
 .*\.so$
 .*\.dll$
 ^man-roxygen$
+^\.([^\/]*)$

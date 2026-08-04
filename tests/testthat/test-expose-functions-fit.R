@@ -72,7 +72,7 @@ test_that("reading fit$functions before any expose call does not error", {
 })
 
 test_that("a fit without a model binding errors with the exact 'no model binding' message", {
-  fit <- newstan:::StanFit$new(
+  fit <- stanr:::StanFit$new(
     payload = list(),
     model = NULL,
     data = list(),

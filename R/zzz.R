@@ -6,4 +6,4 @@ private <- self <- NULL
 # that depend only on session-stable inputs (installed package versions,
 # toolchain configuration, etc.) -- never on anything that can change within
 # a session, such as file contents covered by the PCH fingerprint.
-.newstan_memo <- new.env(parent = emptyenv())
+.stanr_memo <- new.env(parent = emptyenv())

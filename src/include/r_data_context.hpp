@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_R_DATA_CONTEXT_HPP
-#define NEWSTAN_R_DATA_CONTEXT_HPP
+#ifndef STANR_R_DATA_CONTEXT_HPP
+#define STANR_R_DATA_CONTEXT_HPP
 
 #include <Rcpp.h>
 #include <stan/io/validate_dims.hpp>
@@ -16,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace newstan {
+namespace stanr {
 
 // R list -> stan::io::var_context adapter. Values are copied during
 // construction, so Stan worker threads never access the R API.
@@ -51,6 +51,6 @@ class r_data_context : public stan::io::var_context {
                      const std::vector<size_t>& dims_declared) const override;
 };
 
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_R_DATA_CONTEXT_HPP
+#endif  // STANR_R_DATA_CONTEXT_HPP

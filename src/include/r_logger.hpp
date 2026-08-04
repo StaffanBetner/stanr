@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_R_LOGGER_HPP
-#define NEWSTAN_R_LOGGER_HPP
+#ifndef STANR_R_LOGGER_HPP
+#define STANR_R_LOGGER_HPP
 
 #include <Rcpp.h>
 #include <stan/callbacks/logger.hpp>
@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace newstan {
+namespace stanr {
 
 /**
  * Thread-safe buffered logger for Stan callbacks.
@@ -165,6 +165,6 @@ class r_logger : public stan::callbacks::logger {
   const std::vector<std::string>& history() const { return history_; }
 };
 
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_R_LOGGER_HPP
+#endif  // STANR_R_LOGGER_HPP

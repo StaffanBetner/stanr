@@ -13,7 +13,7 @@ stan_model(
   user_header = NULL,
   cpp_options = list(),
   stanc_options = list(),
-  force_recompile = getOption("newstan_force_recompile", FALSE),
+  force_recompile = getOption("stanr_force_recompile", FALSE),
   precompiled_headers = TRUE,
   quiet = TRUE,
   external_cpp = NULL,
@@ -66,7 +66,7 @@ real Makevars variable.}
 
 \item{force_recompile}{(logical) Should the model be recompiled even if it
 has not been modified? The default is \code{FALSE}, but can be set via the
-\code{newstan_force_recompile} option.}
+\code{stanr_force_recompile} option.}
 
 \item{precompiled_headers}{(logical) Should precompiled headers be used to
 speed up compilation? The default is \code{TRUE}.}
@@ -109,10 +109,10 @@ A \code{\link{StanModel}} object.
 
 Compiled models are cached persistently on disk (keyed on a hash of the
 generated C++, so the cache is reused across R sessions as long as the
-Stan program, \code{include_paths}, \code{external_cpp}, and installed newstan/Stan
-versions are unchanged) under \code{getOption("newstan_cache_dir")}, which
+Stan program, \code{include_paths}, \code{external_cpp}, and installed stanr/Stan
+versions are unchanged) under \code{getOption("stanr_cache_dir")}, which
 defaults to a subdirectory of \code{\link[tools:R_user_dir]{tools::R_user_dir()}}. Use
-\code{\link[=newstan_clear_cache]{newstan_clear_cache()}} to remove the cached models and precompiled
+\code{\link[=stanr_clear_cache]{stanr_clear_cache()}} to remove the cached models and precompiled
 headers. On a cache hit, the Stan-to-C++ transpiler is skipped entirely,
 so any transpiler warnings (e.g. from pedantic mode or deprecated
 syntax) are only surfaced the first time a given model is compiled, not
@@ -151,5 +151,5 @@ fit$summary()
 }
 \seealso{
 \code{\link{StanModel}}, \code{\link[=model-method-compile]{$compile()}},
-\code{\link[=model-method-sample]{$sample()}}, \code{\link[=newstan_clear_cache]{newstan_clear_cache()}}
+\code{\link[=model-method-sample]{$sample()}}, \code{\link[=stanr_clear_cache]{stanr_clear_cache()}}
 }

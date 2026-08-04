@@ -2,28 +2,28 @@ local_test_context()
 
 init_test_cache("pch")
 
-# Tests for precompiled-header subprocess memoization (see .newstan_memo)
+# Tests for precompiled-header subprocess memoization (see .stanr_memo)
 
 reset_pch_memo <- function() {
   rm(
-    list = ls(envir = newstan:::.newstan_memo),
-    envir = newstan:::.newstan_memo
+    list = ls(envir = stanr:::.stanr_memo),
+    envir = stanr:::.stanr_memo
   )
 }
 
-test_that("second identical .newstan_pch_flags() call makes no additional .newstan_system2 calls", {
+test_that("second identical .stanr_pch_flags() call makes no additional .stanr_system2 calls", {
   reset_pch_memo()
   on.exit(reset_pch_memo(), add = TRUE)
 
   call_count <- 0
   testthat::local_mocked_bindings(
-    # A non-empty CXX17 lets `.newstan_compiler_identity()` reach its
+    # A non-empty CXX17 lets `.stanr_compiler_identity()` reach its
     # `--version` probe (mocked below), which is what needs to be exercised.
-    .newstan_rcmd = function(...) "cc",
-    .newstan_system2 = function(...) {
+    .stanr_rcmd = function(...) "cc",
+    .stanr_system2 = function(...) {
       call_count <<- call_count + 1
       # An empty/unrecognized compiler probe result routes
-      # `.newstan_pch_flags()` into its "unsupported compiler" branch before
+      # `.stanr_pch_flags()` into its "unsupported compiler" branch before
       # any cache-directory or PCH-build filesystem work happens, keeping
       # this test side-effect free.
       character()
@@ -33,13 +33,13 @@ test_that("second identical .newstan_pch_flags() call makes no additional .newst
   flags <- "-Ifoo -DBAR"
 
   suppressWarnings(suppressMessages(
-    newstan:::.newstan_pch_flags(flags)
+    stanr:::.stanr_pch_flags(flags)
   ))
   calls_after_first <- call_count
   expect_gte(calls_after_first, 1)
 
   suppressWarnings(suppressMessages(
-    newstan:::.newstan_pch_flags(flags)
+    stanr:::.stanr_pch_flags(flags)
   ))
   calls_after_second <- call_count
 
@@ -47,27 +47,27 @@ test_that("second identical .newstan_pch_flags() call makes no additional .newst
 })
 
 
-test_that(".newstan_r_config() memoizes per variable and routes through .newstan_rcmd", {
+test_that(".stanr_r_config() memoizes per variable and routes through .stanr_rcmd", {
   reset_pch_memo()
   on.exit(reset_pch_memo(), add = TRUE)
 
   call_count <- 0
   testthat::local_mocked_bindings(
-    .newstan_rcmd = function(...) {
+    .stanr_rcmd = function(...) {
       call_count <<- call_count + 1
       "mocked-value"
     }
   )
 
-  first <- newstan:::.newstan_r_config("CXX")
+  first <- stanr:::.stanr_r_config("CXX")
   expect_equal(call_count, 1)
   expect_equal(first, "mocked-value")
 
-  second <- newstan:::.newstan_r_config("CXX")
+  second <- stanr:::.stanr_r_config("CXX")
   expect_equal(call_count, 1)
   expect_equal(second, first)
 
-  newstan:::.newstan_r_config("CXXFLAGS")
+  stanr:::.stanr_r_config("CXXFLAGS")
   expect_equal(call_count, 2)
 })
 
@@ -75,11 +75,11 @@ test_that(".newstan_r_config() memoizes per variable and routes through .newstan
 # The compile-failure retry gate in .compile_stan_model_environment()
 # (R/stan_model.R) should only rebuild the PCH when there's evidence it's
 # stale, not on every sourceCpp() failure. These tests fake out the actual
-# subprocess compiles (via .newstan_system2, as above) *and* Rcpp::sourceCpp()
+# subprocess compiles (via .stanr_system2, as above) *and* Rcpp::sourceCpp()
 # itself, so no real (30-60s) PCH or model compile ever runs.
 
-# A minimal .newstan_rcmd mock shared by both tests below: it answers the
-# `R CMD config CXX17` probe (used by `.newstan_compiler_identity()` to find
+# A minimal .stanr_rcmd mock shared by both tests below: it answers the
+# `R CMD config CXX17` probe (used by `.stanr_compiler_identity()` to find
 # the compiler to run `--version` on) with a fixed compiler name, and every
 # other `R CMD config <var>` probe (used while fingerprinting the PCH) with
 # "".
@@ -90,8 +90,8 @@ mock_pch_rcmd <- function(args, ...) {
   ""
 }
 
-# A minimal .newstan_system2 mock shared by both tests below: it answers the
-# `clang++ --version` probe (so .newstan_pch_flags()'s compiler_type
+# A minimal .stanr_system2 mock shared by both tests below: it answers the
+# `clang++ --version` probe (so .stanr_pch_flags()'s compiler_type
 # resolution is deterministic across dev machines and CI) with a fixed clang
 # identity, and the `... pch` build invocation by creating an empty file at
 # the path the real `make ... pch` recipe would have built -- faking a
@@ -122,15 +122,15 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
   withr::local_options(
-    newstan_cache_dir = file.path(cache_home, "models"),
-    newstan_pch_dir = file.path(cache_home, "pch")
+    stanr_cache_dir = file.path(cache_home, "models"),
+    stanr_pch_dir = file.path(cache_home, "pch")
   )
 
   pch_build_calls <- new.env()
   pch_build_calls$n <- 0L
   testthat::local_mocked_bindings(
-    .newstan_rcmd = mock_pch_rcmd,
-    .newstan_system2 = mock_pch_system2(pch_build_calls)
+    .stanr_rcmd = mock_pch_rcmd,
+    .stanr_system2 = mock_pch_system2(pch_build_calls)
   )
 
   sourceCpp_calls <- 0L
@@ -144,7 +144,7 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
 
   code <- "parameters { real theta; } model { theta ~ normal(0, 1); }"
   expect_error(
-    newstan:::.compile_stan_model_environment(
+    stanr:::.compile_stan_model_environment(
       code = code,
       model_name = "pch_fresh_test"
     ),
@@ -163,15 +163,15 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
   withr::local_options(
-    newstan_cache_dir = file.path(cache_home, "models"),
-    newstan_pch_dir = file.path(cache_home, "pch")
+    stanr_cache_dir = file.path(cache_home, "models"),
+    stanr_pch_dir = file.path(cache_home, "pch")
   )
 
   header <- system.file(
     "include",
-    "newstan",
+    "stanr",
     "model_pch.hpp",
-    package = "newstan",
+    package = "stanr",
     mustWork = TRUE
   )
   original_mtime <- file.mtime(header)
@@ -180,8 +180,8 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   pch_build_calls <- new.env()
   pch_build_calls$n <- 0L
   testthat::local_mocked_bindings(
-    .newstan_rcmd = mock_pch_rcmd,
-    .newstan_system2 = mock_pch_system2(pch_build_calls)
+    .stanr_rcmd = mock_pch_rcmd,
+    .stanr_system2 = mock_pch_system2(pch_build_calls)
   )
 
   sourceCpp_calls <- 0L
@@ -202,7 +202,7 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   code <- "parameters { real theta; } model { theta ~ normal(0, 1); }"
 
   # Call A: establishes a fresh, on-disk PCH via a successful compile.
-  newstan:::.compile_stan_model_environment(
+  stanr:::.compile_stan_model_environment(
     code = code,
     model_name = "pch_stale_test"
   )
@@ -211,14 +211,14 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
 
   # Simulate model_pch.hpp changing after the PCH above was built (e.g. a
   # fresh `R CMD INSTALL` re-copying inst/include/) without anything else
-  # (cppflags, newstan version, ...) changing.
+  # (cppflags, stanr version, ...) changing.
   Sys.setFileTime(header, Sys.time() + 10)
 
   # Call B: identical code -> same model_hash (cpp_file cache hit, stanc()
   # not re-run) and the same memoized PCH flags as call A -- but the PCH on
   # disk is now stale relative to model_pch.hpp's bumped mtime, so the
   # compile-failure handler should rebuild it once and retry once.
-  newstan:::.compile_stan_model_environment(
+  stanr:::.compile_stan_model_environment(
     code = code,
     model_name = "pch_stale_test"
   )
@@ -227,20 +227,20 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
 })
 
 
-test_that(".newstan_dependency_cppflags() memoizes across calls without shelling out", {
+test_that(".stanr_dependency_cppflags() memoizes across calls without shelling out", {
   reset_pch_memo()
   on.exit(reset_pch_memo(), add = TRUE)
 
   call_count <- 0
   testthat::local_mocked_bindings(
-    .newstan_system2 = function(...) {
+    .stanr_system2 = function(...) {
       call_count <<- call_count + 1
       character()
     }
   )
 
-  first <- newstan:::.newstan_dependency_cppflags()
-  second <- newstan:::.newstan_dependency_cppflags()
+  first <- stanr:::.stanr_dependency_cppflags()
+  second <- stanr:::.stanr_dependency_cppflags()
 
   expect_identical(first, second)
   # RcppParallel::CxxFlags() is captured in-process, so this never shells out.

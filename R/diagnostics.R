@@ -5,7 +5,7 @@
 #' gradient check results.
 #'
 #' @noRd
-.newstan_parse_diagnose_output <- function(lines) {
+.stanr_parse_diagnose_output <- function(lines) {
   lp <- NA_real_
   empty_gradients <- data.frame(
     param_idx = integer(0),

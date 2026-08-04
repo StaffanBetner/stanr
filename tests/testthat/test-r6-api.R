@@ -15,7 +15,7 @@ test_that("the old procedural API is not exported", {
       "diagnose",
       "gradient_check"
     ) %in%
-      getNamespaceExports("newstan")
+      getNamespaceExports("stanr")
   ))
 })
 

@@ -91,10 +91,10 @@ test_that("stan_model stores and reports cpp_options via $cpp_options()", {
 })
 
 test_that("a named cpp_options entry compiles successfully (overrides, doesn't break the build)", {
-  # Overriding CXXFLAGS drops newstan's own -O3 -g0 optimization flags, but
+  # Overriding CXXFLAGS drops stanr's own -O3 -g0 optimization flags, but
   # must not break the build: Makeconf's own CXXFLAGS still apply via the
   # outer `withr::with_makevars(assignment = "+=")` layer, and PKG_CPPFLAGS
-  # (carrying the `-I` include path newstan's headers need) is untouched.
+  # (carrying the `-I` include path stanr's headers need) is untouched.
   mod <- stan_model(
     code = '
       parameters { real theta; }
@@ -106,8 +106,8 @@ test_that("a named cpp_options entry compiles successfully (overrides, doesn't b
   expect_true(mod$is_compiled())
 })
 
-test_that(".newstan_parse_cpp_options parses named, '=', and '+=' entries", {
-  parsed <- newstan:::.newstan_parse_cpp_options(
+test_that(".stanr_parse_cpp_options parses named, '=', and '+=' entries", {
+  parsed <- stanr:::.stanr_parse_cpp_options(
     list(
       CXX = "g++",
       "CXXFLAGS = -O3",
@@ -126,32 +126,32 @@ test_that(".newstan_parse_cpp_options parses named, '=', and '+=' entries", {
   )
 })
 
-test_that(".newstan_apply_makevars overrides on '=' and appends on '+='", {
+test_that(".stanr_apply_makevars overrides on '=' and appends on '+='", {
   base <- c(CXXFLAGS = "-g -O2", PKG_LIBS = "-lfoo")
 
   # A named argument (i.e. `op = "="`) overrides rather than appends.
-  overridden <- newstan:::.newstan_apply_makevars(
+  overridden <- stanr:::.stanr_apply_makevars(
     base,
     list(list(name = "CXXFLAGS", op = "=", value = "-O3"))
   )
   expect_equal(unname(overridden[["CXXFLAGS"]]), "-O3")
 
   # `+=` appends to the existing value instead of replacing it.
-  appended <- newstan:::.newstan_apply_makevars(
+  appended <- stanr:::.stanr_apply_makevars(
     base,
     list(list(name = "CXXFLAGS", op = "+=", value = "-Wno-psabi"))
   )
   expect_equal(unname(appended[["CXXFLAGS"]]), "-g -O2 -Wno-psabi")
 
   # `+=` on a name absent from `base` degrades to a plain set.
-  new_var <- newstan:::.newstan_apply_makevars(
+  new_var <- stanr:::.stanr_apply_makevars(
     base,
     list(list(name = "LDFLAGS", op = "+=", value = "-lbar"))
   )
   expect_equal(unname(new_var[["LDFLAGS"]]), "-lbar")
 
   # Assignments are applied in order: override then append composes.
-  composed <- newstan:::.newstan_apply_makevars(
+  composed <- stanr:::.stanr_apply_makevars(
     base,
     list(
       list(name = "CXXFLAGS", op = "=", value = "-O3"),
@@ -165,7 +165,7 @@ test_that(".newstan_apply_makevars overrides on '=' and appends on '+='", {
 
 test_that("stan_model writes the .cpp and a built artifact under the resolved cache dir, not tempdir", {
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
 
   code <- '
     parameters { real theta; }
@@ -174,7 +174,7 @@ test_that("stan_model writes the .cpp and a built artifact under the resolved ca
   mod <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
 
-  cache_dir <- getOption("newstan_cache_dir")
+  cache_dir <- getOption("stanr_cache_dir")
   expect_true(dir.exists(cache_dir))
 
   cpp_files <- list.files(cache_dir, pattern = "[.]cpp$", full.names = TRUE)
@@ -202,8 +202,8 @@ test_that("stan_model writes the .cpp and a built artifact under the resolved ca
 
 test_that("force_recompile builds a fresh artifact under cache_dir without retiring the mapped one", {
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("newstan_cache_dir")
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
+  cache_dir <- getOption("stanr_cache_dir")
 
   artifacts <- function() {
     list.files(
@@ -240,14 +240,14 @@ test_that("force_recompile builds a fresh artifact under cache_dir without retir
   expect_length(fresh, 1L)
 
   # `mod` still holds the superseded build mapped into this session, so the
-  # rebuild must not replace it (see `.newstan_forced_rebuild_target()`): it
+  # rebuild must not replace it (see `.stanr_forced_rebuild_target()`): it
   # survives alongside the fresh artifact, on every platform.
   expect_identical(setdiff(artifact_before, artifact_after), character())
 })
 
 test_that("model_hash is computed before stanc() is called, so a warm cache skips stanc entirely", {
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
 
   call_count <- 0
   real_stanc <- stanc
@@ -256,7 +256,7 @@ test_that("model_hash is computed before stanc() is called, so a warm cache skip
       call_count <<- call_count + 1
       real_stanc(...)
     },
-    .package = "newstan"
+    .package = "stanr"
   )
 
   code <- '
@@ -284,9 +284,9 @@ test_that("model_hash is computed before stanc() is called, so a warm cache skip
   expect_equal(call_count, 2L)
 })
 
-test_that("the newstan_force_recompile option forces a fresh compile on a warm cache", {
+test_that("the stanr_force_recompile option forces a fresh compile on a warm cache", {
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
 
   call_count <- 0
   real_stanc <- stanc
@@ -295,7 +295,7 @@ test_that("the newstan_force_recompile option forces a fresh compile on a warm c
       call_count <<- call_count + 1
       real_stanc(...)
     },
-    .package = "newstan"
+    .package = "stanr"
   )
 
   code <- '
@@ -306,7 +306,7 @@ test_that("the newstan_force_recompile option forces a fresh compile on a warm c
   expect_true(mod$is_compiled())
   expect_lte(call_count, 1L)
 
-  withr::local_options(newstan_force_recompile = TRUE)
+  withr::local_options(stanr_force_recompile = TRUE)
   mod2 <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod2$is_compiled())
   expect_equal(call_count, 2L)
@@ -314,20 +314,20 @@ test_that("the newstan_force_recompile option forces a fresh compile on a warm c
 
 test_that("a forced recompile loads an additional shared library and unloads none", {
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
 
   code <- '
     parameters { real theta; }
     model { theta ~ normal(0, 1); }
   '
   mod <- stan_model(code = code, precompiled_headers = FALSE)
-  loaded_before <- newstan:::.newstan_loaded_dll_paths()
+  loaded_before <- stanr:::.stanr_loaded_dll_paths()
 
   # Unloading the mapped library would leave `mod` (and any fit over the same
   # program) holding pointers into unmapped memory -- see
-  # `.newstan_forced_rebuild_target()`.
+  # `.stanr_forced_rebuild_target()`.
   mod$compile(force_recompile = TRUE, quiet = TRUE)
-  loaded_after <- newstan:::.newstan_loaded_dll_paths()
+  loaded_after <- stanr:::.stanr_loaded_dll_paths()
 
   expect_identical(setdiff(loaded_before, loaded_after), character())
   expect_gt(length(setdiff(loaded_after, loaded_before)), 0L)
@@ -336,20 +336,20 @@ test_that("a forced recompile loads an additional shared library and unloads non
   # The redirected rebuild leaves the canonical cache entry superseded; the
   # stale marker is what stops the next session from loading it.
   expect_length(
-    list.files(getOption("newstan_cache_dir"), pattern = "[.]stale$"),
+    list.files(getOption("stanr_cache_dir"), pattern = "[.]stale$"),
     1L
   )
 })
 
-test_that(".newstan_forced_rebuild_target() redirects only while an artifact is mapped", {
+test_that(".stanr_forced_rebuild_target() redirects only while an artifact is mapped", {
   # The decision itself, without paying for a compile. Cannot be covered
   # end-to-end for the not-mapped branch: reaching it in-process would mean
   # letting `sourceCpp()` unload a library this session is still using, which
   # is the very crash under test.
-  registry <- newstan:::.newstan_dynlib_registry()
+  registry <- stanr:::.stanr_dynlib_registry()
   hash <- "0123456789abcdef"
   cache <- withr::local_tempdir()
-  key <- newstan:::.newstan_registry_key(hash, cache)
+  key <- stanr:::.stanr_registry_key(hash, cache)
   withr::defer(suppressWarnings(rm(list = key, envir = registry)))
 
   canonical <- file.path(cache, paste0("stan_", hash, ".cpp"))
@@ -357,12 +357,12 @@ test_that(".newstan_forced_rebuild_target() redirects only while an artifact is 
   # Nothing built yet, so there is nothing to pull out from under: stay on
   # the canonical translation unit.
   expect_equal(
-    newstan:::.newstan_forced_rebuild_target(hash, cache, TRUE),
+    stanr:::.stanr_forced_rebuild_target(hash, cache, TRUE),
     list(cpp_file = canonical, alias = 0L)
   )
 
   # A recorded but unmapped artifact is still safe to rebuild in place.
-  newstan:::.newstan_register_dynlibs(
+  stanr:::.stanr_register_dynlibs(
     hash,
     cache,
     canonical,
@@ -370,26 +370,26 @@ test_that(".newstan_forced_rebuild_target() redirects only while an artifact is 
     "/no/such/lib.so"
   )
   expect_equal(
-    newstan:::.newstan_forced_rebuild_target(hash, cache, TRUE),
+    stanr:::.stanr_forced_rebuild_target(hash, cache, TRUE),
     list(cpp_file = canonical, alias = 0L)
   )
 
   # A mapped one is not: redirect to an alias translation unit.
-  newstan:::.newstan_register_dynlibs(
+  stanr:::.stanr_register_dynlibs(
     hash,
     cache,
     canonical,
     0L,
-    newstan:::.newstan_loaded_dll_paths()[[1L]]
+    stanr:::.stanr_loaded_dll_paths()[[1L]]
   )
-  redirected <- newstan:::.newstan_forced_rebuild_target(hash, cache, TRUE)
+  redirected <- stanr:::.stanr_forced_rebuild_target(hash, cache, TRUE)
   expect_identical(redirected$alias, 1L)
   expect_false(identical(redirected$cpp_file, canonical))
 
   # Once redirected, every later compile of this hash in this session stays on
   # the redirected translation unit, so models over the same program share the
   # newest artifact instead of splitting across old and new.
-  newstan:::.newstan_register_dynlibs(
+  stanr:::.stanr_register_dynlibs(
     hash,
     cache,
     redirected$cpp_file,
@@ -401,17 +401,17 @@ test_that(".newstan_forced_rebuild_target() redirects only while an artifact is 
   # nothing of its own mapped, so it must not inherit this one's redirect.
   other_cache <- withr::local_tempdir()
   expect_identical(
-    newstan:::.newstan_forced_rebuild_target(hash, other_cache, TRUE)$alias,
+    stanr:::.stanr_forced_rebuild_target(hash, other_cache, TRUE)$alias,
     0L
   )
-  reused <- newstan:::.newstan_forced_rebuild_target(hash, cache, FALSE)
+  reused <- stanr:::.stanr_forced_rebuild_target(hash, cache, FALSE)
   expect_identical(reused$cpp_file, redirected$cpp_file)
 })
 
 test_that("changing external_cpp file contents (same path) changes model_hash and triggers a fresh compile", {
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("newstan_cache_dir")
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
+  cache_dir <- getOption("stanr_cache_dir")
 
   call_count <- 0
   real_stanc <- stanc
@@ -420,7 +420,7 @@ test_that("changing external_cpp file contents (same path) changes model_hash an
       call_count <<- call_count + 1
       real_stanc(...)
     },
-    .package = "newstan"
+    .package = "stanr"
   )
 
   external_cpp_dir <- withr::local_tempdir()
@@ -485,8 +485,8 @@ test_that("changing external_cpp file contents (same path) changes model_hash an
 
 test_that("changing cpp_options changes model_hash and triggers a fresh compile", {
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("newstan_cache_dir")
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
+  cache_dir <- getOption("stanr_cache_dir")
 
   code <- '
     parameters { real theta; }
@@ -494,12 +494,12 @@ test_that("changing cpp_options changes model_hash and triggers a fresh compile"
   '
 
   # `+=` (not a named override) so the internally computed `PKG_CPPFLAGS`
-  # (which carries the `-I` include path newstan's own headers need) is
+  # (which carries the `-I` include path stanr's own headers need) is
   # appended to rather than replaced.
   mod <- stan_model(
     code = code,
     precompiled_headers = FALSE,
-    cpp_options = list("PKG_CPPFLAGS += -DNEWSTAN_TEST_FLAG=1")
+    cpp_options = list("PKG_CPPFLAGS += -DSTANR_TEST_FLAG=1")
   )
   expect_true(mod$is_compiled())
   cpp_files_before <- list.files(cache_dir, pattern = "[.]cpp$")
@@ -510,24 +510,24 @@ test_that("changing cpp_options changes model_hash and triggers a fresh compile"
   mod2 <- stan_model(
     code = code,
     precompiled_headers = FALSE,
-    cpp_options = list("PKG_CPPFLAGS += -DNEWSTAN_TEST_FLAG=2")
+    cpp_options = list("PKG_CPPFLAGS += -DSTANR_TEST_FLAG=2")
   )
   expect_true(mod2$is_compiled())
   cpp_files_after <- list.files(cache_dir, pattern = "[.]cpp$")
   expect_length(cpp_files_after, 2L)
 })
 
-test_that("newstan_clear_cache() removes the models/pch cache dirs and a later compile recreates them", {
+test_that("stanr_clear_cache() removes the models/pch cache dirs and a later compile recreates them", {
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
-  cache_root <- tools::R_user_dir("newstan", "cache")
-  # newstan_clear_cache() always targets tools::R_user_dir()'s default root
+  cache_root <- tools::R_user_dir("stanr", "cache")
+  # stanr_clear_cache() always targets tools::R_user_dir()'s default root
   # (see its docs), never the getOption() overrides -- so these must resolve
   # to that same default root, or compilation below (which does consult the
-  # options) would land somewhere newstan_clear_cache() never looks.
+  # options) would land somewhere stanr_clear_cache() never looks.
   withr::local_options(
-    newstan_cache_dir = file.path(cache_root, "models"),
-    newstan_pch_dir = file.path(cache_root, "pch")
+    stanr_cache_dir = file.path(cache_root, "models"),
+    stanr_pch_dir = file.path(cache_root, "pch")
   )
 
   code <- '
@@ -541,16 +541,16 @@ test_that("newstan_clear_cache() removes the models/pch cache dirs and a later c
   expect_true(dir.exists(models_dir))
 
   # `mod` is still loaded in this session. Windows will not unlink a mapped
-  # DLL, so there newstan_clear_cache() removes all it can and warns about
+  # DLL, so there stanr_clear_cache() removes all it can and warns about
   # the remainder; POSIX unlinks the mapped file and the tree goes entirely.
   on_windows <- .Platform$OS.type == "windows"
   if (on_windows) {
     expect_warning(
-      freed <- newstan_clear_cache(),
-      "Could not fully clear the newstan cache"
+      freed <- stanr_clear_cache(),
+      "Could not fully clear the stanr cache"
     )
   } else {
-    freed <- newstan_clear_cache()
+    freed <- stanr_clear_cache()
   }
   expect_setequal(names(freed), c("models", "pch"))
   expect_equal(unname(freed["models"]), models_dir)
@@ -568,7 +568,7 @@ test_that("newstan_clear_cache() removes the models/pch cache dirs and a later c
     )
     expect_true(all(
       survivors %in%
-        newstan:::.newstan_loaded_dlls_under(
+        stanr:::.stanr_loaded_dlls_under(
           models_dir
         )
     ))
@@ -577,7 +577,7 @@ test_that("newstan_clear_cache() removes the models/pch cache dirs and a later c
   }
 
   # Calling it again with nothing left to release is a harmless no-op.
-  expect_no_error(suppressWarnings(newstan_clear_cache()))
+  expect_no_error(suppressWarnings(stanr_clear_cache()))
 
   mod2 <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod2$is_compiled())
@@ -595,7 +595,7 @@ test_that("stan_model falls back to tempdir when the cache dir is unwritable", {
     file.access(unwritable, 2) != 0,
     "cannot make a directory unwritable in this environment (e.g. running as root)"
   )
-  withr::local_options(newstan_cache_dir = unwritable)
+  withr::local_options(stanr_cache_dir = unwritable)
 
   code <- '
     parameters { real theta; }

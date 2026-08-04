@@ -3,15 +3,15 @@ local_test_context()
 init_test_cache("tuple-data")
 
 # Coverage for the tuple/complex data & init interop: the pure-R flattener
-# (`R/tuples.R`), its wiring into `.newstan_run_service()` /
+# (`R/tuples.R`), its wiring into `.stanr_run_service()` /
 # `fit$unconstrain_variables()`, and the windowed-complex storage in
 # `src/r_data_context.cpp`.
 
-# --- .newstan_flatten_tuple_values(): pure-R unit tests, no compilation ------
+# --- .stanr_flatten_tuple_values(): pure-R unit tests, no compilation ------
 
 test_that("the fast path returns data/init values unchanged when nothing is a list", {
   values <- list(N = 4L, y = c(1, 0, 1, 0), z = 1 + 2i)
-  out <- .newstan_flatten_tuple_values(values, list())
+  out <- .stanr_flatten_tuple_values(values, list())
   expect_identical(out, values)
 })
 
@@ -27,11 +27,11 @@ test_that("flattening a tuple-array variable reproduces the worked example exact
   cv2 <- complex(real = 4:6, imaginary = 14:16)
   values <- list(acv = list(list(cv1, 10), list(cv2, 20)))
 
-  out <- .newstan_flatten_tuple_values(values, declared)
+  out <- .stanr_flatten_tuple_values(values, declared)
 
   expect_equal(as.complex(out$acv.1), c(cv1, cv2))
   expect_equal(dim(out$acv.1), c(2L, 3L))
-  expect_equal(attr(out$acv.1, "newstan_array_dims"), 1L)
+  expect_equal(attr(out$acv.1, "stanr_array_dims"), 1L)
   expect_equal(out$acv.2, c(10, 20))
   expect_null(dim(out$acv.2))
 })
@@ -43,7 +43,7 @@ test_that("a plain (non-array) tuple flattens to per-slot scalars/vectors", {
       dimensions = 0
     )
   )
-  out <- .newstan_flatten_tuple_values(
+  out <- .stanr_flatten_tuple_values(
     list(td = list(1.5, c(2, 3))),
     declared
   )
@@ -65,7 +65,7 @@ test_that("array[2,3] tuple(int, real) flattens in blocked-AoS order", {
     list(list(11L, 1.1), list(12L, 1.2), list(13L, 1.3)),
     list(list(21L, 2.1), list(22L, 2.2), list(23L, 2.3))
   )
-  out <- .newstan_flatten_tuple_values(list(g = value), declared)
+  out <- .stanr_flatten_tuple_values(list(g = value), declared)
 
   # Hand-computed blocked-AoS order: enclosing-array elements enumerated
   # column-major (first index fastest) -- (1,1),(2,1),(1,2),(2,2),(1,3),(2,3).
@@ -87,12 +87,12 @@ test_that("nested tuple(real, array[2] tuple(real, complex)) flattens correctly"
     )
   )
   value <- list(100, list(list(1, 1 + 2i), list(2, 3 + 4i)))
-  out <- .newstan_flatten_tuple_values(list(nt = value), declared)
+  out <- .stanr_flatten_tuple_values(list(nt = value), declared)
 
   expect_equal(out$nt.1, 100)
   expect_equal(out$nt.2.1, c(1, 2))
   expect_equal(out$nt.2.2, c(1 + 2i, 3 + 4i), ignore_attr = TRUE)
-  expect_equal(attr(out$nt.2.2, "newstan_array_dims"), 1L)
+  expect_equal(attr(out$nt.2.2, "stanr_array_dims"), 1L)
 })
 
 test_that("real-valued input is accepted where a tuple slot declares complex", {
@@ -102,7 +102,7 @@ test_that("real-valued input is accepted where a tuple slot declares complex", {
       dimensions = 1
     )
   )
-  out <- .newstan_flatten_tuple_values(
+  out <- .stanr_flatten_tuple_values(
     list(tad = list(list(1L, 2), list(3L, 4))),
     declared
   )
@@ -118,7 +118,7 @@ test_that("a shape mismatch across enclosing array elements errors", {
     )
   )
   expect_error(
-    .newstan_flatten_tuple_values(
+    .stanr_flatten_tuple_values(
       list(g = list(list(c(1, 2)), list(c(1, 2, 3)))),
       declared
     ),
@@ -134,7 +134,7 @@ test_that("a named tuple list errors", {
     )
   )
   expect_error(
-    .newstan_flatten_tuple_values(
+    .stanr_flatten_tuple_values(
       list(td = list(a = 1.5, b = c(2, 3))),
       declared
     ),
@@ -145,12 +145,12 @@ test_that("a named tuple list errors", {
 test_that("a list for a variable not declared as a tuple errors", {
   declared <- list(x = list(type = "real", dimensions = 0))
   expect_error(
-    .newstan_flatten_tuple_values(list(x = list(1, 2)), declared),
+    .stanr_flatten_tuple_values(list(x = list(1, 2)), declared),
     "not declared as a tuple"
   )
   # Also covers a missing declaration entirely (same error class).
   expect_error(
-    .newstan_flatten_tuple_values(list(zzz = list(1, 2)), declared),
+    .stanr_flatten_tuple_values(list(zzz = list(1, 2)), declared),
     "not declared as a tuple"
   )
 })
@@ -163,7 +163,7 @@ test_that("a dotted-name collision with a generated leaf errors", {
     )
   )
   expect_error(
-    .newstan_flatten_tuple_values(
+    .stanr_flatten_tuple_values(
       list(td = list(1.5, c(2, 3)), `td.1` = 99),
       declared
     ),
@@ -179,7 +179,7 @@ test_that("wrong tuple arity errors", {
     )
   )
   expect_error(
-    .newstan_flatten_tuple_values(
+    .stanr_flatten_tuple_values(
       list(td = list(1.5, c(2, 3), 99)),
       declared
     ),
@@ -199,7 +199,7 @@ test_that("a non-rectangular tuple array errors", {
     list(list(21L, 2.1), list(22L, 2.2))
   )
   expect_error(
-    .newstan_flatten_tuple_values(list(g = value), declared),
+    .stanr_flatten_tuple_values(list(g = value), declared),
     "not a rectangular tuple array"
   )
 })
@@ -215,8 +215,8 @@ test_that("a non-rectangular tuple array errors", {
 # for every leaf the battery model echoes. Names are the *native* flat
 # constrained-parameter form -- never the bracketed form -- so the actual
 # bracket strings used to index the draws always come from calling
-# `.newstan_bracket_names()` itself (below), not from a hand-typed guess.
-.newstan_battery_expected <- function(data) {
+# `.stanr_bracket_names()` itself (below), not from a hand-typed guess.
+.stanr_battery_expected <- function(data) {
   complex_entry <- function(prefix, value) {
     stats::setNames(
       c(Re(value), Im(value)),
@@ -300,11 +300,11 @@ test_that("the battery model echoes every input exactly via generated quantities
   )
   expect_equal(fit$return_codes(), 0L)
 
-  expected <- .newstan_battery_expected(data)
+  expected <- .stanr_battery_expected(data)
   # The expected keys are native dotted/colon names; the actual lookup keys
-  # come from calling the real `.newstan_bracket_names()` on them, not from
+  # come from calling the real `.stanr_bracket_names()` on them, not from
   # a hand-typed bracket string.
-  bracket_keys <- .newstan_bracket_names(names(expected))
+  bracket_keys <- .stanr_bracket_names(names(expected))
 
   draws <- fit$draws(format = "draws_df")
   actual_names <- posterior::variables(draws)

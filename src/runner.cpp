@@ -12,9 +12,9 @@
 #include "include/run_laplace.hpp"
 #include "include/run_sampling.hpp"
 #include "include/run_standalone_gqs.hpp"
-#include "newstan/r_data_context.hpp"
+#include "stanr/r_data_context.hpp"
 
-namespace newstan {
+namespace stanr {
 
 Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
   int num_threads = Rcpp::as<int>(args["num_threads"]);
@@ -34,21 +34,21 @@ Rcpp::List run_model(stan::model::model_base& model, Rcpp::List args) {
   std::string method = Rcpp::as<std::string>(args["method"]);
 
   if (method == "sample") {
-    return newstan::run_sampling(model, args);
+    return stanr::run_sampling(model, args);
   } else if (method == "optimize") {
-    return newstan::run_optimizing(model, args);
+    return stanr::run_optimizing(model, args);
   } else if (method == "diagnose") {
-    return newstan::run_diagnose(model, args);
+    return stanr::run_diagnose(model, args);
   } else if (method == "variational") {
-    return newstan::run_advi(model, args);
+    return stanr::run_advi(model, args);
   } else if (method == "generate_quantities") {
-    return newstan::run_standalone_gqs(model, args);
+    return stanr::run_standalone_gqs(model, args);
   } else if (method == "pathfinder") {
-    return newstan::run_pathfinder(model, args);
+    return stanr::run_pathfinder(model, args);
   } else if (method == "laplace") {
-    return newstan::run_laplace(model, args);
+    return stanr::run_laplace(model, args);
   } else {
     Rcpp::stop("Unknown method: " + method);
   }
 }
-}  // namespace newstan
+}  // namespace stanr

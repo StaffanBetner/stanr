@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_R_OUTPUT_HPP
-#define NEWSTAN_R_OUTPUT_HPP
+#ifndef STANR_R_OUTPUT_HPP
+#define STANR_R_OUTPUT_HPP
 
 #include <Rcpp.h>
 #include <RcppEigen.h>
@@ -13,7 +13,7 @@
 #include <vector>
 #include <string>
 
-namespace newstan {
+namespace stanr {
 
 // Collects parameter samples into an Eigen::MatrixXd. Safe for single-writer
 // access per chain during parallel (multi-chain) sampling.
@@ -174,6 +174,6 @@ class r_discard_writer : public stan::callbacks::writer {
   void operator()(const Eigen::Matrix<double, 1, -1>&) override {}
 };
 
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_R_OUTPUT_HPP
+#endif  // STANR_R_OUTPUT_HPP

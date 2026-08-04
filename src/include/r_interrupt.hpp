@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_R_INTERRUPT_H
-#define NEWSTAN_R_INTERRUPT_H
+#ifndef STANR_R_INTERRUPT_H
+#define STANR_R_INTERRUPT_H
 
 #include <Rcpp.h>
 #include <stan/callbacks/interrupt.hpp>
@@ -7,7 +7,7 @@
 #include <atomic>
 #include <stdexcept>
 
-namespace newstan {
+namespace stanr {
 
 // Must be called from R's original thread. Rcpp contains the R longjmp and
 // converts a pending interrupt into this exception.
@@ -57,6 +57,6 @@ class r_interrupt : public stan::callbacks::interrupt {
   }
 };
 
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_R_INTERRUPT_H
+#endif  // STANR_R_INTERRUPT_H

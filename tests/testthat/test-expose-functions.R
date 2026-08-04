@@ -16,7 +16,7 @@ read_fixture <- function(name) {
 test_that("scalar/rng/void functions: stripping, name extraction, registry", {
   cpp_code <- read_fixture("expose-fixture-scalar.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(
+  result <- stanr:::.stanr_process_standalone_cpp(
     cpp_code,
     reserved_names = character()
   )
@@ -65,10 +65,10 @@ test_that("scalar/rng/void functions: stripping, name extraction, registry", {
     'Rcpp::Named("is_rng") = Rcpp::LogicalVector::create(false, true, false)',
     fixed = TRUE
   )
-  expect_match(result$wrapper_section, "newstan_rng_set_seed", fixed = TRUE)
+  expect_match(result$wrapper_section, "stanr_rng_set_seed", fixed = TRUE)
   expect_match(
     result$wrapper_section,
-    "newstan_exposed_functions",
+    "stanr_exposed_functions",
     fixed = TRUE
   )
 })
@@ -76,7 +76,7 @@ test_that("scalar/rng/void functions: stripping, name extraction, registry", {
 test_that("multi-line signatures wrapped mid-parameter are collapsed correctly", {
   cpp_code <- read_fixture("expose-fixture-vecmat.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(
+  result <- stanr:::.stanr_process_standalone_cpp(
     cpp_code,
     reserved_names = character()
   )
@@ -99,7 +99,7 @@ test_that("multi-line signatures wrapped mid-parameter are collapsed correctly",
 test_that("array/nested-vector/int argument and return types", {
   cpp_code <- read_fixture("expose-fixture-array.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(
+  result <- stanr:::.stanr_process_standalone_cpp(
     cpp_code,
     reserved_names = character()
   )
@@ -127,7 +127,7 @@ test_that("array/nested-vector/int argument and return types", {
 test_that("tuple-returning functions are exposed with intact signatures", {
   cpp_code <- read_fixture("expose-fixture-tuple.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(
+  result <- stanr:::.stanr_process_standalone_cpp(
     cpp_code,
     reserved_names = character()
   )
@@ -150,7 +150,7 @@ test_that("overloaded Stan functions keep only the first, with a warning", {
   cpp_code <- read_fixture("expose-fixture-overload.cpp")
 
   expect_warning(
-    result <- newstan:::.newstan_process_standalone_cpp(
+    result <- stanr:::.stanr_process_standalone_cpp(
       cpp_code,
       reserved_names = character()
     ),
@@ -176,7 +176,7 @@ test_that("a name colliding with reserved_names is a hard error", {
   cpp_code <- read_fixture("expose-fixture-scalar.cpp")
 
   expect_error(
-    newstan:::.newstan_process_standalone_cpp(
+    stanr:::.stanr_process_standalone_cpp(
       cpp_code,
       reserved_names = c("my_add", "run_model")
     ),
@@ -186,7 +186,7 @@ test_that("a name colliding with reserved_names is a hard error", {
 
 test_that("a program with no [[stan::function]] markers errors", {
   expect_error(
-    newstan:::.newstan_process_standalone_cpp(
+    stanr:::.stanr_process_standalone_cpp(
       "#include <stan/model/model_header.hpp>\nnamespace model_namespace {\n}\n",
       reserved_names = character()
     ),
@@ -197,7 +197,7 @@ test_that("a program with no [[stan::function]] markers errors", {
 test_that("a program whose only function returns a tuple is exposed successfully", {
   cpp_code <- read_fixture("expose-fixture-tuple-only.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(
+  result <- stanr:::.stanr_process_standalone_cpp(
     cpp_code,
     reserved_names = character()
   )
@@ -213,7 +213,7 @@ test_that("a program whose only function returns a tuple is exposed successfully
 test_that("wrapper_section excludes model_namespace; full_code includes it", {
   cpp_code <- read_fixture("expose-fixture-scalar.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(
+  result <- stanr:::.stanr_process_standalone_cpp(
     cpp_code,
     reserved_names = character()
   )
@@ -256,15 +256,15 @@ functions {
   vector vec_add(vector a, vector b) { return a + b; }
 }
 "
-  env <- newstan:::.compile_standalone_functions_environment(code)
+  env <- stanr:::.compile_standalone_functions_environment(code)
 
-  expect_true(is.function(env$newstan_exposed_functions))
-  expect_true(is.function(env$newstan_rng_set_seed))
+  expect_true(is.function(env$stanr_exposed_functions))
+  expect_true(is.function(env$stanr_rng_set_seed))
   expect_true(is.function(env$my_add))
   expect_true(is.function(env$my_add_rng))
   expect_true(is.function(env$vec_add))
 
-  registry <- env$newstan_exposed_functions()
+  registry <- env$stanr_exposed_functions()
   expect_equal(sort(registry$name), sort(c("my_add", "my_add_rng", "vec_add")))
 
   expect_equal(env$my_add(2, 3), 5)
@@ -295,7 +295,7 @@ functions {
   complex czmul_rng(complex a) { return a * normal_rng(0, 1); }
 }
 "
-  env <- newstan:::.compile_standalone_functions_environment(code)
+  env <- stanr:::.compile_standalone_functions_environment(code)
 
   # tuple(real, vector) return: unnamed list, element 2 shaped as the
   # declared vector.
@@ -340,9 +340,9 @@ functions {
   expect_equal(env$deep_id(deep_in), deep_in)
 
   # `_rng` function taking complex: reproducible with an explicit seed.
-  env$newstan_rng_set_seed(1L)
+  env$stanr_rng_set_seed(1L)
   v1 <- env$czmul_rng(2 + 0i)
-  env$newstan_rng_set_seed(1L)
+  env$stanr_rng_set_seed(1L)
   v2 <- env$czmul_rng(2 + 0i)
   expect_equal(v1, v2)
 })
@@ -353,14 +353,14 @@ functions {
   real cache_reuse_add(real a, real b) { return a + b; }
 }
 "
-  cache_dir <- getOption("newstan_cache_dir")
+  cache_dir <- getOption("stanr_cache_dir")
 
-  env1 <- newstan:::.compile_standalone_functions_environment(code)
+  env1 <- stanr:::.compile_standalone_functions_environment(code)
   n_after_first <- length(
     list.files(cache_dir, pattern = "^functions_.*\\.cpp$")
   )
 
-  env2 <- newstan:::.compile_standalone_functions_environment(code)
+  env2 <- stanr:::.compile_standalone_functions_environment(code)
   n_after_second <- length(
     list.files(cache_dir, pattern = "^functions_.*\\.cpp$")
   )
@@ -370,17 +370,17 @@ functions {
   expect_equal(env2$cache_reuse_add(2, 3), 5)
 })
 
-test_that(".newstan_build_functions_env populates a target env with callable functions, wrapping _rng exports", {
+test_that(".stanr_build_functions_env populates a target env with callable functions, wrapping _rng exports", {
   code <- "
 functions {
   real build_env_add(real a, real b) { return a + b; }
   real build_env_add_rng(real a, real b) { return a + b + normal_rng(0, 1); }
 }
 "
-  compiled_env <- newstan:::.compile_standalone_functions_environment(code)
+  compiled_env <- stanr:::.compile_standalone_functions_environment(code)
   target_env <- new.env()
 
-  newstan:::.newstan_build_functions_env(
+  stanr:::.stanr_build_functions_env(
     compiled_env,
     target_env,
     global = FALSE
@@ -403,17 +403,17 @@ functions {
   expect_error(rng_fn(1))
 })
 
-test_that(".newstan_build_functions_env(global = TRUE) assigns into a designated env, never the real .GlobalEnv", {
+test_that(".stanr_build_functions_env(global = TRUE) assigns into a designated env, never the real .GlobalEnv", {
   code <- "
 functions {
   real global_test_add(real a, real b) { return a + b; }
 }
 "
-  compiled_env <- newstan:::.compile_standalone_functions_environment(code)
+  compiled_env <- stanr:::.compile_standalone_functions_environment(code)
   target_env <- new.env()
   test_global <- new.env()
 
-  newstan:::.newstan_build_functions_env(
+  stanr:::.stanr_build_functions_env(
     compiled_env,
     target_env,
     global = TRUE,
@@ -425,16 +425,16 @@ functions {
   expect_false(exists("global_test_add", envir = globalenv(), inherits = FALSE))
 })
 
-test_that("rebuilding via .newstan_build_functions_env clears stale bindings from a previous build", {
+test_that("rebuilding via .stanr_build_functions_env clears stale bindings from a previous build", {
   code <- "
 functions {
   real rebuild_add(real a, real b) { return a + b; }
 }
 "
-  compiled_env <- newstan:::.compile_standalone_functions_environment(code)
+  compiled_env <- stanr:::.compile_standalone_functions_environment(code)
   target_env <- new.env()
 
-  newstan:::.newstan_build_functions_env(
+  stanr:::.stanr_build_functions_env(
     compiled_env,
     target_env,
     global = FALSE
@@ -442,7 +442,7 @@ functions {
   assign("stale_binding", 123, envir = target_env)
   expect_true(exists("stale_binding", envir = target_env, inherits = FALSE))
 
-  newstan:::.newstan_build_functions_env(
+  stanr:::.stanr_build_functions_env(
     compiled_env,
     target_env,
     global = FALSE
@@ -652,8 +652,8 @@ model {
 }
 "
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("newstan_cache_dir")
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
+  cache_dir <- getOption("stanr_cache_dir")
 
   call_count <- 0
   real_stanc <- stanc
@@ -662,7 +662,7 @@ model {
       call_count <<- call_count + 1
       real_stanc(...)
     },
-    .package = "newstan"
+    .package = "stanr"
   )
 
   mod1 <- stan_model(
@@ -708,8 +708,8 @@ model {
 }
 "
   cache_root <- withr::local_tempdir()
-  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("newstan_cache_dir")
+  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
+  cache_dir <- getOption("stanr_cache_dir")
 
   mod_plain <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod_plain$is_compiled())
@@ -800,15 +800,15 @@ model {
   )
 
   # A compile_standalone model's compiled_env_ already provides
-  # newstan_exposed_functions(), so $expose_stan_functions() must take the
+  # stanr_exposed_functions(), so $expose_stan_functions() must take the
   # fast path and never call the separate-TU compile helper.
   testthat::local_mocked_bindings(
     .compile_standalone_functions_environment = function(...) {
       stop(
-        "must not recompile: compile_standalone model already has newstan_exposed_functions"
+        "must not recompile: compile_standalone model already has stanr_exposed_functions"
       )
     },
-    .package = "newstan"
+    .package = "stanr"
   )
 
   expect_no_error(mod$expose_stan_functions(global = TRUE))

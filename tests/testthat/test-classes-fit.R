@@ -4,15 +4,15 @@ init_test_cache("classes-fit")
 
 # Tests for internal helpers in R/classes-fit.R
 
-test_that(".newstan_bracket_names converts dotted Stan names to bracket form", {
-  expect_equal(newstan:::.newstan_bracket_names("alpha"), "alpha")
-  expect_equal(newstan:::.newstan_bracket_names("beta.1"), "beta[1]")
-  expect_equal(newstan:::.newstan_bracket_names("theta.2.3"), "theta[2,3]")
-  expect_equal(newstan:::.newstan_bracket_names("x[1]"), "x[1]")
+test_that(".stanr_bracket_names converts dotted Stan names to bracket form", {
+  expect_equal(stanr:::.stanr_bracket_names("alpha"), "alpha")
+  expect_equal(stanr:::.stanr_bracket_names("beta.1"), "beta[1]")
+  expect_equal(stanr:::.stanr_bracket_names("theta.2.3"), "theta[2,3]")
+  expect_equal(stanr:::.stanr_bracket_names("x[1]"), "x[1]")
 })
 
 
-test_that(".newstan_bracket_names handles a vector mixing dotted and plain names", {
+test_that(".stanr_bracket_names handles a vector mixing dotted and plain names", {
   input <- c("alpha", "beta.1", "theta.2.3", "x[1]", "par.12.3", "sigma123")
   expected <- c(
     "alpha",
@@ -22,7 +22,7 @@ test_that(".newstan_bracket_names handles a vector mixing dotted and plain names
     "par[12,3]",
     "sigma123"
   )
-  expect_equal(newstan:::.newstan_bracket_names(input), expected)
+  expect_equal(stanr:::.stanr_bracket_names(input), expected)
 })
 
 
@@ -59,7 +59,7 @@ test_that("direct fit method coverage: time, init, code, print, lp, num_chains",
 
   expect_identical(fit$init(), list(theta = 0.5))
 
-  no_init_fit <- newstan:::StanFit$new(
+  no_init_fit <- stanr:::StanFit$new(
     payload = list(),
     model = NULL,
     data = list(),
@@ -125,7 +125,7 @@ test_that("StanGQ$num_chains() reports the draws' own chain count, 0L with no dr
   expect_equal(gq$num_chains(), 1L)
   expect_equal(gq$num_chains(), posterior::nchains(gq$draws()))
 
-  empty_gq <- newstan:::StanGQ$new(
+  empty_gq <- stanr:::StanGQ$new(
     payload = list(),
     model = NULL,
     data = list(),
@@ -158,7 +158,7 @@ test_that("save_object() does not serialize the fit data twice", {
   set.seed(1)
   data <- list(x = stats::rnorm(1e6)) # ~8MB as doubles
 
-  fit <- newstan:::StanFit$new(
+  fit <- stanr:::StanFit$new(
     payload = list(),
     model = NULL,
     data = data,

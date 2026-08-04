@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_RUN_SAMPLING_HPP
-#define NEWSTAN_RUN_SAMPLING_HPP
+#ifndef STANR_RUN_SAMPLING_HPP
+#define STANR_RUN_SAMPLING_HPP
 
 #include <Rcpp.h>
 #include <memory>
@@ -25,11 +25,11 @@
 #include "r_logger.hpp"
 #include "r_metric_writer.hpp"
 #include "r_worker.hpp"
-#include <newstan/r_data_context.hpp>
-#include <newstan/r_metric_context.hpp>
+#include <stanr/r_data_context.hpp>
+#include <stanr/r_metric_context.hpp>
 #include "stack_writer_chains.hpp"
 
-namespace newstan {
+namespace stanr {
 
   template <class Model>
   std::vector<std::shared_ptr<stan::io::var_context>> make_metric_contexts(
@@ -76,7 +76,7 @@ namespace newstan {
                       static_cast<size_t>(matrix.ncol())};
       }
       contexts.emplace_back(
-          std::make_shared<newstan::r_metric_context>(std::move(values),
+          std::make_shared<stanr::r_metric_context>(std::move(values),
                                                        std::move(dimensions)));
     }
     return contexts;
@@ -118,7 +118,7 @@ namespace newstan {
     const std::vector<std::string> diagnostic_names =
         Rcpp::as<std::vector<std::string>>(args["diagnostic_names"]);
 
-    newstan::r_logger logger(verbose, show_exceptions);
+    stanr::r_logger logger(verbose, show_exceptions);
 
     const auto saved_rows = [num_thin](int iterations) {
       return iterations / num_thin + (iterations % num_thin != 0);
@@ -132,13 +132,13 @@ namespace newstan {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     // --- Build per-chain contexts and writers ---
-    const auto init_ctx = std::make_shared<newstan::r_data_context>(init_list);
-    std::vector<std::shared_ptr<newstan::r_data_context>> init_ctxs(
+    const auto init_ctx = std::make_shared<stanr::r_data_context>(init_list);
+    std::vector<std::shared_ptr<stanr::r_data_context>> init_ctxs(
         num_chains, init_ctx);
-    std::vector<newstan::r_discard_writer> init_writers;
-    std::vector<newstan::r_sample_writer> sample_writers;
-    std::vector<newstan::r_discard_writer> diag_writers;
-    std::vector<newstan::r_metric_writer> metric_writers;
+    std::vector<stanr::r_discard_writer> init_writers;
+    std::vector<stanr::r_sample_writer> sample_writers;
+    std::vector<stanr::r_discard_writer> diag_writers;
+    std::vector<stanr::r_metric_writer> metric_writers;
 
     init_writers.reserve(num_chains);
     sample_writers.reserve(num_chains);
@@ -157,9 +157,9 @@ namespace newstan {
                                              metric_supplied);
     const bool multi_chain = num_chains > 1;
 
-    int return_code = newstan::run_on_worker_thread(
+    int return_code = stanr::run_on_worker_thread(
         logger, "Sampling",
-        [&](newstan::r_interrupt& interrupt) -> int {
+        [&](stanr::r_interrupt& interrupt) -> int {
     int return_code = stan::services::error_codes::CONFIG;
     // --- Validation & dispatch ---
     if (algorithm == "hmc" && adapt_engaged && num_warmup == 0) {
@@ -377,7 +377,7 @@ namespace newstan {
       Rcpp::List inv_metric(num_chains);
       Rcpp::NumericVector step_size(num_chains);
       for (int i = 0; i < num_chains; ++i) {
-        const newstan::r_metric_writer& w = metric_writers[i];
+        const stanr::r_metric_writer& w = metric_writers[i];
         step_size[i] = w.stepsize();
         if (w.is_dense()) {
           inv_metric[i] = w.inv_metric_matrix();

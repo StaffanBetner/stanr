@@ -1,13 +1,13 @@
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
-.newstan_flag <- function(x, name) {
+.stanr_flag <- function(x, name) {
   if (!is.logical(x) || length(x) != 1L || is.na(x)) {
     stop("`", name, "` must be TRUE or FALSE.", call. = FALSE)
   }
   x
 }
 
-.newstan_int <- function(x, name, min = 0L) {
+.stanr_int <- function(x, name, min = 0L) {
   if (
     !is.numeric(x) ||
       length(x) != 1L ||
@@ -31,7 +31,7 @@
 # would (so, unlike a plain named list, the same name may legitimately appear
 # more than once, e.g. an overriding `CXXFLAGS = "-O3"` followed by an
 # appending `"CXXFLAGS += -Wall"`).
-.newstan_parse_cpp_options <- function(cpp_options) {
+.stanr_parse_cpp_options <- function(cpp_options) {
   if (!is.list(cpp_options)) {
     stop("`cpp_options` must be a list.", call. = FALSE)
   }
@@ -93,7 +93,7 @@
   })
 }
 
-.newstan_seed <- function(seed) {
+.stanr_seed <- function(seed) {
   if (is.null(seed)) {
     seed <- as.integer(stats::runif(1, 1, .Machine$integer.max))
   }
@@ -116,7 +116,7 @@
 
 # Shared execution path for all StanModel service methods: seed resolution,
 # native model construction, service dispatch, timing, and payload assembly.
-.newstan_run_service <- function(
+.stanr_run_service <- function(
   self,
   data,
   seed,
@@ -125,7 +125,7 @@
   payload_fn # function(result) -> list of method-specific fields
 ) {
   started <- proc.time()[["elapsed"]]
-  seed <- .newstan_seed(seed)
+  seed <- .stanr_seed(seed)
   resolved_init <- resolve_init(init)
   # Tuple-typed data/init values arrive as bare unnamed R lists; flatten
   # them into the dotted per-leaf entries `r_data_context` expects before
@@ -134,8 +134,8 @@
   has_list <- function(x) any(vapply(x, is.list, logical(1)))
   if (has_list(data) || has_list(resolved_init$values)) {
     declared <- self$variables()
-    data <- .newstan_flatten_tuple_values(data, declared$data)
-    resolved_init$values <- .newstan_flatten_tuple_values(
+    data <- .stanr_flatten_tuple_values(data, declared$data)
+    resolved_init$values <- .stanr_flatten_tuple_values(
       resolved_init$values,
       declared$parameters
     )
@@ -165,12 +165,12 @@
 #' no arguments): the bundled header cannot change within a session.
 #'
 #' @noRd
-.newstan_stan_version <- function() {
-  cached <- .newstan_memo$stan_version
+.stanr_stan_version <- function() {
+  cached <- .stanr_memo$stan_version
   if (!is.null(cached)) {
     return(cached)
   }
-  header <- system.file("include", "stan", "version.hpp", package = "newstan")
+  header <- system.file("include", "stan", "version.hpp", package = "stanr")
   value <- if (!nzchar(header) || !file.exists(header)) {
     NA_character_
   } else {
@@ -193,11 +193,11 @@
       sep = "."
     )
   }
-  .newstan_memo$stan_version <- value
+  .stanr_memo$stan_version <- value
   value
 }
 
-.newstan_as_draws_format <- function(x, format) {
+.stanr_as_draws_format <- function(x, format) {
   switch(
     format,
     draws_array = posterior::as_draws_array(x),
@@ -209,7 +209,7 @@
   )
 }
 
-.newstan_bracket_names <- function(names) {
+.stanr_bracket_names <- function(names) {
   has_dot <- grepl(".", names, fixed = TRUE)
   if (!any(has_dot)) {
     return(names)
@@ -221,35 +221,35 @@
   names
 }
 
-.newstan_normalize_draw_names <- function(x) {
+.stanr_normalize_draw_names <- function(x) {
   if (is.null(x)) {
     return(NULL)
   }
   if (inherits(x, "draws_array")) {
     names <- dimnames(x)[[3]]
-    dimnames(x)[[3]] <- .newstan_bracket_names(names)
+    dimnames(x)[[3]] <- .stanr_bracket_names(names)
   } else {
     names <- colnames(x)
     model_columns <- !startsWith(names, ".")
-    names[model_columns] <- .newstan_bracket_names(names[model_columns])
+    names[model_columns] <- .stanr_bracket_names(names[model_columns])
     colnames(x) <- names
   }
   x
 }
 
-.newstan_xptr_is_null <- function(ptr) {
+.stanr_xptr_is_null <- function(ptr) {
   # An Rcpp `XPtr`'s underlying C++ address does not survive
   # `serialize()`/`readRDS()`: the restored pointer's address is written
   # back as null, so native calls made through it fail loudly (rather than
   # silently) after a restore.
-  is.null(ptr) || .Call(newstan_xptr_is_null, ptr)
+  is.null(ptr) || .Call(stanr_xptr_is_null, ptr)
 }
 
-.newstan_rename_draw_columns <- function(x) {
+.stanr_rename_draw_columns <- function(x) {
   if (is.null(x)) {
     return(NULL)
   }
-  x <- .newstan_normalize_draw_names(x)
+  x <- .stanr_normalize_draw_names(x)
   names <- if (inherits(x, "draws_array")) dimnames(x)[[3]] else colnames(x)
   names[names == "log_p__"] <- "lp__"
   names[names == "log_q__" | names == "log_g__"] <- "lp_approx__"
@@ -265,12 +265,12 @@
 #
 # This module holds normalization helpers shared across StanModel service
 # methods that aren't part of the single shared execution path in
-# `.newstan_run_service()` (see R/classes-model.R). Bundled Stan defaults
+# `.stanr_run_service()` (see R/classes-model.R). Bundled Stan defaults
 # live directly in each service method's own signature.
 
 # Validate and resolve chain count/IDs for sampling
-.newstan_validate_chains <- function(chains, chain_ids) {
-  chains <- .newstan_int(chains, "chains", min = 1L)
+.stanr_validate_chains <- function(chains, chain_ids) {
+  chains <- .stanr_int(chains, "chains", min = 1L)
   if (
     !is.numeric(chain_ids) ||
       length(chain_ids) != chains ||
@@ -299,7 +299,7 @@
 #
 # Wraps a single metric in a list (recycled across chains) or validates
 # a per-chain list. Issues a warning if inv_metric is supplied with unit_e.
-.newstan_normalize_inv_metric <- function(
+.stanr_normalize_inv_metric <- function(
   inv_metric,
   metric,
   chains

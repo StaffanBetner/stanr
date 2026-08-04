@@ -44,8 +44,8 @@ init_test_cache <- function(test_name) {
   }
 
   options(
-    newstan_cache_dir = file.path(cache_path, "models"),
-    newstan_pch_dir = file.path(cache_path, "pch")
+    stanr_cache_dir = file.path(cache_path, "models"),
+    stanr_pch_dir = file.path(cache_path, "pch")
   )
 }
 

@@ -6,7 +6,7 @@
 # lived in PKG_CPPFLAGS. Defined once and shared between the model TU compile
 # (R/stan_model.R) and the precompiled header build below so the two stay
 # byte-identical -- GCC/clang reject a PCH built with mismatched flags.
-.newstan_opt_flags <- function() {
+.stanr_opt_flags <- function() {
   flags <- "-O3 -g0 -w"
 
   # Floating-point contraction handling can cause numerical inaccuracies
@@ -21,33 +21,33 @@
 
 # Wrapper around `system2()`: a seam so tests can count/mock subprocess
 # invocations via `testthat::local_mocked_bindings()`.
-.newstan_system2 <- function(...) system2(...)
+.stanr_system2 <- function(...) system2(...)
 
 # Same seam for `tools::Rcmd()`, which shells out via `system2()` internally
-# but not through `.newstan_system2()`.
-.newstan_rcmd <- function(...) tools::Rcmd(...)
+# but not through `.stanr_system2()`.
+.stanr_rcmd <- function(...) tools::Rcmd(...)
 
 #' Return the compiler configuration value used by R's build system.
 #'
 #' Memoized for the life of the R session: `R CMD config <variable>` is
 #' session-stable, so the underlying subprocess only ever runs once per
-#' `variable`. Delegates to `tools::Rcmd()` (via `.newstan_rcmd()`) rather
+#' `variable`. Delegates to `tools::Rcmd()` (via `.stanr_rcmd()`) rather
 #' than constructing the `R CMD` invocation by hand, so the Windows
 #' `Rcmd.exe` front-end is used correctly there too.
 #'
 #' @noRd
-.newstan_r_config <- function(variable) {
+.stanr_r_config <- function(variable) {
   memo_key <- paste0("r_config:", variable)
-  cached <- .newstan_memo[[memo_key]]
+  cached <- .stanr_memo[[memo_key]]
   if (!is.null(cached)) {
     return(cached)
   }
   output <- tryCatch(
-    .newstan_rcmd(c("config", variable), stdout = TRUE, stderr = FALSE),
+    .stanr_rcmd(c("config", variable), stdout = TRUE, stderr = FALSE),
     error = function(e) character()
   )
   value <- paste(output, collapse = "\n")
-  .newstan_memo[[memo_key]] <- value
+  .stanr_memo[[memo_key]] <- value
   value
 }
 
@@ -61,8 +61,8 @@
 #' out to `Rscript`.
 #'
 #' @noRd
-.newstan_dependency_cppflags <- function() {
-  cached <- .newstan_memo$dependency_cppflags
+.stanr_dependency_cppflags <- function() {
+  cached <- .stanr_memo$dependency_cppflags
   if (!is.null(cached)) {
     return(cached)
   }
@@ -86,7 +86,7 @@
     ),
     trimws(paste(rcpp_parallel_flags, collapse = " "))
   )
-  .newstan_memo$dependency_cppflags <- flags
+  .stanr_memo$dependency_cppflags <- flags
   flags
 }
 
@@ -98,7 +98,7 @@
 #' is absent.
 #'
 #' @noRd
-.newstan_makeconf <- function() {
+.stanr_makeconf <- function() {
   if (nzchar(.Platform$r_arch)) {
     arch_makeconf <- file.path(R.home("etc"), .Platform$r_arch, "Makeconf")
     if (file.exists(arch_makeconf)) {
@@ -125,11 +125,11 @@
 #' `mkdir -p` would fail and abort the build).
 #'
 #' @noRd
-.newstan_pch_makefile <- function() {
-  makefile <- tempfile("newstan-pch-", fileext = ".mk")
+.stanr_pch_makefile <- function() {
+  makefile <- tempfile("stanr-pch-", fileext = ".mk")
   writeLines(
     c(
-      paste("include", .newstan_makeconf()),
+      paste("include", .stanr_makeconf()),
       ".PHONY: pch",
       "pch:",
       "\t$(CXX17) $(CXX17STD) $(ALL_CPPFLAGS) $(CXX17FLAGS) $(CXX17PICFLAGS) -x c++-header \"$(HEADER)\" -o \"$(PCH)\" $(EXTRA_CXXFLAGS)"
@@ -143,24 +143,24 @@
 #'
 #' Memoized for the life of the R session (single key -- the toolchain
 #' cannot change mid-session). Used to select PCH flags in
-#' `.newstan_pch_flags()` (clang vs gcc), and as a component of `model_hash`
+#' `.stanr_pch_flags()` (clang vs gcc), and as a component of `model_hash`
 #' (`.compile_stan_model_environment()`, R/stan_model.R): `Rcpp::sourceCpp()`'s
 #' own cache has no notion of compiler identity, so an in-place toolchain
 #' upgrade could otherwise leave a stale `.so` reloaded indefinitely.
 #'
 #' @noRd
-.newstan_compiler_identity <- function() {
-  cached <- .newstan_memo$compiler_identity
+.stanr_compiler_identity <- function() {
+  cached <- .stanr_memo$compiler_identity
   if (!is.null(cached)) {
     return(cached)
   }
-  cxx17 <- .newstan_r_config("CXX17")
+  cxx17 <- .stanr_r_config("CXX17")
   identity <- if (!nzchar(cxx17)) {
     ""
   } else {
     cxx17_words <- strsplit(cxx17, "\\s+")[[1]]
     output <- tryCatch(
-      .newstan_system2(
+      .stanr_system2(
         cxx17_words[[1]],
         c(cxx17_words[-1], "--version"),
         stdout = TRUE,
@@ -170,13 +170,13 @@
     )
     paste(output, collapse = "\n")
   }
-  .newstan_memo$compiler_identity <- identity
+  .stanr_memo$compiler_identity <- identity
   identity
 }
 
 #' Return the on-disk path of the PCH currently memoized for `cppflags`.
 #'
-#' Reconstructs the exact memo key `.newstan_pch_flags()` uses for a given
+#' Reconstructs the exact memo key `.stanr_pch_flags()` uses for a given
 #' `cppflags` (the key does not depend on `rebuild` -- the memo represents
 #' steady-state resolved flags regardless of how they were resolved) and
 #' returns the associated PCH path, if any. Used by
@@ -185,21 +185,21 @@
 #' duplicating the digest key construction there.
 #'
 #' Returns `NA_character_` when no PCH is memoized for `cppflags` (either
-#' `.newstan_pch_flags()` was never called with these flags in this session,
+#' `.stanr_pch_flags()` was never called with these flags in this session,
 #' or it was and PCH was unavailable, e.g. no `make`).
 #'
 #' @noRd
-.newstan_pch_current <- function(cppflags) {
+.stanr_pch_current <- function(cppflags) {
   memo_key <- paste0("pch_flags:", digest::digest(cppflags))
-  .newstan_memo[[memo_key]]$pch %||% NA_character_
+  .stanr_memo[[memo_key]]$pch %||% NA_character_
 }
 
 #' Return flags that make sourceCpp use a cached model PCH.
 #'
-#' Precompiles `newstan/model_pch.hpp` (`src/include/model_pch.hpp`, mirrored
-#' to the installed package as `inst/include/newstan/model_pch.hpp`), which
+#' Precompiles `stanr/model_pch.hpp` (`src/include/model_pch.hpp`, mirrored
+#' to the installed package as `inst/include/stanr/model_pch.hpp`), which
 #' transitively covers `stan/model/model_header.hpp`, `Rcpp.h`, and the
-#' newstan wrapper headers -- the full cold-compiled preamble of an assembled
+#' stanr wrapper headers -- the full cold-compiled preamble of an assembled
 #' model translation unit (`inst/stan_model.cpp`).
 #' The resolved flags are memoized per-session, keyed on `cppflags` alone (not
 #' `rebuild`). A memo hit still revalidates the cached PCH via
@@ -215,33 +215,33 @@
 #'   beside it, is sufficient.
 #'
 #' @noRd
-.newstan_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
+.stanr_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
   memo_key <- paste0("pch_flags:", digest::digest(cppflags))
   if (!rebuild) {
-    cached <- .newstan_memo[[memo_key]]
+    cached <- .stanr_memo[[memo_key]]
     if (!is.null(cached) && (is.na(cached$pch) || file.exists(cached$pch))) {
       return(cached$flags)
     }
   }
 
   remember <- function(flags, pch = NA_character_) {
-    .newstan_memo[[memo_key]] <- list(flags = flags, pch = pch)
+    .stanr_memo[[memo_key]] <- list(flags = flags, pch = pch)
     flags
   }
 
   header <- system.file(
     "include",
-    "newstan",
+    "stanr",
     "model_pch.hpp",
-    package = "newstan",
+    package = "stanr",
     mustWork = TRUE
   )
-  newstan_include_dir <- system.file(
+  stanr_include_dir <- system.file(
     "include",
-    package = "newstan",
+    package = "stanr",
     mustWork = TRUE
   )
-  dependency_flags <- .newstan_dependency_cppflags()
+  dependency_flags <- .stanr_dependency_cppflags()
   pch_cppflags <- paste(c(cppflags, dependency_flags), collapse = " ")
   make <- Sys.which("make")
   if (!nzchar(make)) {
@@ -252,9 +252,9 @@
     return(remember(""))
   }
 
-  makefile <- .newstan_pch_makefile()
+  makefile <- .stanr_pch_makefile()
   on.exit(unlink(makefile), add = TRUE)
-  compiler <- .newstan_compiler_identity()
+  compiler <- .stanr_compiler_identity()
   compiler_type <- if (grepl("clang", compiler, ignore.case = TRUE)) {
     "clang"
   } else if (grepl("gcc|g\\+\\+", compiler, ignore.case = TRUE)) {
@@ -269,25 +269,25 @@
 
   fingerprint <- digest::digest(
     list(
-      newstan = as.character(utils::packageVersion("newstan")),
+      stanr = as.character(utils::packageVersion("stanr")),
       r = R.version$version.string,
       arch = R.version$arch,
       compiler = compiler,
       # The CXX17* family, matching the variables the PCH recipe
-      # (`.newstan_pch_makefile()`) and the model TU compile both resolve to.
+      # (`.stanr_pch_makefile()`) and the model TU compile both resolve to.
       makeconf = vapply(
         c("CXX17", "CXX17STD", "CXX17FLAGS", "CXX17PICFLAGS", "CPPFLAGS"),
-        .newstan_r_config,
+        .stanr_r_config,
         character(1)
       ),
       cppflags = pch_cppflags,
-      opt_flags = .newstan_opt_flags(),
+      opt_flags = .stanr_opt_flags(),
       # md5 of model_pch.hpp alone (not each header it transitively
-      # includes) is sufficient: the newstan wrapper headers it pulls in
+      # includes) is sufficient: the stanr wrapper headers it pulls in
       # only change on package reinstall, which is already covered by the
-      # `newstan` package-version entry above, and Rcpp/Stan's own headers
+      # `stanr` package-version entry above, and Rcpp/Stan's own headers
       # are covered by the `dependencies` versions below / model_header.hpp
-      # shipping inside the same newstan install.
+      # shipping inside the same stanr install.
       header = unname(tools::md5sum(header)),
       dependencies = vapply(
         c("Rcpp", "RcppEigen", "BH", "RcppParallel"),
@@ -299,15 +299,15 @@
   )
   cache_dir <- file.path(
     getOption(
-      "newstan_pch_dir",
-      file.path(tools::R_user_dir("newstan", "cache"), "pch")
+      "stanr_pch_dir",
+      file.path(tools::R_user_dir("stanr", "cache"), "pch")
     ),
     fingerprint
   )
   # GCC's `-include` discovers a sibling `.gch` beside the literal path it is
   # given (see the mechanism note in the roxygen block above), so a stand-in
   # for the real header placed inside the cache dir is enough -- no need to
-  # replicate `include/newstan/...` structure the way implicit-inclusion PCH
+  # replicate `include/stanr/...` structure the way implicit-inclusion PCH
   # discovery via `-I` would require.
   cache_header <- file.path(cache_dir, "model_pch.hpp")
   pch <- paste0(cache_header, ".gch")
@@ -318,7 +318,7 @@
 
   if (!file.exists(pch)) {
     # The make recipe deliberately has no `mkdir` step (see
-    # `.newstan_pch_makefile()`), so the output directory is created here.
+    # `.stanr_pch_makefile()`), so the output directory is created here.
     dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
     if (compiler_type == "gcc" && !file.exists(cache_header)) {
       # Windows has no usable symlinks here -- `file.symlink()` requires
@@ -340,10 +340,10 @@
       }
     }
     if (verbose) {
-      message("[newstan] Compiling precompiled model header...")
+      message("[stanr] Compiling precompiled model header...")
     }
     output <- tryCatch(
-      .newstan_system2(
+      .stanr_system2(
         make,
         c(
           "-f",
@@ -354,7 +354,7 @@
             if (compiler_type == "gcc") cache_header else header
           )),
           shQuote(paste0("PKG_CPPFLAGS=", pch_cppflags)),
-          shQuote(paste0("EXTRA_CXXFLAGS=", .newstan_opt_flags())),
+          shQuote(paste0("EXTRA_CXXFLAGS=", .stanr_opt_flags())),
           "pch"
         ),
         stdout = TRUE,
@@ -377,13 +377,13 @@
   } else {
     # `-include` makes GCC process `cache_header` as if it were `#include`d
     # first; the extra `-I` keeps the TU's own (now-redundant, header-guard
-    # no-op) `#include <newstan/...>` / `#include <stan/model/...>` lines
+    # no-op) `#include <stanr/...>` / `#include <stan/model/...>` lines
     # resolving normally on the include path regardless.
     remember(
       paste(
         "-include",
         shQuote(cache_header),
-        paste0("-I", shQuote(newstan_include_dir))
+        paste0("-I", shQuote(stanr_include_dir))
       ),
       pch
     )
@@ -396,12 +396,12 @@
 #' `.compile_stan_model_environment()` in R/stan_model.R and
 #' `.compile_standalone_functions_environment()` in R/expose.R), so it
 #' lives here alongside the other PCH helpers it calls
-#' (`.newstan_pch_current()`, `.newstan_pch_flags()`) rather than in either
+#' (`.stanr_pch_current()`, `.stanr_pch_flags()`) rather than in either
 #' caller. `compile_fn` is a one-argument function `function(compilation_cppflags)`
 #' that performs the actual compile.
 #'
 #' @noRd
-.newstan_compile_with_pch_retry <- function(
+.stanr_compile_with_pch_retry <- function(
   compile_fn,
   cppflags,
   base_cppflags,
@@ -418,16 +418,16 @@
         stop(error)
       }
 
-      pch_path <- .newstan_pch_current(base_cppflags)
+      pch_path <- .stanr_pch_current(base_cppflags)
       stale <- is.na(pch_path) ||
         !file.exists(pch_path) ||
         {
           deps <- c(
             system.file(
               "include",
-              "newstan",
+              "stanr",
               "model_pch.hpp",
-              package = "newstan",
+              package = "stanr",
               mustWork = TRUE
             ),
             vapply(
@@ -444,10 +444,10 @@
 
       if (verbose) {
         message(
-          "[newstan] Compile failed; rebuilding precompiled model header and retrying..."
+          "[stanr] Compile failed; rebuilding precompiled model header and retrying..."
         )
       }
-      pch_flags <- .newstan_pch_flags(base_cppflags, verbose, rebuild = TRUE)
+      pch_flags <- .stanr_pch_flags(base_cppflags, verbose, rebuild = TRUE)
       if (!nzchar(pch_flags)) {
         stop(error)
       }

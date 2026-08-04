@@ -1,6 +1,6 @@
 #include "include/r_data_context.hpp"
 
-namespace newstan {
+namespace stanr {
 
 r_data_context::r_data_context(Rcpp::List list) {
   if (list.size() == 0) return;
@@ -107,17 +107,17 @@ r_data_context::r_data_context(Rcpp::List list) {
         // reader actually indexes.
         //
         // k = count of enclosing array dims (read from the
-        // `newstan_array_dims` attribute the R flattener attaches; default
+        // `stanr_array_dims` attribute the R flattener attaches; default
         // to all pre-trailing dims -- m = 1 -- when absent, which is the
         // manual dotted-name escape hatch's documented limitation).
         size_t k = pre_trailing_dims;
         SEXP array_dims_attr
-            = Rf_getAttrib(value, Rf_install("newstan_array_dims"));
+            = Rf_getAttrib(value, Rf_install("stanr_array_dims"));
         if (!Rf_isNull(array_dims_attr)) {
           if (Rf_length(array_dims_attr) != 1
               || !(Rf_isInteger(array_dims_attr)
                    || Rf_isReal(array_dims_attr))) {
-            Rcpp::stop("'newstan_array_dims' attribute for variable '" + name
+            Rcpp::stop("'stanr_array_dims' attribute for variable '" + name
                        + "' must be a length-1 integer or double.");
           }
           const double k_val = Rf_isInteger(array_dims_attr)
@@ -125,13 +125,13 @@ r_data_context::r_data_context(Rcpp::List list) {
               : REAL(array_dims_attr)[0];
           if (!std::isfinite(k_val) || k_val < 0
               || std::trunc(k_val) != k_val) {
-            Rcpp::stop("Invalid 'newstan_array_dims' attribute for variable '"
+            Rcpp::stop("Invalid 'stanr_array_dims' attribute for variable '"
                        + name + "'.");
           }
           k = static_cast<size_t>(k_val);
         }
         if (k > pre_trailing_dims) {
-          Rcpp::stop("'newstan_array_dims' attribute for variable '" + name
+          Rcpp::stop("'stanr_array_dims' attribute for variable '" + name
                      + "' exceeds its declared dimensions.");
         }
 
@@ -146,7 +146,7 @@ r_data_context::r_data_context(Rcpp::List list) {
               "Variable '" + name + "' has " + std::to_string(complexes.size())
               + " complex value(s), not divisible by the "
               + std::to_string(enclosing_elements) + " enclosing array "
-                "element(s) implied by its 'newstan_array_dims' attribute.");
+                "element(s) implied by its 'stanr_array_dims' attribute.");
         }
         const size_t m = complexes.size() / enclosing_elements;
         const size_t n = enclosing_elements;
@@ -232,4 +232,4 @@ void r_data_context::validate_dims(const std::string& stage,
   stan::io::validate_dims(*this, stage, name, base_type, dims_declared);
 }
 
-}  // namespace newstan
+}  // namespace stanr

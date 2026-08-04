@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_RUN_OPTIMIZING_HPP
-#define NEWSTAN_RUN_OPTIMIZING_HPP
+#ifndef STANR_RUN_OPTIMIZING_HPP
+#define STANR_RUN_OPTIMIZING_HPP
 
 #include <Rcpp.h>
 #include <stan/services/optimize/bfgs.hpp>
@@ -8,9 +8,9 @@
 #include "r_output.hpp"
 #include "r_logger.hpp"
 #include "r_interrupt.hpp"
-#include <newstan/r_data_context.hpp>
+#include <stanr/r_data_context.hpp>
 
-namespace newstan {
+namespace stanr {
   template <bool Jacobian, class Model, class InitContext, class InitWriter,
             class SampleWriter, class Logger, class Interrupt>
   int run_optimizing_algorithm(Model& model, const std::string& algorithm,
@@ -80,13 +80,13 @@ namespace newstan {
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
-    newstan::r_data_context init_ctx(init_list);
-    newstan::r_discard_writer init_writer;
+    stanr::r_data_context init_ctx(init_list);
+    stanr::r_discard_writer init_writer;
     // With saved iterations Stan writes the initial point plus at most iter
     // updates; otherwise it writes only the final point.
-    newstan::r_sample_writer sample_writer(save_iterations ? iter + 1 : 1);
-    newstan::r_logger logger(verbose, show_exceptions);
-    newstan::r_interrupt interrupt(true);
+    stanr::r_sample_writer sample_writer(save_iterations ? iter + 1 : 1);
+    stanr::r_logger logger(verbose, show_exceptions);
+    stanr::r_interrupt interrupt(true);
 
     int return_code = jacobian
         ? run_optimizing_algorithm<true>(

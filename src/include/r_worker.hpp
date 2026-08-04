@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_R_WORKER_HPP
-#define NEWSTAN_R_WORKER_HPP
+#ifndef STANR_R_WORKER_HPP
+#define STANR_R_WORKER_HPP
 
 #include <Rcpp.h>
 #include <stan/math/rev/core/chainablestack.hpp>
@@ -16,7 +16,7 @@
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
 
-namespace newstan {
+namespace stanr {
 
 // Sampling/pathfinder block synchronously with no way to yield to R's event
 // loop, so their Stan service call runs on a native coordinator std::thread
@@ -43,15 +43,15 @@ namespace newstan {
 //    the thread boundary directly, and never call Rcpp::stop from the
 //    worker thread itself.
 //
-// fn's signature is int fn(newstan::r_interrupt& interrupt); it runs
+// fn's signature is int fn(stanr::r_interrupt& interrupt); it runs
 // entirely on the worker thread and must obey the constraints above.
 // Returns the int fn produced. `what` is used verbatim in both "<what>
 // interrupted." and "Unknown exception in <what> worker.".
 template <class F>
-int run_on_worker_thread(newstan::r_logger& logger, const char* what,
+int run_on_worker_thread(stanr::r_logger& logger, const char* what,
                           F&& fn) {
   std::atomic<bool> cancel_requested{false};
-  newstan::r_interrupt interrupt(&cancel_requested, what);
+  stanr::r_interrupt interrupt(&cancel_requested, what);
 
   std::atomic<bool> finished{false};
   std::mutex completion_mutex;
@@ -113,6 +113,6 @@ int run_on_worker_thread(newstan::r_logger& logger, const char* what,
   return return_code;
 }
 
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_R_WORKER_HPP
+#endif  // STANR_R_WORKER_HPP

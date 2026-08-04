@@ -2,9 +2,9 @@ local_test_context()
 
 init_test_cache("model-methods")
 
-.newstan_model_method_state <- new.env(parent = emptyenv())
+.stanr_model_method_state <- new.env(parent = emptyenv())
 
-.newstan_model_method_data <- function(double = FALSE) {
+.stanr_model_method_data <- function(double = FALSE) {
   y <- c(1L, 1L, 1L, 0L)
   if (double) {
     y <- rep(y, 2L)
@@ -12,22 +12,22 @@ init_test_cache("model-methods")
   list(N = length(y), y = y, mu = 0)
 }
 
-.newstan_model_method_model <- function() {
-  if (!exists("model", envir = .newstan_model_method_state, inherits = FALSE)) {
+.stanr_model_method_model <- function() {
+  if (!exists("model", envir = .stanr_model_method_state, inherits = FALSE)) {
     model <- stan_model(
       stan_file = test_path("test-models/model_methods.stan"),
       quiet = TRUE
     )
-    assign("model", model, envir = .newstan_model_method_state)
+    assign("model", model, envir = .stanr_model_method_state)
   }
-  get("model", envir = .newstan_model_method_state, inherits = FALSE)
+  get("model", envir = .stanr_model_method_state, inherits = FALSE)
 }
 
-.newstan_model_method_fit <- function(double = FALSE) {
+.stanr_model_method_fit <- function(double = FALSE) {
   key <- if (double) "fit_double" else "fit"
-  if (!exists(key, envir = .newstan_model_method_state, inherits = FALSE)) {
-    fit <- .newstan_model_method_model()$optimize(
-      data = .newstan_model_method_data(double),
+  if (!exists(key, envir = .stanr_model_method_state, inherits = FALSE)) {
+    fit <- .stanr_model_method_model()$optimize(
+      data = .stanr_model_method_data(double),
       seed = 2468,
       init = list(theta = 0.5, beta = c(0.5, -0.5)),
       iter = 50,
@@ -36,16 +36,16 @@ init_test_cache("model-methods")
       show_exceptions = FALSE,
       num_threads = test_threads()
     )
-    assign(key, fit, envir = .newstan_model_method_state)
+    assign(key, fit, envir = .stanr_model_method_state)
   }
-  get(key, envir = .newstan_model_method_state, inherits = FALSE)
+  get(key, envir = .stanr_model_method_state, inherits = FALSE)
 }
 
-.newstan_model_method_mcmc <- function() {
+.stanr_model_method_mcmc <- function() {
   key <- "mcmc"
-  if (!exists(key, envir = .newstan_model_method_state, inherits = FALSE)) {
-    fit <- .newstan_model_method_model()$sample(
-      data = .newstan_model_method_data(),
+  if (!exists(key, envir = .stanr_model_method_state, inherits = FALSE)) {
+    fit <- .stanr_model_method_model()$sample(
+      data = .stanr_model_method_data(),
       seed = 1357,
       init = list(theta = 0.5, beta = c(0.5, -0.5)),
       chains = 2,
@@ -59,15 +59,15 @@ init_test_cache("model-methods")
       show_messages = FALSE,
       show_exceptions = FALSE
     )
-    assign(key, fit, envir = .newstan_model_method_state)
+    assign(key, fit, envir = .stanr_model_method_state)
   }
-  get(key, envir = .newstan_model_method_state, inherits = FALSE)
+  get(key, envir = .stanr_model_method_state, inherits = FALSE)
 }
 
-.newstan_expected_target <- function(upars, double = FALSE, jacobian = TRUE) {
+.stanr_expected_target <- function(upars, double = FALSE, jacobian = TRUE) {
   theta <- stats::plogis(upars[[1L]])
   beta <- upars[2:3]
-  y <- .newstan_model_method_data(double)$y
+  y <- .stanr_model_method_data(double)$y
   value <- sum(y) * log(theta) + (length(y) - sum(y)) * log1p(-theta)
   value <- value - 0.5 * sum(beta^2)
   if (jacobian) {
@@ -77,7 +77,7 @@ init_test_cache("model-methods")
 }
 
 test_that("log probability, gradient, and Hessian match analytical values", {
-  fit <- .newstan_model_method_fit()
+  fit <- .stanr_model_method_fit()
   upars <- c(0, 0.5, -0.5)
 
   expected_lp <- -6 * log(2) - 0.25
@@ -128,7 +128,7 @@ test_that("log probability, gradient, and Hessian match analytical values", {
 })
 
 test_that("constraining and unconstraining preserve structure and values", {
-  fit <- .newstan_model_method_fit()
+  fit <- .stanr_model_method_fit()
   upars <- c(0, 0.5, -0.5)
 
   parameters <- fit$constrain_variables(
@@ -190,7 +190,7 @@ test_that("constraining and unconstraining preserve structure and values", {
 })
 
 test_that("model-method RNG is fit-local and advances across calls", {
-  fit <- .newstan_model_method_fit()
+  fit <- .stanr_model_method_fit()
   upars <- c(0, 0.5, -0.5)
 
   first <- fit$constrain_variables(upars)$stochastic_gq
@@ -203,11 +203,11 @@ test_that("model-method RNG is fit-local and advances across calls", {
   # state were shared across StanFit instances, in which case a
   # freshly-constructed fit's first draw would instead continue from
   # wherever the shared state was left. Built fresh (not via the memoized
-  # `.newstan_model_method_fit()`) because `fit`'s RNG was already advanced
+  # `.stanr_model_method_fit()`) because `fit`'s RNG was already advanced
   # by an earlier test in this file, so its own first draw is no longer
   # observable here.
-  fresh_fit <- .newstan_model_method_model()$optimize(
-    data = .newstan_model_method_data(),
+  fresh_fit <- .stanr_model_method_model()$optimize(
+    data = .stanr_model_method_data(),
     seed = 2468,
     init = list(theta = 0.5, beta = c(0.5, -0.5)),
     iter = 50,
@@ -218,14 +218,14 @@ test_that("model-method RNG is fit-local and advances across calls", {
   )
   fresh_first <- fresh_fit$constrain_variables(upars)$stochastic_gq
 
-  fit_double <- .newstan_model_method_fit(double = TRUE)
+  fit_double <- .stanr_model_method_fit(double = TRUE)
   fit_double_first <- fit_double$constrain_variables(upars)$stochastic_gq
 
   expect_equal(fit_double_first, fresh_first)
 })
 
 test_that("model methods reject malformed or non-finite inputs", {
-  fit <- .newstan_model_method_fit()
+  fit <- .stanr_model_method_fit()
 
   for (method in c("log_prob", "grad_log_prob", "hessian")) {
     expect_error(fit[[method]](c(0, 1)), "3 unconstrained")
@@ -263,20 +263,20 @@ test_that("model methods reject malformed or non-finite inputs", {
 })
 
 test_that("fits from one model retain independent data-bound targets", {
-  fit <- .newstan_model_method_fit()
-  fit_double <- .newstan_model_method_fit(double = TRUE)
+  fit <- .stanr_model_method_fit()
+  fit_double <- .stanr_model_method_fit(double = TRUE)
   upars <- c(0.4, 0.2, -0.1)
 
   target <- fit$log_prob(upars)
   target_double <- fit_double$log_prob(upars)
   expect_equal(
     target,
-    .newstan_expected_target(upars),
+    .stanr_expected_target(upars),
     tolerance = 1e-10
   )
   expect_equal(
     target_double,
-    .newstan_expected_target(upars, double = TRUE),
+    .stanr_expected_target(upars, double = TRUE),
     tolerance = 1e-10
   )
   expect_false(isTRUE(all.equal(target, target_double)))
@@ -286,7 +286,7 @@ test_that("fits from one model retain independent data-bound targets", {
 })
 
 test_that("unconstrain_draws preserves posterior dimensions and formats", {
-  fit <- .newstan_model_method_mcmc()
+  fit <- .stanr_model_method_mcmc()
   constrained <- posterior::as_draws_matrix(fit$draws(format = "draws_matrix"))
   unconstrained <- fit$unconstrain_draws(format = "draws_matrix")
 
@@ -327,7 +327,7 @@ test_that("unconstrain_draws preserves posterior dimensions and formats", {
 })
 
 test_that("serialized fits lazily rebuild data-bound model methods", {
-  fit <- .newstan_model_method_fit()
+  fit <- .stanr_model_method_fit()
   upars <- c(0.2, -0.3, 0.4)
   expected_lp <- fit$log_prob(upars)
   expected_gradient <- fit$grad_log_prob(upars)
@@ -415,7 +415,7 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
     quiet = TRUE
   )
   fit <- mod$optimize(
-    data = .newstan_model_method_data(),
+    data = .stanr_model_method_data(),
     seed = 2468,
     init = list(theta = 0.5, beta = c(0.5, -0.5)),
     iter = 50,
@@ -429,7 +429,7 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
 
   fit_private <- fit$.__enclos_env__$private
   superseded_ptr <- fit_private$model_ptr_
-  loaded_before <- newstan:::.newstan_loaded_dll_paths()
+  loaded_before <- stanr:::.stanr_loaded_dll_paths()
 
   # Directly recompile the fit's underlying model while the fit is still
   # alive and holding a `model_ptr_` built against the *old* compiled
@@ -438,10 +438,10 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
   # above.
   mod$compile(force_recompile = TRUE, quiet = TRUE)
 
-  # The invariant (see `.newstan_forced_rebuild_target()`): a forced recompile
+  # The invariant (see `.stanr_forced_rebuild_target()`): a forced recompile
   # may load an additional shared library, but never unloads one.
   expect_identical(
-    setdiff(loaded_before, newstan:::.newstan_loaded_dll_paths()),
+    setdiff(loaded_before, stanr:::.stanr_loaded_dll_paths()),
     character()
   )
 
@@ -466,7 +466,7 @@ test_that("ensure_native()'s probe is invoked exactly once across N consecutive 
     quiet = TRUE
   )
   fit <- mod$optimize(
-    data = .newstan_model_method_data(),
+    data = .stanr_model_method_data(),
     seed = 2468,
     init = list(theta = 0.5, beta = c(0.5, -0.5)),
     iter = 50,
@@ -483,7 +483,7 @@ test_that("ensure_native()'s probe is invoked exactly once across N consecutive 
   # model's private `compiled_env_`), so instrument the exact call site
   # directly: wrap the real probe in a counting proxy and splice it into the
   # model's private compiled environment, mirroring how `test-pch.R`'s
-  # ".newstan_system2 call count" test intercepts a seam to count
+  # ".stanr_system2 call count" test intercepts a seam to count
   # invocations without relying on timing. This is on a fresh fit/model
   # pair (never native-called before), so the first of the N calls below
   # must take the one-time slow path.
@@ -609,7 +609,7 @@ test_that("unconstrain_draws() still works on a tuple/complex-model fit (regress
   expect_s3_class(unconstrained, "draws_matrix")
   expect_identical(nrow(unconstrained), 2L)
 
-  expected_names <- .newstan_bracket_names(
+  expected_names <- .stanr_bracket_names(
     fit$.__enclos_env__$private$native_call("model_unconstrained_names")
   )
   expect_identical(posterior::variables(unconstrained), expected_names)
@@ -635,9 +635,9 @@ test_that("$optimize() and $laplace() succeed on a tuple/complex model (regressi
   # constrained) dimension.
   expect_equal(unname(fit_opt$mle()), rep(0, 5), tolerance = 1e-4)
   # Bracket names derived from the native call, never hand-typed (house
-  # rule: `.newstan_bracket_names` is load-bearing and unaffected by
+  # rule: `.stanr_bracket_names` is load-bearing and unaffected by
   # tuple/complex support).
-  expected_names <- .newstan_bracket_names(
+  expected_names <- .stanr_bracket_names(
     fit_opt$.__enclos_env__$private$native_call(
       "model_constrained_names",
       FALSE,
@@ -688,7 +688,7 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
   gq_draws <- as.data.frame(gq$draws(format = "draws_df"))
   fit_draws <- as.data.frame(fit$draws(format = "draws_df"))
   # Derive the "*_out" column names from the actual draws (never hand-typed
-  # bracket strings, per house rule -- `.newstan_bracket_names` is
+  # bracket strings, per house rule -- `.stanr_bracket_names` is
   # load-bearing and unaffected by tuple/complex support). The echoed
   # "*_out" quantities
   # are pure functions of `data` (not of the sampled parameter `x`), so
@@ -720,10 +720,10 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
 })
 
 test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/complex-in-tuple-array values exactly (not just shape)", {
-  # The golden-shape test above exercises `.newstan_skeleton_node()` (no
+  # The golden-shape test above exercises `.stanr_skeleton_node()` (no
   # values), and the generate_quantities()/draws test above exercises the
   # pre-existing `$draws()` bracket-name path, unaffected by tuple/complex
-  # support -- neither calls `.newstan_consume_node()`, the element-major
+  # support -- neither calls `.stanr_consume_node()`, the element-major
   # reconstruction `constrain_variables()` actually uses. This test does, on
   # every
   # array-of-tuple shape the battery model declares (`acv_out`: complex

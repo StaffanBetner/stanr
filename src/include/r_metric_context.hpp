@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_R_METRIC_CONTEXT_HPP
-#define NEWSTAN_R_METRIC_CONTEXT_HPP
+#ifndef STANR_R_METRIC_CONTEXT_HPP
+#define STANR_R_METRIC_CONTEXT_HPP
 
 #include <stan/io/validate_dims.hpp>
 #include <stan/io/var_context.hpp>
@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace newstan {
+namespace stanr {
 
 // A minimal immutable context for an inverse metric.  Unlike
 // stan::io::array_var_context, this takes ownership of the already-copied R
@@ -49,6 +49,6 @@ class r_metric_context : public stan::io::var_context {
   }
 };
 
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_R_METRIC_CONTEXT_HPP
+#endif  // STANR_R_METRIC_CONTEXT_HPP

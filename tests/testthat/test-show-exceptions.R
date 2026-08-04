@@ -8,11 +8,11 @@ init_test_cache("show-exceptions")
 # seed: Metropolis proposal rejections (error-level, stderr) during
 # sampling, and initial-value rejections (warn-level, stdout) during
 # initialization.
-.newstan_show_exceptions_cache <- new.env(parent = emptyenv())
+.stanr_show_exceptions_cache <- new.env(parent = emptyenv())
 
 get_rejecting_model <- function() {
-  if (!exists("mod", envir = .newstan_show_exceptions_cache)) {
-    .newstan_show_exceptions_cache$mod <- stan_model(
+  if (!exists("mod", envir = .stanr_show_exceptions_cache)) {
+    .stanr_show_exceptions_cache$mod <- stan_model(
       code = "
       parameters { real x; }
       model {
@@ -22,7 +22,7 @@ get_rejecting_model <- function() {
     "
     )
   }
-  .newstan_show_exceptions_cache$mod
+  .stanr_show_exceptions_cache$mod
 }
 
 # Runs `expr`, capturing Rprintf (stdout) and REprintf (stderr) output

@@ -1,4 +1,4 @@
 library(testthat)
-library(newstan)
+library(stanr)
 
-test_check("newstan")
+test_check("stanr")

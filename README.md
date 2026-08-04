@@ -1,13 +1,13 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# newstan
+# stanr
 
 <!-- badges: start -->
 
 <!-- badges: end -->
 
-`newstan` is an R interface for compiling Stan programs and running Stan
+`stanr` is an R interface for compiling Stan programs and running Stan
 services directly from R. It uses an R6-based API similar to `cmdstanr`:
 `stan_model()` returns a `StanModel` object, and inference methods
 (`$sample()`, `$optimize()`, `$variational()`, etc.) return R6 fit
@@ -45,11 +45,11 @@ All fit objects inherit from `StanFit` and share common methods:
 
 ## Installation
 
-You can install the development version of newstan from GitHub:
+You can install the development version of stanr from GitHub:
 
 ``` r
 # install.packages("pak")
-pak::pak("andrjohns/newstan")
+pak::pak("andrjohns/stanr")
 ```
 
 ## Compile a Model
@@ -58,7 +58,7 @@ Models are compiled from a string or from a `.stan` file. `stan_model()`
 returns a `StanModel` R6 object.
 
 ``` r
-library(newstan)
+library(stanr)
 
 bernoulli_model <- "
 data {
@@ -115,15 +115,15 @@ fit$summary()
 #>  1 lp__        -8.73  -8.47  0.612 0.210 -9.99  -8.32   1.24     10.6     22.4
 #>  2 theta        0.500  0.485 0.126 0.101  0.316  0.700  1.20     21.1     21.4
 #>  3 log_lik[1]  -0.727 -0.723 0.282 0.218 -1.15  -0.357  1.16     21.1     21.4
-#>  4 log_lik[2]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.19     21.1     21.4
+#>  4 log_lik[2]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.20     21.1     21.4
 #>  5 log_lik[3]  -0.727 -0.723 0.282 0.218 -1.15  -0.357  1.16     21.1     21.4
 #>  6 log_lik[4]  -0.727 -0.723 0.282 0.218 -1.15  -0.357  1.16     21.1     21.4
-#>  7 log_lik[5]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.19     21.1     21.4
+#>  7 log_lik[5]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.20     21.1     21.4
 #>  8 log_lik[6]  -0.727 -0.723 0.282 0.218 -1.15  -0.357  1.16     21.1     21.4
-#>  9 log_lik[7]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.19     21.1     21.4
-#> 10 log_lik[8]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.19     21.1     21.4
+#>  9 log_lik[7]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.20     21.1     21.4
+#> 10 log_lik[8]  -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.20     21.1     21.4
 #> 11 log_lik[9]  -0.727 -0.723 0.282 0.218 -1.15  -0.357  1.16     21.1     21.4
-#> 12 log_lik[10] -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.19     21.1     21.4
+#> 12 log_lik[10] -0.728 -0.664 0.268 0.197 -1.20  -0.380  1.20     21.1     21.4
 ```
 
 Access sampler diagnostics and chain information:
@@ -427,8 +427,8 @@ diag <- mod$diagnose(
 #>  Log probability=-12.776
 #> 
 #>  param idx           value           model     finite diff           error
-#>          0         1.83245        -4.34465        -4.34465     1.38252e-09
-#> [newstan] All gradient tests passed.
+#>          0         1.83245        -4.34465        -4.34465      2.2707e-09
+#> [stanr] All gradient tests passed.
 
 list(
   num_failed = diag$num_failed(),
@@ -442,8 +442,8 @@ list(
 #> [1] -12.776
 #> 
 #> $gradients
-#>   param_idx   value    model finite_diff       error
-#> 1         0 1.83245 -4.34465    -4.34465 1.38252e-09
+#>   param_idx   value    model finite_diff      error
+#> 1         0 1.83245 -4.34465    -4.34465 2.2707e-09
 ```
 
 ## Tuples and Complex Numbers

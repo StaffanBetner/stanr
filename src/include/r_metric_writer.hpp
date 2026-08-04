@@ -1,11 +1,11 @@
-#ifndef NEWSTAN_R_METRIC_WRITER_HPP
-#define NEWSTAN_R_METRIC_WRITER_HPP
+#ifndef STANR_R_METRIC_WRITER_HPP
+#define STANR_R_METRIC_WRITER_HPP
 
 #include <stan/callbacks/structured_writer.hpp>
 #include <Eigen/Dense>
 #include <string>
 
-namespace newstan {
+namespace stanr {
 
 // Captures the "stepsize"/"inv_metric" pair written by
 // base_hmc::write_sampler_state_struct() once per chain after warmup.  Runs
@@ -45,6 +45,6 @@ class r_metric_writer : public stan::callbacks::structured_writer {
   Eigen::MatrixXd inv_metric_matrix_;
 };
 
-}  // namespace newstan
+}  // namespace stanr
 
-#endif  // NEWSTAN_R_METRIC_WRITER_HPP
+#endif  // STANR_R_METRIC_WRITER_HPP

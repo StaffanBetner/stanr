@@ -7,12 +7,12 @@
 #'
 #' @noRd
 stanc_ctx <- function() {
-  if (is.null(.newstan_memo$stanc_context)) {
+  if (is.null(.stanr_memo$stanc_context)) {
     ctx <- QuickJSR::JSContext$new()
-    ctx$source(system.file("stanc.js", package = "newstan", mustWork = TRUE))
-    .newstan_memo$stanc_context <- ctx
+    ctx$source(system.file("stanc.js", package = "stanr", mustWork = TRUE))
+    .stanr_memo$stanc_context <- ctx
   }
-  .newstan_memo$stanc_context
+  .stanr_memo$stanc_context
 }
 
 #' Resolve Stan `#include` directives
@@ -112,7 +112,7 @@ resolve_stan_includes <- function(
 #' @return A character vector of file contents (one element per path, in
 #'   order), or `character()` if `paths` is `NULL`.
 #' @noRd
-.newstan_external_cpp_contents <- function(paths) {
+.stanr_external_cpp_contents <- function(paths) {
   if (is.null(paths)) {
     return(character())
   }
@@ -202,7 +202,7 @@ stanc <- function(
   }
   model_code <- resolve_stan_includes(model_code, include_directories)
 
-  contents <- .newstan_external_cpp_contents(external_cpp)
+  contents <- .stanr_external_cpp_contents(external_cpp)
   external_cpp_code <- if (length(contents) == 0) {
     NULL
   } else {

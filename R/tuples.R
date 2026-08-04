@@ -10,14 +10,14 @@
 #     fastest, outer levels slower) and each element's leaf payload is
 #     concatenated contiguously -- this is *not* the column-major order of
 #     the declared dims.
-#   * Complex leaves additionally carry a `newstan_array_dims` attribute (the
+#   * Complex leaves additionally carry a `stanr_array_dims` attribute (the
 #     count of enclosing array dims) so `r_data_context` can build the
 #     windowed `vals_c` layout stanc 2.39 requires for tuple-slot complex data
 #     (see src/r_data_context.cpp).
 
 # TRUE if `x` has any non-empty name -- used to reject named lists, since
 # tuple values are represented as unnamed R lists, never named ones.
-.newstan_has_names <- function(x) {
+.stanr_has_names <- function(x) {
   nm <- names(x)
   !is.null(nm) && any(nzchar(nm))
 }
@@ -26,7 +26,7 @@
 # otherwise its length if > 1, otherwise nothing (a bare scalar). Used both
 # to validate that every enclosing-array element supplies the same shape and
 # to build the leaf's stored `dim`.
-.newstan_payload_shape <- function(x) {
+.stanr_payload_shape <- function(x) {
   d <- dim(x)
   if (!is.null(d)) {
     return(as.integer(d))
@@ -42,8 +42,8 @@
 # shape for array-of-tuple values) and return the array's size at each level,
 # in Stan declaration order. Errors on non-list/named values and on
 # non-rectangular arrays (sibling elements whose nested shape disagrees).
-.newstan_tuple_array_shape <- function(name, value, k) {
-  if (!is.list(value) || .newstan_has_names(value)) {
+.stanr_tuple_array_shape <- function(name, value, k) {
+  if (!is.list(value) || .stanr_has_names(value)) {
     stop(
       "`",
       name,
@@ -61,7 +61,7 @@
   }
   sizes <- NULL
   for (i in seq_len(d1)) {
-    shape_i <- .newstan_tuple_array_shape(
+    shape_i <- .stanr_tuple_array_shape(
       paste0(name, "[[", i, "]]"),
       value[[i]],
       k - 1L
@@ -86,12 +86,12 @@
   c(d1, sizes)
 }
 
-# Flatten a nested list (already validated by `.newstan_tuple_array_shape`,
+# Flatten a nested list (already validated by `.stanr_tuple_array_shape`,
 # with per-level sizes `sizes`) into a single flat list of elements enumerated
 # column-major -- first (outermost) index fastest, later indices slower. This
 # is the enumeration order the blocked flat-storage layout described in the
 # file header requires for tuple-slot leaves.
-.newstan_enumerate_tuple_elements <- function(value, sizes) {
+.stanr_enumerate_tuple_elements <- function(value, sizes) {
   k <- length(sizes)
   if (k == 0L) {
     return(list(value))
@@ -101,7 +101,7 @@
   }
   d1 <- sizes[1]
   sub <- lapply(seq_len(d1), function(i) {
-    .newstan_enumerate_tuple_elements(value[[i]], sizes[-1])
+    .stanr_enumerate_tuple_elements(value[[i]], sizes[-1])
   })
   rest_n <- prod(sizes[-1])
   out <- vector("list", d1 * rest_n)
@@ -119,7 +119,7 @@
 # already-enumerated enclosing-array element). `array_sizes` is the
 # accumulated enclosing-array dim sizes (outermost first) up to and including
 # this leaf's own tuple-array nesting.
-.newstan_flatten_tuple_leaf <- function(
+.stanr_flatten_tuple_leaf <- function(
   slot_name,
   slot_vals,
   slot_type,
@@ -133,10 +133,10 @@
       call. = FALSE
     )
   }
-  ref_shape <- .newstan_payload_shape(slot_vals[[1]])
+  ref_shape <- .stanr_payload_shape(slot_vals[[1]])
   if (length(slot_vals) > 1L) {
     for (i in 2:length(slot_vals)) {
-      shape_i <- .newstan_payload_shape(slot_vals[[i]])
+      shape_i <- .stanr_payload_shape(slot_vals[[i]])
       if (!identical(shape_i, ref_shape)) {
         stop(
           "`",
@@ -165,9 +165,9 @@
     dim(flat) <- as.integer(total_dims)
   }
   if (is_complex_slot) {
-    # `newstan_array_dims` counts only the enclosing array dims -- never
+    # `stanr_array_dims` counts only the enclosing array dims -- never
     # this leaf's own container dims (e.g. a complex_vector's own length).
-    attr(flat, "newstan_array_dims") <- as.integer(length(array_sizes))
+    attr(flat, "stanr_array_dims") <- as.integer(length(array_sizes))
   }
   flat
 }
@@ -179,7 +179,7 @@
 # is this level's slot data.frame (columns `type`, `dimensions`, one row per
 # slot -- `type` is a data.frame for a nested-tuple slot, else a string).
 # Leaf entries are written into `out` (an environment) keyed by dotted name.
-.newstan_flatten_tuple_recurse <- function(
+.stanr_flatten_tuple_recurse <- function(
   name,
   elements,
   array_sizes,
@@ -188,7 +188,7 @@
 ) {
   n_slots <- nrow(type_df)
   for (el in elements) {
-    if (!is.list(el) || .newstan_has_names(el) || length(el) != n_slots) {
+    if (!is.list(el) || .stanr_has_names(el) || length(el) != n_slots) {
       stop(
         "`",
         name,
@@ -214,7 +214,7 @@
         inner_sizes <- NULL
         inner_lists <- vector("list", length(slot_vals))
         for (i in seq_along(slot_vals)) {
-          shape_i <- .newstan_tuple_array_shape(
+          shape_i <- .stanr_tuple_array_shape(
             paste0(slot_name, "[", i, "]"),
             slot_vals[[i]],
             slot_dims
@@ -237,7 +237,7 @@
               call. = FALSE
             )
           }
-          inner_lists[[i]] <- .newstan_enumerate_tuple_elements(
+          inner_lists[[i]] <- .stanr_enumerate_tuple_elements(
             slot_vals[[i]],
             inner_sizes
           )
@@ -247,7 +247,7 @@
         new_elements <- unlist(inner_lists, recursive = FALSE)
         new_array_sizes <- c(array_sizes, inner_sizes)
       }
-      .newstan_flatten_tuple_recurse(
+      .stanr_flatten_tuple_recurse(
         slot_name,
         new_elements,
         new_array_sizes,
@@ -255,7 +255,7 @@
         out
       )
     } else {
-      out[[slot_name]] <- .newstan_flatten_tuple_leaf(
+      out[[slot_name]] <- .stanr_flatten_tuple_leaf(
         slot_name,
         slot_vals,
         slot_type,
@@ -271,16 +271,16 @@
 # nested unnamed lists of depth `n_array_dims` for an array-of-tuple).
 # `type_df` / `n_array_dims`: this variable's own `declared[[name]]$type` /
 # `$dimensions`.
-.newstan_flatten_one_tuple <- function(name, value, type_df, n_array_dims) {
+.stanr_flatten_one_tuple <- function(name, value, type_df, n_array_dims) {
   if (n_array_dims == 0L) {
     elements <- list(value)
     array_sizes <- integer(0)
   } else {
-    array_sizes <- .newstan_tuple_array_shape(name, value, n_array_dims)
-    elements <- .newstan_enumerate_tuple_elements(value, array_sizes)
+    array_sizes <- .stanr_tuple_array_shape(name, value, n_array_dims)
+    elements <- .stanr_enumerate_tuple_elements(value, array_sizes)
   }
   out <- new.env(parent = emptyenv())
-  .newstan_flatten_tuple_recurse(name, elements, array_sizes, type_df, out)
+  .stanr_flatten_tuple_recurse(name, elements, array_sizes, type_df, out)
   as.list(out)
 }
 
@@ -301,7 +301,7 @@
 #' @return `values` with every declared-tuple list entry replaced by its
 #'   flattened dotted leaves.
 #' @noRd
-.newstan_flatten_tuple_values <- function(values, declared) {
+.stanr_flatten_tuple_values <- function(values, declared) {
   if (!length(values)) {
     return(values)
   }
@@ -345,7 +345,7 @@
         call. = FALSE
       )
     }
-    leaves <- .newstan_flatten_one_tuple(
+    leaves <- .stanr_flatten_one_tuple(
       name,
       values[[name]],
       decl$type,
@@ -383,7 +383,7 @@
 # enclosing-array element are contiguous instead.
 #
 # Both directions share one "sized structure" tree (built by
-# `.newstan_sized_structure()`), computed once per `constrain_variables()` /
+# `.stanr_sized_structure()`), computed once per `constrain_variables()` /
 # `variable_skeleton()` call from `model$variables()` (type structure --
 # which base variables/slots are tuple/complex, and nested tuple shape) and
 # `model_param_metadata()` (native dotted-name-keyed sizes: per-slot declared
@@ -399,9 +399,9 @@
 #     (unchanged from today, with the trailing complex `2` dropped for
 #     `kind = "complex"`); for a tuple slot this is *just* the slot's own
 #     container shape, with every enclosing tuple-array dimension already
-#     stripped off (see `.newstan_sized_tuple_node()` below). `dims =
+#     stripped off (see `.stanr_sized_tuple_node()` below). `dims =
 #     integer(0)` means scalar. `legacy` is TRUE only for a top-level
-#     non-complex (real/int) variable -- see `.newstan_apply_leaf_dims()`
+#     non-complex (real/int) variable -- see `.stanr_apply_leaf_dims()`
 #     for what it changes.
 #
 #   * a *tuple* node: `list(kind = "tuple", array_dims = <int>, slots =
@@ -410,7 +410,7 @@
 #     tuple); `slots` is one child node per tuple slot, in slot order,
 #     recursing for nested-tuple slots.
 #
-# `.newstan_sized_structure()` itself returns a named list, one entry per
+# `.stanr_sized_structure()` itself returns a named list, one entry per
 # base variable, `list(stage = <"parameter"|"transformed_parameter"|
 # "generated_quantity">, node = <the node above>)`, in the same order
 # `model_param_metadata()` lists variables.
@@ -420,7 +420,7 @@
 # `integer(0)` when `n >= length(dims)` (a bare scalar/no remaining dims),
 # rather than the reversed sequence a bare `dims[(n+1):length(dims)]` would
 # produce in that case.
-.newstan_dims_after <- function(dims, n) {
+.stanr_dims_after <- function(dims, n) {
   if (n >= length(dims)) integer(0) else dims[(n + 1L):length(dims)]
 }
 
@@ -432,11 +432,11 @@
 # array dims outermost first, then the leaf's own container dims, then
 # complex's trailing `2`), so any leaf beneath the subtree carries the same
 # prefix at the same position, regardless of which slot it descends through.
-.newstan_first_leaf_metadata_name <- function(dotted_name, type_df) {
+.stanr_first_leaf_metadata_name <- function(dotted_name, type_df) {
   slot_type <- type_df$type[[1]]
   slot_name <- paste0(dotted_name, ".1")
   if (is.data.frame(slot_type)) {
-    .newstan_first_leaf_metadata_name(slot_name, slot_type)
+    .stanr_first_leaf_metadata_name(slot_name, slot_type)
   } else {
     slot_name
   }
@@ -453,7 +453,7 @@
 # every enclosing array dimension already accounted for by levels above this
 # one (outermost first; `integer(0)` at the top). `metadata_index`: an
 # environment mapping dotted metadata name -> `list(dims, stage)`.
-.newstan_sized_tuple_node <- function(
+.stanr_sized_tuple_node <- function(
   dotted_name,
   type_df,
   own_array_count,
@@ -464,11 +464,11 @@
   n_outer <- length(outer_array_dims)
   array_dims <- integer(0)
   if (own_array_count > 0L) {
-    probe_name <- .newstan_first_leaf_metadata_name(dotted_name, type_df)
+    probe_name <- .stanr_first_leaf_metadata_name(dotted_name, type_df)
     probe_entry <- metadata_index[[probe_name]]
     if (is.null(probe_entry)) {
       stop(
-        "newstan internal error: `model_param_metadata()` is missing an ",
+        "stanr internal error: `model_param_metadata()` is missing an ",
         "entry for `",
         probe_name,
         "`.",
@@ -488,7 +488,7 @@
     slot_type <- type_df$type[[s]]
     slot_own_count <- type_df$dimensions[[s]]
     if (is.data.frame(slot_type)) {
-      slots[[s]] <- .newstan_sized_tuple_node(
+      slots[[s]] <- .stanr_sized_tuple_node(
         slot_name,
         slot_type,
         slot_own_count,
@@ -499,7 +499,7 @@
       entry <- metadata_index[[slot_name]]
       if (is.null(entry)) {
         stop(
-          "newstan internal error: `model_param_metadata()` is missing an ",
+          "stanr internal error: `model_param_metadata()` is missing an ",
           "entry for `",
           slot_name,
           "`.",
@@ -510,7 +510,7 @@
       prefix <- if (n_new_outer) dims[seq_len(n_new_outer)] else integer(0)
       if (!identical(prefix, as.integer(new_outer_array_dims))) {
         stop(
-          "newstan internal error: `",
+          "stanr internal error: `",
           slot_name,
           "`'s declared dimensions ",
           "(",
@@ -523,7 +523,7 @@
         )
       }
       is_complex <- identical(slot_type, "complex")
-      own_dims <- .newstan_dims_after(dims, n_new_outer)
+      own_dims <- .stanr_dims_after(dims, n_new_outer)
       if (is_complex) {
         own_dims <- own_dims[-length(own_dims)]
       }
@@ -553,7 +553,7 @@
 #'   `model_param_metadata()`'s order), each `list(stage = <chr>, node =
 #'   <sized node>)`.
 #' @noRd
-.newstan_sized_structure <- function(model, ptr_metadata) {
+.stanr_sized_structure <- function(model, ptr_metadata) {
   metadata_names <- ptr_metadata$names
   metadata_index <- new.env(parent = emptyenv())
   for (i in seq_along(metadata_names)) {
@@ -582,7 +582,7 @@
     decl <- declared_all[[name]]
     if (is.null(decl)) {
       stop(
-        "newstan internal error: `",
+        "stanr internal error: `",
         name,
         "` from `model_param_metadata()` ",
         "is not declared in `model$variables()`.",
@@ -596,7 +596,7 @@
     # generated quantity), since a whole tuple is read/written together.
     stage <- ptr_metadata$stages[[which(base_names == name)[[1]]]]
     if (is.data.frame(decl$type)) {
-      node <- .newstan_sized_tuple_node(
+      node <- .stanr_sized_tuple_node(
         name,
         decl$type,
         decl$dimensions,
@@ -607,7 +607,7 @@
       entry <- metadata_index[[name]]
       if (is.null(entry)) {
         stop(
-          "newstan internal error: `model_param_metadata()` is missing an ",
+          "stanr internal error: `model_param_metadata()` is missing an ",
           "entry for `",
           name,
           "`.",
@@ -624,7 +624,7 @@
       # `legacy = TRUE` only for a plain (non-complex) top-level variable:
       # its shape follows the historical convention, which always sets
       # `dim` once there is at least one declared dimension (even a single
-      # one -- see `.newstan_apply_leaf_dims()`). Top-level complex
+      # one -- see `.stanr_apply_leaf_dims()`). Top-level complex
       # variables instead follow the canonical convention directly
       # ("complex_vector[n] -> complex vector length n", not a 1-d array),
       # matching every tuple-internal leaf.
@@ -639,7 +639,7 @@
 # included under the given `transformed_parameters`/`generated_quantities`
 # flags -- shared by `variable_skeleton()` and `constrain_variables()` so
 # both always agree on which variables are present.
-.newstan_sized_stage_kept <- function(
+.stanr_sized_stage_kept <- function(
   entry,
   transformed_parameters,
   generated_quantities
@@ -655,13 +655,13 @@
 # array-of-tuple shape ("list (over first index) of lists (over second
 # index) of ... tuples"). `sizes = integer(0)` (no enclosing array) just
 # returns one `build_leaf()` directly.
-.newstan_nested_list_shape <- function(sizes, build_leaf) {
+.stanr_nested_list_shape <- function(sizes, build_leaf) {
   if (!length(sizes)) {
     return(build_leaf())
   }
   n <- sizes[[1]]
   lapply(seq_len(n), function(i) {
-    .newstan_nested_list_shape(sizes[-1], build_leaf)
+    .stanr_nested_list_shape(sizes[-1], build_leaf)
   })
 }
 
@@ -683,7 +683,7 @@
 #
 # `values` must already have length `prod(dims)` (or length 1 for a scalar,
 # handled by the caller passing `dims = integer(0)`).
-.newstan_apply_leaf_dims <- function(values, dims, legacy) {
+.stanr_apply_leaf_dims <- function(values, dims, legacy) {
   if (!length(dims)) {
     return(values[[1]])
   }
@@ -698,32 +698,32 @@
 # bare `NA_complex_`); tuple/array-of-tuple -> nested unnamed lists per the
 # canonical shape; anything else (real/int) stays byte-identical to the
 # historical behavior (`dim` kept as-is, scalar -> `NA_real_`).
-.newstan_skeleton_node <- function(node) {
+.stanr_skeleton_node <- function(node) {
   if (identical(node$kind, "tuple")) {
-    return(.newstan_nested_list_shape(
+    return(.stanr_nested_list_shape(
       node$array_dims,
-      function() lapply(node$slots, .newstan_skeleton_node)
+      function() lapply(node$slots, .stanr_skeleton_node)
     ))
   }
   na_value <- if (identical(node$kind, "complex")) NA_complex_ else NA_real_
   n <- if (length(node$dims)) prod(node$dims) else 1L
   values <- rep(na_value, n)
-  .newstan_apply_leaf_dims(values, node$dims, isTRUE(node$legacy))
+  .stanr_apply_leaf_dims(values, node$dims, isTRUE(node$legacy))
 }
 
 # A mutable positional reader over a flat numeric vector -- `consume(n)`
 # returns the next `n` values (default 1) and advances the cursor;
 # `position()` reports how many values have been consumed so far (used to
-# verify the whole flat vector was accounted for, see `.newstan_consume_node`
+# verify the whole flat vector was accounted for, see `.stanr_consume_node`
 # call sites).
-.newstan_flat_reader <- function(values) {
+.stanr_flat_reader <- function(values) {
   pos <- 0L
   n_total <- length(values)
   list(
     consume = function(n = 1L) {
       if (pos + n > n_total) {
         stop(
-          "newstan internal error: the constrained output has fewer values ",
+          "stanr internal error: the constrained output has fewer values ",
           "than the variable structure expects.",
           call. = FALSE
         )
@@ -737,17 +737,17 @@
 }
 
 # Reshape a flat list of `prod(dims)` elements -- enumerated column-major,
-# first index fastest, exactly the order `.newstan_consume_node()` reads
+# first index fastest, exactly the order `.stanr_consume_node()` reads
 # tuple-array elements in -- into the canonical nested-list shape ("list over
 # first index of lists over second index of ... of tuples"). This is the
-# positional inverse of `.newstan_enumerate_tuple_elements()` above (that one
+# positional inverse of `.stanr_enumerate_tuple_elements()` above (that one
 # flattens nested lists to column-major order for the *input*-side contract;
 # this rebuilds nested lists from column-major order for the *output*-side
 # shape) -- kept as a separate function because the two are read in
 # different overall element orders (blocked-AoS on input vs element-major on
 # output) even though the column-major enumeration *within* one array level
 # is the same rule both directions.
-.newstan_reshape_column_major <- function(elements, dims) {
+.stanr_reshape_column_major <- function(elements, dims) {
   if (length(dims) <= 1L) {
     return(elements)
   }
@@ -756,27 +756,27 @@
   rest_n <- prod(rest_dims)
   lapply(seq_len(d1), function(i) {
     sub <- lapply(seq_len(rest_n), function(r) elements[[i + (r - 1L) * d1]])
-    .newstan_reshape_column_major(sub, rest_dims)
+    .stanr_reshape_column_major(sub, rest_dims)
   })
 }
 
 # Consume one sized-structure node's worth of scalars from `reader` (a
-# `.newstan_flat_reader()`), in the native flat constrained-draws order
+# `.stanr_flat_reader()`), in the native flat constrained-draws order
 # (distinct from the input side's blocked-AoS order): plain containers
 # column-major; complex containers column-major with adjacent (real, imag)
 # pairs; plain tuples slot-by-slot; tuple arrays *element-major* -- elements
 # enumerated column-major, each element's slots consumed in full (recursing
 # for nested tuples) before the next element. Returns the canonical R shape.
-.newstan_consume_node <- function(node, reader) {
+.stanr_consume_node <- function(node, reader) {
   if (identical(node$kind, "tuple")) {
     n_elements <- if (length(node$array_dims)) prod(node$array_dims) else 1L
     elements <- lapply(seq_len(n_elements), function(e) {
-      lapply(node$slots, .newstan_consume_node, reader = reader)
+      lapply(node$slots, .stanr_consume_node, reader = reader)
     })
     if (!length(node$array_dims)) {
       return(elements[[1]])
     }
-    return(.newstan_reshape_column_major(elements, node$array_dims))
+    return(.stanr_reshape_column_major(elements, node$array_dims))
   }
   if (identical(node$kind, "complex")) {
     n <- if (length(node$dims)) prod(node$dims) else 1L
@@ -785,12 +785,12 @@
       real = parts[seq.int(1L, 2L * n, by = 2L)],
       imaginary = parts[seq.int(2L, 2L * n, by = 2L)]
     )
-    return(.newstan_apply_leaf_dims(values, node$dims, isTRUE(node$legacy)))
+    return(.stanr_apply_leaf_dims(values, node$dims, isTRUE(node$legacy)))
   }
   # real/int: matches the historical behavior for top-level variables
   # (`legacy = TRUE` there) -- plain numeric, scalar unboxed, `dim` set
   # whenever the declared shape has >= 1 dimension.
   n <- if (length(node$dims)) prod(node$dims) else 1L
   values <- reader$consume(n)
-  .newstan_apply_leaf_dims(values, node$dims, isTRUE(node$legacy))
+  .stanr_apply_leaf_dims(values, node$dims, isTRUE(node$legacy))
 }

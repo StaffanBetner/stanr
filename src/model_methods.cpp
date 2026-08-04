@@ -1,5 +1,5 @@
 #include "include/model_methods.hpp"
-#include <newstan/r_data_context.hpp>
+#include <stanr/r_data_context.hpp>
 #include <stan/math/rev/functor/gradient.hpp>
 #include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>
 #include <stan/model/log_prob_grad.hpp>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace newstan {
+namespace stanr {
 
 std::string model_method_error_prefix(
     const stan::model::model_base& model, const char* method) {
@@ -344,4 +344,4 @@ Rcpp::NumericVector model_constrain(
   return result;
 }
 
-}  // namespace newstan
+}  // namespace stanr

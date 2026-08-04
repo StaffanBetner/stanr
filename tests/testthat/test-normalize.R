@@ -6,29 +6,29 @@ init_test_cache("normalize")
 
 test_that("chain validation rejects invalid chains", {
   expect_snapshot(error = TRUE, {
-    newstan:::.newstan_validate_chains(chains = 0, chain_ids = integer())
+    stanr:::.stanr_validate_chains(chains = 0, chain_ids = integer())
   })
 })
 
 
 test_that("chain validation rejects non-consecutive chain_ids", {
   expect_snapshot(error = TRUE, {
-    newstan:::.newstan_validate_chains(chains = 2, chain_ids = c(1L, 3L))
+    stanr:::.stanr_validate_chains(chains = 2, chain_ids = c(1L, 3L))
   })
 })
 
 
 test_that("chain validation rejects malformed `chains` values", {
   expect_error(
-    newstan:::.newstan_validate_chains(chains = NA, chain_ids = integer()),
+    stanr:::.stanr_validate_chains(chains = NA, chain_ids = integer()),
     "`chains` must be a single integer"
   )
   expect_error(
-    newstan:::.newstan_validate_chains(chains = c(2, 3), chain_ids = 1:2),
+    stanr:::.stanr_validate_chains(chains = c(2, 3), chain_ids = 1:2),
     "`chains` must be a single integer"
   )
   expect_error(
-    newstan:::.newstan_validate_chains(chains = "4", chain_ids = 1:4),
+    stanr:::.stanr_validate_chains(chains = "4", chain_ids = 1:4),
     "`chains` must be a single integer"
   )
 })
@@ -36,7 +36,7 @@ test_that("chain validation rejects malformed `chains` values", {
 
 test_that("inv_metric normalization warns and drops the metric under unit_e", {
   expect_warning(
-    result <- newstan:::.newstan_normalize_inv_metric(
+    result <- stanr:::.stanr_normalize_inv_metric(
       inv_metric = 1,
       metric = "unit_e",
       chains = 1
@@ -48,7 +48,7 @@ test_that("inv_metric normalization warns and drops the metric under unit_e", {
 
 test_that("inv_metric normalization rejects a per-chain list of the wrong length", {
   expect_error(
-    newstan:::.newstan_normalize_inv_metric(
+    stanr:::.stanr_normalize_inv_metric(
       inv_metric = list(1, 2, 3),
       metric = "diag_e",
       chains = 2
@@ -58,7 +58,7 @@ test_that("inv_metric normalization rejects a per-chain list of the wrong length
 })
 
 test_that("inv_metric normalization wraps a single metric in a length-1 list", {
-  result <- newstan:::.newstan_normalize_inv_metric(
+  result <- stanr:::.stanr_normalize_inv_metric(
     inv_metric = 1,
     metric = "diag_e",
     chains = 3
@@ -70,7 +70,7 @@ test_that("inv_metric normalization wraps a single metric in a length-1 list", {
 
 test_that("inv_metric normalization passes a correctly-sized per-chain list through", {
   metrics <- list(1, 2)
-  result <- newstan:::.newstan_normalize_inv_metric(
+  result <- stanr:::.stanr_normalize_inv_metric(
     inv_metric = metrics,
     metric = "diag_e",
     chains = 2
@@ -81,13 +81,13 @@ test_that("inv_metric normalization passes a correctly-sized per-chain list thro
 
 test_that("seed validation rejects an invalid seed", {
   expect_snapshot(error = TRUE, {
-    newstan:::.newstan_seed(-1)
+    stanr:::.stanr_seed(-1)
   })
 })
 
 
 test_that("seed resolution resolves NULL seed", {
-  seed <- newstan:::.newstan_seed(NULL)
+  seed <- stanr:::.stanr_seed(NULL)
 
   expect_true(is.integer(seed))
   expect_true(seed >= 1 && seed <= .Machine$integer.max)

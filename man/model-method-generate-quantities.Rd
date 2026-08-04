@@ -34,7 +34,7 @@ As a power-user escape hatch, tuple variables can instead be supplied
 pre-flattened using dotted names (e.g. \code{list(t.1 = ..., t.2 = ...)} for
 a tuple \code{t}), bypassing the list-shape conversion above; this is not the
 primary documented path. One caveat applies: a dotted entry for a
-\code{complex} tuple slot that omits the internal \code{newstan_array_dims}
+\code{complex} tuple slot that omits the internal \code{stanr_array_dims}
 attribute is assumed to hold exactly one complex value per enclosing
 array element, which is only correct when that slot is itself a plain
 (non-container) \code{complex} -- for anything else (e.g. a

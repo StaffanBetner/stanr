@@ -22,7 +22,7 @@
 #'   * `functions` -- a data frame with columns `name` and `is_rng`, one row
 #'     per exposed function, in exposure order.
 #' @noRd
-.newstan_process_standalone_cpp <- function(cpp_code, reserved_names) {
+.stanr_process_standalone_cpp <- function(cpp_code, reserved_names) {
   lines <- strsplit(cpp_code, "\n", fixed = TRUE)[[1]]
   marker_idx <- which(trimws(lines) == "// [[stan::function]]")
   if (length(marker_idx) == 0L) {
@@ -99,7 +99,7 @@
       stop(
         "Stan function `",
         name,
-        "` collides with a reserved/internal newstan export name; rename ",
+        "` collides with a reserved/internal stanr export name; rename ",
         "the Stan function to expose it.",
         call. = FALSE
       )
@@ -151,12 +151,12 @@
   )
 
   # 1234/0 are placeholder seed/chain: the real per-session seed is set from
-  # R via newstan_rng_set_seed() once the compiled functions are exposed.
+  # R via stanr_rng_set_seed() once the compiled functions are exposed.
   # RcppEigen.h (not plain Rcpp.h) is required here: wrappers with
   # vector/matrix/row_vector args or returns are exported as
   # `Eigen::Matrix<...>`, and only RcppEigen.h provides the `Rcpp::as()`/
   # `Rcpp::wrap()` specializations that marshal those to/from SEXP.
-  # newstan/rcpp_tuple_interop.hpp adds the Rcpp::wrap()/Exporter overloads
+  # stanr/rcpp_tuple_interop.hpp adds the Rcpp::wrap()/Exporter overloads
   # for std::tuple (and std::vector<tuple> nestings) that Stan's tuple
   # wrappers need; it must come after RcppEigen.h/Rcpp.h (both TU modes
   # satisfy this).
@@ -167,14 +167,14 @@
   prelude <- paste(
     c(
       "#include <RcppEigen.h>",
-      "#include <newstan/rcpp_tuple_interop.hpp>",
+      "#include <stanr/rcpp_tuple_interop.hpp>",
       "// [[Rcpp::depends(BH)]]",
       "// [[Rcpp::depends(RcppEigen)]]",
       "// [[Rcpp::depends(RcppParallel)]]",
       "static stan::rng_t base_rng__ = stan::services::util::create_rng(1234, 0);",
       "static std::ostream* pstream__ = &Rcpp::Rcout;",
       "// [[Rcpp::export]]",
-      "void newstan_rng_set_seed(int seed) {",
+      "void stanr_rng_set_seed(int seed) {",
       "  base_rng__ = stan::services::util::create_rng(static_cast<unsigned int>(seed), 0);",
       "}"
     ),
@@ -184,7 +184,7 @@
   registry <- paste(
     c(
       "// [[Rcpp::export]]",
-      "Rcpp::List newstan_exposed_functions() {",
+      "Rcpp::List stanr_exposed_functions() {",
       "  return Rcpp::List::create(",
       paste0(
         '    Rcpp::Named("name") = Rcpp::CharacterVector::create(',
@@ -223,7 +223,7 @@
 #'
 #' Mirrors `.compile_stan_model_environment()` (R/stan_model.R), but for the
 #' separate-TU expose path: no `model_name` messaging, no OpenCL, no
-#' `libnewstan_runner.a` (this TU has no services to link against).
+#' `libstanr_runner.a` (this TU has no services to link against).
 #'
 #' @param code Stan program source, already `#include`-resolved by the
 #'   caller (e.g. a model's `resolved_code()`).
@@ -234,7 +234,7 @@
 #' @param precompiled_headers Reuse the model-PCH `.gch` when flags match.
 #'
 #' @return An environment populated by `Rcpp::sourceCpp()`, with
-#'   `newstan_exposed_functions`, `newstan_rng_set_seed`, and one R function
+#'   `stanr_exposed_functions`, `stanr_rng_set_seed`, and one R function
 #'   per exposed Stan function.
 #' @noRd
 .compile_standalone_functions_environment <- function(
@@ -244,22 +244,22 @@
   verbose = FALSE,
   precompiled_headers = TRUE
 ) {
-  .newstan_require_compile_packages()
+  .stanr_require_compile_packages()
 
   # Only ever used for this separate-TU path; the combined-TU call site in
   # `.compile_stan_model_environment()` builds its own larger
   # reserved_names set.
-  reserved_names <- c("newstan_exposed_functions", "newstan_rng_set_seed")
+  reserved_names <- c("stanr_exposed_functions", "stanr_rng_set_seed")
 
   stanc_out <- stanc(
     code,
     standalone_functions = TRUE,
     external_cpp = external_cpp
   )
-  processed <- .newstan_process_standalone_cpp(stanc_out, reserved_names)
+  processed <- .stanr_process_standalone_cpp(stanc_out, reserved_names)
 
   # OPENCL_LIBS is meaningless here -- this TU never uses OpenCL.
-  cpp_option_assignments <- .newstan_parse_cpp_options(cpp_options)
+  cpp_option_assignments <- .stanr_parse_cpp_options(cpp_options)
   extra_assignments <- Filter(
     function(a) !identical(a$name, "OPENCL_LIBS"),
     cpp_option_assignments
@@ -272,30 +272,30 @@
   functions_hash <- digest::digest(
     c(
       processed$full_code,
-      as.character(utils::packageVersion("newstan")),
-      .newstan_stan_version(),
+      as.character(utils::packageVersion("stanr")),
+      .stanr_stan_version(),
       R.version$platform,
-      .newstan_compiler_identity(),
-      .newstan_cpp_options_hash_component(extra_assignments)
+      .stanr_compiler_identity(),
+      .stanr_cpp_options_hash_component(extra_assignments)
     ),
     algo = "xxhash64"
   )
 
   # Functions .cpp files live alongside model .cpp files in the same cache
   # dir, distinguished only by filename prefix.
-  cache_dir <- .newstan_models_cache_dir()
+  cache_dir <- .stanr_models_cache_dir()
   cpp_file <- file.path(cache_dir, paste0("functions_", functions_hash, ".cpp"))
   if (!file.exists(cpp_file)) {
     if (verbose) {
-      message("[newstan] Compiling Stan functions...")
+      message("[stanr] Compiling Stan functions...")
     }
     writeLines(processed$full_code, cpp_file)
   }
 
-  base_cppflags <- .newstan_base_cppflags()
+  base_cppflags <- .stanr_base_cppflags()
   pch_enabled <- FALSE
   if (precompiled_headers && length(external_cpp) == 0) {
-    pch_flags <- .newstan_pch_flags(base_cppflags, verbose)
+    pch_flags <- .stanr_pch_flags(base_cppflags, verbose)
     pch_enabled <- nzchar(pch_flags)
     cppflags <- paste(pch_flags, base_cppflags)
   } else {
@@ -305,11 +305,11 @@
   env <- new.env()
 
   compile_functions <- function(compilation_cppflags) {
-    .newstan_sourcecpp(
+    .stanr_sourcecpp(
       cpp_file = cpp_file,
       env = env,
       cppflags = compilation_cppflags,
-      libs = .newstan_tbb_libs(),
+      libs = .stanr_tbb_libs(),
       extra_assignments = extra_assignments,
       rebuild = FALSE,
       cache_dir = cache_dir,
@@ -317,7 +317,7 @@
     )
   }
 
-  .newstan_compile_with_pch_retry(
+  .stanr_compile_with_pch_retry(
     compile_functions,
     cppflags,
     base_cppflags,
@@ -331,22 +331,22 @@
 #' Wrap a compiled `_rng` export with an explicit `seed` argument
 #'
 #' The compiled export `fn` already has `pstream__`/`base_rng__` stripped
-#' from its C++ signature by `.newstan_process_standalone_cpp()`, so its R
+#' from its C++ signature by `.stanr_process_standalone_cpp()`, so its R
 #' formals are exactly the user-facing Stan args. The wrapper's formals are
 #' copied from `fn` (rather than written as `function(..., seed = NULL)`) so
 #' `args()`/autocomplete on the exposed function shows real parameter names.
 #'
 #' @param fn A compiled `_rng` export.
 #' @param compiled_env The environment `fn` was sourced into (provides
-#'   `newstan_rng_set_seed()`).
+#'   `stanr_rng_set_seed()`).
 #' @return A function with `fn`'s formals plus a trailing `seed = NULL`.
 #' @noRd
-.newstan_rng_wrapper <- function(fn, compiled_env) {
+.stanr_rng_wrapper <- function(fn, compiled_env) {
   base_formals <- formals(fn)
   arg_names <- names(base_formals) %||% character()
   wrapper <- function(seed = NULL) {
     if (!is.null(seed)) {
-      compiled_env$newstan_rng_set_seed(seed)
+      compiled_env$stanr_rng_set_seed(seed)
     }
     do.call(fn, mget(arg_names, envir = environment()))
   }
@@ -358,7 +358,7 @@
 #'
 #' Shared by both expose paths (separate-TU and combined-TU): reads the
 #' function registry off `compiled_env`, wraps
-#' `_rng` exports with `.newstan_rng_wrapper()`, and assigns everything into
+#' `_rng` exports with `.stanr_rng_wrapper()`, and assigns everything into
 #' `target_env` (and, if `global`, also into `global_env`).
 #'
 #' @param compiled_env An environment as returned by
@@ -370,27 +370,27 @@
 #'
 #' @return `target_env`, invisibly.
 #' @noRd
-.newstan_build_functions_env <- function(
+.stanr_build_functions_env <- function(
   compiled_env,
   target_env,
   global,
   global_env = globalenv()
 ) {
-  registry <- compiled_env$newstan_exposed_functions()
+  registry <- compiled_env$stanr_exposed_functions()
 
   # Cleared first so re-exposing after a model recompile (functions block
   # changed) doesn't leave stale bindings from the previous compile.
   rm(list = ls(target_env), envir = target_env)
 
   if (any(registry$is_rng)) {
-    compiled_env$newstan_rng_set_seed(sample.int(.Machine$integer.max, 1))
+    compiled_env$stanr_rng_set_seed(sample.int(.Machine$integer.max, 1))
   }
 
   for (i in seq_along(registry$name)) {
     name <- registry$name[[i]]
     fn <- compiled_env[[name]]
     value <- if (registry$is_rng[[i]]) {
-      .newstan_rng_wrapper(fn, compiled_env)
+      .stanr_rng_wrapper(fn, compiled_env)
     } else {
       fn
     }

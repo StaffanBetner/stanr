@@ -1,5 +1,5 @@
-#ifndef NEWSTAN_RUN_PATHFINDER
-#define NEWSTAN_RUN_PATHFINDER
+#ifndef STANR_RUN_PATHFINDER
+#define STANR_RUN_PATHFINDER
 
 #include <Rcpp.h>
 #include <stan/services/pathfinder/single.hpp>
@@ -11,9 +11,9 @@
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
 #include "r_worker.hpp"
-#include <newstan/r_data_context.hpp>
+#include <stanr/r_data_context.hpp>
 
-namespace newstan {
+namespace stanr {
   template <class Model>
   Rcpp::List run_pathfinder(Model& model, Rcpp::List args) {
     const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
@@ -40,18 +40,18 @@ namespace newstan {
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
-    newstan::r_logger logger(verbose, show_exceptions);
+    stanr::r_logger logger(verbose, show_exceptions);
     // Single-path execution remains on the R thread. Multi-path execution is
     // moved below into a coordinator thread, so it uses an atomic interrupt.
-    newstan::r_interrupt interrupt(num_paths <= 1);
+    stanr::r_interrupt interrupt(num_paths <= 1);
 
     int return_code;
 
     if (num_paths <= 1) {
       // Single pathfinder
-      newstan::r_data_context init_ctx(init_list);
-      newstan::r_discard_writer init_writer;
-      newstan::r_sample_writer sample_writer(num_draws);
+      stanr::r_data_context init_ctx(init_list);
+      stanr::r_discard_writer init_writer;
+      stanr::r_sample_writer sample_writer(num_draws);
       stan::callbacks::json_writer<std::ostringstream> metric_writer(
           std::make_unique<std::ostringstream>());
 
@@ -77,7 +77,7 @@ namespace newstan {
       // Multi-path Pathfinder runs in a coordinator std::thread. All data
       // contexts and writers are C++ owned before that thread is launched.
       // The immutable context is safe to share across all paths.
-      const auto init_ctx = std::make_unique<newstan::r_data_context>(init_list);
+      const auto init_ctx = std::make_unique<stanr::r_data_context>(init_list);
       std::vector<stan::io::var_context*> init_ctxs(num_paths, init_ctx.get());
 
       // The package returns only the PSIS-resampled draws.  Base writers are
@@ -92,7 +92,7 @@ namespace newstan {
       }
 
       // Final combined parameter writer
-      newstan::r_sample_writer param_writer(num_psis_draws);
+      stanr::r_sample_writer param_writer(num_psis_draws);
       // Final diagnostic writer (structured_writer)
       stan::callbacks::json_writer<std::ostringstream> diag_writer(
           std::make_unique<std::ostringstream>());
@@ -100,9 +100,9 @@ namespace newstan {
       // Init writers (one per path, for writing initial values)
       std::vector<stan::callbacks::writer> init_writers(num_paths);
 
-      return_code = newstan::run_on_worker_thread(
+      return_code = stanr::run_on_worker_thread(
           logger, "Pathfinder",
-          [&](newstan::r_interrupt& worker_interrupt) -> int {
+          [&](stanr::r_interrupt& worker_interrupt) -> int {
             return stan::services::pathfinder::pathfinder_lbfgs_multi(
                 model, std::move(init_ctxs), seed, chain_id, init_radius,
                 history_size, init_alpha,
