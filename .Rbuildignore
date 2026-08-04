@@ -24,3 +24,4 @@ inst/lib
 .*\.a$
 .*\.so$
 .*\.dll$
+^man-roxygen$
