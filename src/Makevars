@@ -1,4 +1,5 @@
 .PHONY: static package
+CXX_STD = CXX20
 
 PKG_CPPFLAGS = -I"../inst/include" -I"sundials" -include stan_sundials_printf_override.hpp -D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
 PKG_CPPFLAGS += $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::CxxFlags()" | tail -n 1)

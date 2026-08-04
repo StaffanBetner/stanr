@@ -21,10 +21,10 @@
 }
 
 # Shared by both compile paths (model TU and functions TU). `+=` appends
-# these after Makeconf's own CXXFLAGS/CXX17FLAGS (which are brought in ahead
+# these after Makeconf's own CXXFLAGS/CXX20FLAGS (which are brought in ahead
 # of the package Makevars file R writes for this call), so our -O3 -g0 wins
 # the last-flag-wins compiler precedence instead of being silently
-# overridden by Makeconf's -g -O2. USE_CXX17/PKG_CPPFLAGS/PKG_LIBS are not
+# overridden by Makeconf's -g -O2. USE_CXX20/PKG_CPPFLAGS/PKG_LIBS are not
 # set by Makeconf, so `+=` on them is equivalent to `=`.
 .stanr_sourcecpp <- function(
   cpp_file,
@@ -37,14 +37,14 @@
   verbose
 ) {
   withr::with_envvar(
-    c(USE_CXX17 = "1"),
+    c(USE_CXX20 = "1"),
     withr::with_makevars(
       .stanr_apply_makevars(
         c(
           PKG_CPPFLAGS = cppflags,
           PKG_LIBS = libs,
           CXXFLAGS = .stanr_opt_flags(),
-          CXX17FLAGS = .stanr_opt_flags()
+          CXX20FLAGS = .stanr_opt_flags()
         ),
         extra_assignments
       ),
@@ -115,10 +115,10 @@
     "CXX",
     "CXXFLAGS",
     "CXXPICFLAGS",
-    "CXX17",
-    "CXX17STD",
-    "CXX17FLAGS",
-    "CXX17PICFLAGS"
+    "CXX20",
+    "CXX20STD",
+    "CXX20FLAGS",
+    "CXX20PICFLAGS"
   )
   any(vapply(
     assignments,

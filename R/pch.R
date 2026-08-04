@@ -1,7 +1,7 @@
 # Precompiled Stan model header support ---------------------------------------
 
 # Optimization/warning flags appended (via `+=`) after Makeconf's own
-# CXXFLAGS/CXX17FLAGS so they win under last-flag-wins compiler precedence,
+# CXXFLAGS/CXX20FLAGS so they win under last-flag-wins compiler precedence,
 # instead of being silently overridden the way `-O3 -w` used to be when it
 # lived in PKG_CPPFLAGS. Defined once and shared between the model TU compile
 # (R/stan_model.R) and the precompiled header build below so the two stay
@@ -110,14 +110,14 @@
 
 #' Create an R-toolchain Makefile for a precompiled header.
 #'
-#' The recipe names the `CXX17*` variables explicitly rather than the plain
-#' `CXX`/`CXXFLAGS`/`CXXPICFLAGS` ones. `USE_CXX17` is not a Makeconf switch --
+#' The recipe names the `CXX20*` variables explicitly rather than the plain
+#' `CXX`/`CXXFLAGS`/`CXXPICFLAGS` ones. `USE_CXX20` is not a Makeconf switch --
 #' R implements it in `tools:::.shlib_internal()`, which substitutes
-#' `$(CXX17) $(CXX17STD)` etc. before invoking make -- so a bare `make -f`
+#' `$(CXX20) $(CXX20STD)` etc. before invoking make -- so a bare `make -f`
 #' against Makeconf would silently get `$(CXX)`'s own default standard
-#' (`-std=gnu++20` as of R 4.6) while `sourceCpp()` compiles the model TU
-#' (R/stan_model.R, which sets `USE_CXX17=1`) at `-std=gnu++17`. GCC/clang
-#' reject a PCH built under a different `-std` than its consumer.
+#' instead of the C++20 standard `sourceCpp()` compiles the model TU under
+#' (R/stan_model.R, which sets `USE_CXX20=1`). GCC/clang reject a PCH built
+#' under a different `-std` than its consumer.
 #'
 #' The recipe does not create `$(dir $(PCH))`; the caller does that in R,
 #' so the recipe needs no shell built-ins beyond the compiler itself (GNU
@@ -132,7 +132,7 @@
       paste("include", .stanr_makeconf()),
       ".PHONY: pch",
       "pch:",
-      "\t$(CXX17) $(CXX17STD) $(ALL_CPPFLAGS) $(CXX17FLAGS) $(CXX17PICFLAGS) -x c++-header \"$(HEADER)\" -o \"$(PCH)\" $(EXTRA_CXXFLAGS)"
+      "\t$(CXX20) $(CXX20STD) $(ALL_CPPFLAGS) $(CXX20FLAGS) $(CXX20PICFLAGS) -x c++-header \"$(HEADER)\" -o \"$(PCH)\" $(EXTRA_CXXFLAGS)"
     ),
     makefile
   )
@@ -154,15 +154,15 @@
   if (!is.null(cached)) {
     return(cached)
   }
-  cxx17 <- .stanr_r_config("CXX17")
-  identity <- if (!nzchar(cxx17)) {
+  cxx20 <- .stanr_r_config("CXX20")
+  identity <- if (!nzchar(cxx20)) {
     ""
   } else {
-    cxx17_words <- strsplit(cxx17, "\\s+")[[1]]
+    cxx20_words <- strsplit(cxx20, "\\s+")[[1]]
     output <- tryCatch(
       .stanr_system2(
-        cxx17_words[[1]],
-        c(cxx17_words[-1], "--version"),
+        cxx20_words[[1]],
+        c(cxx20_words[-1], "--version"),
         stdout = TRUE,
         stderr = TRUE
       ),
@@ -275,10 +275,10 @@
       r = R.version$version.string,
       arch = R.version$arch,
       compiler = compiler,
-      # The CXX17* family, matching the variables the PCH recipe
+      # The CXX20* family, matching the variables the PCH recipe
       # (`.stanr_pch_makefile()`) and the model TU compile both resolve to.
       makeconf = vapply(
-        c("CXX17", "CXX17STD", "CXX17FLAGS", "CXX17PICFLAGS", "CPPFLAGS"),
+        c("CXX20", "CXX20STD", "CXX20FLAGS", "CXX20PICFLAGS", "CPPFLAGS"),
         .stanr_r_config,
         character(1)
       ),

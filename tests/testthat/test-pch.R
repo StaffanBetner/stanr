@@ -17,7 +17,7 @@ test_that("second identical .stanr_pch_flags() call makes no additional .stanr_s
 
   call_count <- 0
   testthat::local_mocked_bindings(
-    # A non-empty CXX17 lets `.stanr_compiler_identity()` reach its
+    # A non-empty CXX20 lets `.stanr_compiler_identity()` reach its
     # `--version` probe (mocked below), which is what needs to be exercised.
     .stanr_rcmd = function(...) "cc",
     .stanr_system2 = function(...) {
@@ -79,12 +79,12 @@ test_that(".stanr_r_config() memoizes per variable and routes through .stanr_rcm
 # itself, so no real (30-60s) PCH or model compile ever runs.
 
 # A minimal .stanr_rcmd mock shared by both tests below: it answers the
-# `R CMD config CXX17` probe (used by `.stanr_compiler_identity()` to find
+# `R CMD config CXX20` probe (used by `.stanr_compiler_identity()` to find
 # the compiler to run `--version` on) with a fixed compiler name, and every
 # other `R CMD config <var>` probe (used while fingerprinting the PCH) with
 # "".
 mock_pch_rcmd <- function(args, ...) {
-  if (identical(args, c("config", "CXX17"))) {
+  if (identical(args, c("config", "CXX20"))) {
     return("clang++")
   }
   ""

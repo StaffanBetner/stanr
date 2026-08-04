@@ -16,7 +16,7 @@ License: BSD_3_clause + file LICENSE
 URL: https://github.com/andrjohns/stanr
 BugReports: https://github.com/andrjohns/stanr/issues
 Depends:
-    R (>= 4.0)
+    R (>= 4.3)
 Imports:
     R6,
     Rcpp (>= 1.0.0),
@@ -42,5 +42,5 @@ Roxygen: list(markdown = TRUE)
 Config/build/compilation-database: true
 Config/roxygen2/version: 8.0.0
 NeedsCompilation: yes
-SystemRequirements: GNU make
+SystemRequirements: GNU make, C++20
 Config/testthat/parallel: true
