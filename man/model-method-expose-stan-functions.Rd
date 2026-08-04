@@ -71,6 +71,7 @@ does not recompile.
 exposes functions as part of the model's own compilation.
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
 \code{\link{model-method-generate-quantities}},

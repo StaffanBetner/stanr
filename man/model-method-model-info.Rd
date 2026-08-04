@@ -45,6 +45,7 @@ use_opencl()
 \code{\link[=model-method-compile]{$compile()}} and \code{\link[=stan_model]{stan_model()}}
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
 \code{\link{model-method-expose-stan-functions}},

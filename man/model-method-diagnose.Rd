@@ -21,6 +21,7 @@ Stan. Returns a \code{\link{StanDiagnose}} object.
 \code{\link[=model-method-sample]{$sample()}}
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-compile}},
 \code{\link{model-method-expose-stan-functions}},
 \code{\link{model-method-generate-quantities}},

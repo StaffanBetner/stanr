@@ -30,6 +30,7 @@ in the call to \code{stan_model()} and subsequently call \verb{$compile()} direc
 \code{\link[=model-method-model-info]{$is_compiled()}} and \code{\link[=stan_model]{stan_model()}}
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-diagnose}},
 \code{\link{model-method-expose-stan-functions}},
 \code{\link{model-method-generate-quantities}},

@@ -99,6 +99,7 @@ maximum likelihood estimate (MLE). Returns a \code{\link{StanMLE}} object.
 \code{\link[=model-method-laplace]{$laplace()}}
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
 \code{\link{model-method-expose-stan-functions}},

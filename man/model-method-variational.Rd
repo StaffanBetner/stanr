@@ -92,6 +92,7 @@ Returns a \code{\link{StanVB}} object.
 \code{\link[=model-method-pathfinder]{$pathfinder()}}
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
 \code{\link{model-method-expose-stan-functions}},

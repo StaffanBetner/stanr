@@ -63,6 +63,7 @@ Returns a \code{\link{StanGQ}} object.
 \code{\link[=model-method-sample]{$sample()}}
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
 \code{\link{model-method-expose-stan-functions}},

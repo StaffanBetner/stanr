@@ -35,6 +35,7 @@
 #'
 #'  |**Method**|**Description**|
 #'  |:----------|:---------------|
+#'  [`$check_syntax()`][model-method-check-syntax] | Check the Stan program's syntax without compiling. |
 #'  [`$compile()`][model-method-compile] | Compile the Stan program. |
 #'  [`$is_compiled()`][model-method-model-info] | Check whether the model has been compiled. |
 #'
@@ -436,6 +437,44 @@ stan_model_compile <- function(
   invisible(self)
 }
 StanModel$set("public", "compile", stan_model_compile)
+
+#' Check Stan program syntax
+#'
+#' @name model-method-check-syntax
+#' @aliases check_syntax
+#' @family StanModel methods
+#'
+#' @description The `$check_syntax()` method of a [`StanModel`] object runs
+#'   the Stan program through `stanc` without compiling the generated C++. It
+#'   is a cheap way to validate a program before calling
+#'   [`$compile()`][model-method-compile].
+#'
+#' @param pedantic (logical) Should `stanc`'s pedantic-mode warnings be
+#'   requested? The default is `FALSE`.
+#' @param quiet (logical) Should the success message be suppressed? The
+#'   default is `FALSE`.
+#'
+#' @return `TRUE`, invisibly. Errors if the program has a syntax error.
+#'
+#' @seealso [`$compile()`][model-method-compile]
+#'
+NULL
+
+stan_model_check_syntax <- function(pedantic = FALSE, quiet = FALSE) {
+  pedantic <- .stanr_flag(pedantic, "pedantic")
+  quiet <- .stanr_flag(quiet, "quiet")
+  stanc(
+    private$resolved_code(),
+    external_cpp = private$external_cpp_,
+    use_opencl = private$use_opencl_,
+    warn_pedantic = pedantic
+  )
+  if (!quiet) {
+    message("[stanr] Stan program is syntactically correct.")
+  }
+  invisible(TRUE)
+}
+StanModel$set("public", "check_syntax", stan_model_check_syntax)
 
 # Selects the OpenCL platform/device for the model's native computations to
 # run on. Triggers lazy compilation via `native_function()` if needed, and

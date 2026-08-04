@@ -133,6 +133,7 @@ Returns a \code{\link{StanMCMC}} object.
 \code{\link[=model-method-variational]{$variational()}}
 
 Other StanModel methods:
+\code{\link{model-method-check-syntax}},
 \code{\link{model-method-compile}},
 \code{\link{model-method-diagnose}},
 \code{\link{model-method-expose-stan-functions}},
