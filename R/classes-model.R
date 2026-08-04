@@ -521,7 +521,11 @@ stan_model_format <- function(
   overwrite_file <- .stanr_flag(overwrite_file, "overwrite_file")
   backup <- .stanr_flag(backup, "backup")
   quiet <- .stanr_flag(quiet, "quiet")
-  if (!isFALSE(canonicalize) && !isTRUE(canonicalize) && !is.character(canonicalize)) {
+  if (
+    !isFALSE(canonicalize) &&
+      !isTRUE(canonicalize) &&
+      !is.character(canonicalize)
+  ) {
     stop(
       "`canonicalize` must be FALSE, TRUE, or a character vector.",
       call. = FALSE

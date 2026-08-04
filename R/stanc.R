@@ -311,7 +311,10 @@ stanc_format <- function(
   if (isTRUE(canonicalize)) {
     flags <- c(flags, "print-canonical")
   } else if (is.character(canonicalize)) {
-    flags <- c(flags, paste0("canonicalize=", paste(canonicalize, collapse = ",")))
+    flags <- c(
+      flags,
+      paste0("canonicalize=", paste(canonicalize, collapse = ","))
+    )
   }
   if (!is.null(max_line_length)) {
     flags <- c(flags, paste0("max-line-length=", max_line_length))

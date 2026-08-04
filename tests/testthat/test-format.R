@@ -55,8 +55,14 @@ test_that("format(overwrite_file = TRUE) writes the file and backs up the origin
     "Old version of the model stored to"
   )
 
-  expect_equal(paste(readLines(path), collapse = "\n"), sub("\\s*$", "", result))
-  backups <- list.files(dirname(path), pattern = paste0(basename(path), "\\.bak-"))
+  expect_equal(
+    paste(readLines(path), collapse = "\n"),
+    sub("\\s*$", "", result)
+  )
+  backups <- list.files(
+    dirname(path),
+    pattern = paste0(basename(path), "\\.bak-")
+  )
   expect_length(backups, 1L)
   # the live object keeps the code it was constructed with
   expect_equal(mod$code(), original_code)
@@ -67,8 +73,15 @@ test_that("format(overwrite_file = TRUE, backup = FALSE) skips the backup", {
   writeLines("parameters { real x; } model { x ~ normal(0, 1); }", path)
   mod <- stan_model(stan_file = path, compile = FALSE)
 
-  expect_no_message(mod$format(overwrite_file = TRUE, backup = FALSE, quiet = TRUE))
-  backups <- list.files(dirname(path), pattern = paste0(basename(path), "\\.bak-"))
+  expect_no_message(mod$format(
+    overwrite_file = TRUE,
+    backup = FALSE,
+    quiet = TRUE
+  ))
+  backups <- list.files(
+    dirname(path),
+    pattern = paste0(basename(path), "\\.bak-")
+  )
   expect_length(backups, 0L)
 })
 
