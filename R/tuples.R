@@ -290,7 +290,8 @@
 #' (per `declared`, one block of `mod$variables()`) with the dotted per-leaf
 #' entries `r_data_context` expects. Entries that are not lists pass through
 #' unchanged, including any user-supplied dotted entries (the manual escape
-#' hatch).
+#' hatch). A `data.frame` entry is coerced to a matrix via `as.matrix()` if
+#' every column is numeric or complex; otherwise it errors.
 #'
 #' @param values A named list of data or init values.
 #' @param declared One block of `mod$variables()` (e.g. `$data` or
@@ -311,6 +312,29 @@
 
   result <- values
   for (name in names(values)[is_bare_list]) {
+    value <- values[[name]]
+    if (is.data.frame(value)) {
+      # `data.frame` inherits `is.list()`, but cmdstanr-style matrix data
+      # accepts data.frames as matrix-like -- only reject the (rare) case a
+      # column can't survive `as.matrix()` numerically.
+      is_numeric_col <- vapply(
+        value,
+        function(col) is.numeric(col) || is.complex(col),
+        logical(1)
+      )
+      if (!all(is_numeric_col)) {
+        stop(
+          "`",
+          name,
+          "` is a data.frame with a non-numeric, non-complex column; ",
+          "data.frames are only accepted as data when every column is ",
+          "numeric or complex -- supply a matrix instead.",
+          call. = FALSE
+        )
+      }
+      result[[name]] <- as.matrix(value)
+      next
+    }
     decl <- declared[[name]]
     if (is.null(decl) || !is.data.frame(decl$type)) {
       stop(

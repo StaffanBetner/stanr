@@ -115,6 +115,8 @@ namespace newstan {
     const int init_buffer_arg = Rcpp::as<int>(args["init_buffer"]);
     const int term_buffer_arg = Rcpp::as<int>(args["term_buffer"]);
     const int window_arg = Rcpp::as<int>(args["window"]);
+    const std::vector<std::string> diagnostic_names =
+        Rcpp::as<std::vector<std::string>>(args["diagnostic_names"]);
 
     newstan::r_logger logger(verbose, show_exceptions);
 
@@ -347,9 +349,11 @@ namespace newstan {
         });
 
     // --- Combine results (R thread only) ---
-    Rcpp::NumericVector combined = return_code == 0
-        ? writer_chains_to_array(sample_writers)
-        : Rcpp::NumericVector(0);
+    Rcpp::List chain_arrays = return_code == 0
+        ? writer_chains_to_arrays(sample_writers, diagnostic_names)
+        : Rcpp::List::create(
+              Rcpp::_["samples"] = Rcpp::NumericVector(0),
+              Rcpp::_["diagnostics"] = Rcpp::NumericVector(0));
     Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
 
     bool metric_captured = false;
@@ -361,7 +365,8 @@ namespace newstan {
     }
 
     Rcpp::List result = Rcpp::List::create(
-      Rcpp::_["samples"] = combined,
+      Rcpp::_["samples"] = chain_arrays["samples"],
+      Rcpp::_["diagnostics"] = chain_arrays["diagnostics"],
       Rcpp::_["return_code"] = return_code,
       Rcpp::_["inv_metric"] = R_NilValue,
       Rcpp::_["step_size"] = R_NilValue,

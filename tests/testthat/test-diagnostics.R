@@ -149,9 +149,19 @@ test_that("$lp() returns different values for different seeds", {
 # $output() method
 # ---------------------------------------------------------------------------
 
-test_that("$output() returns the gradient-table lines", {
+test_that("$output() returns the Stan log, not the gradient table", {
   mod <- test_model("bernoulli")
   result <- suppressMessages(mod$diagnose(data = bernoulli_data, seed = 42))
+
+  expect_true(is.character(result$output()))
+  expect_gt(length(result$output()), 0)
+})
+
+test_that("$output() exposes the log even when show_messages = FALSE", {
+  mod <- test_model("bernoulli")
+  result <- suppressMessages(
+    mod$diagnose(data = bernoulli_data, seed = 42, show_messages = FALSE)
+  )
 
   expect_true(is.character(result$output()))
   expect_gt(length(result$output()), 0)

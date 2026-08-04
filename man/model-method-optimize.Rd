@@ -36,10 +36,11 @@ array element, which is only correct when that slot is itself a plain
 (non-container) \code{complex} -- for anything else (e.g. a
 \code{complex_vector} tuple slot), use the list shapes above instead.}
 
-\item{init}{Initial values for parameters. Either a non-negative number,
-used as the range of CmdStan-style random initialization
-(\code{Uniform(-init, init)} on the unconstrained scale; the default is 2),
-or a named list / named numeric vector of constrained parameter values.
+\item{init}{Initial values for parameters. Either \code{NULL} (equivalent to
+the default radius of 2), a non-negative number, used as the range of
+CmdStan-style random initialization (\code{Uniform(-init, init)} on the
+unconstrained scale; the default is 2), or a named list / named numeric
+vector of constrained parameter values.
 Supplied values are shared by all chains; parameters not covered by the
 supplied values are randomly initialized with the default range. A named
 list may include tuple-shaped list entries and R complex values for
@@ -76,7 +77,7 @@ estimate. \code{\link[=fit-method-mle]{$mle()}} is unaffected either way and alw
 reflects the final iteration.}
 
 \item{num_threads}{(integer) The total number of threads to use across all
-chains. Defaults to \code{parallel::detectCores()} (all available threads).}
+chains. Defaults to \code{RcppParallel::defaultNumThreads()} (all available threads).}
 
 \item{opencl_ids}{(integer vector) \code{c(platform_id, device_id)} identifying
 the OpenCL platform/device to run on. Only meaningful for a model

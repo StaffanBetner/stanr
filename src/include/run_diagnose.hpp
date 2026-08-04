@@ -36,7 +36,11 @@ namespace newstan {
 
     logger.flush();
 
-    Rcpp::CharacterVector messages(
+    Rcpp::CharacterVector output(
+        logger.history().begin(),
+        logger.history().end()
+    );
+    Rcpp::CharacterVector gradient_lines(
         param_writer.messages().begin(),
         param_writer.messages().end()
     );
@@ -44,7 +48,8 @@ namespace newstan {
     return Rcpp::List::create(
       Rcpp::_["num_failed"] = n_failed,
       Rcpp::_["return_code"] = n_failed == 0 ? 0 : 1,
-      Rcpp::_["output"] = messages
+      Rcpp::_["output"] = output,
+      Rcpp::_["gradient_lines"] = gradient_lines
     );
   }
 }

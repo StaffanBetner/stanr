@@ -19,23 +19,12 @@
 }
 
 
-#' Thin wrapper around `system2()`.
-#'
-#' All `system2()` call sites in this file are routed through this function
-#' so tests can count/mock subprocess invocations via
-#' `testthat::local_mocked_bindings()` without spawning real processes.
-#'
-#' @noRd
+# Wrapper around `system2()`: a seam so tests can count/mock subprocess
+# invocations via `testthat::local_mocked_bindings()`.
 .newstan_system2 <- function(...) system2(...)
 
-#' Thin wrapper around `tools::Rcmd()`.
-#'
-#' Gives tests the same mocking seam as `.newstan_system2()` above, for the
-#' `R CMD config` calls made by `.newstan_r_config()` -- `tools::Rcmd()`
-#' shells out via `system2()` internally, but not through `.newstan_system2`,
-#' so it needs its own seam.
-#'
-#' @noRd
+# Same seam for `tools::Rcmd()`, which shells out via `system2()` internally
+# but not through `.newstan_system2()`.
 .newstan_rcmd <- function(...) tools::Rcmd(...)
 
 #' Return the compiler configuration value used by R's build system.

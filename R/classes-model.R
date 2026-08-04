@@ -141,30 +141,25 @@
   self,
   data,
   seed,
-  init = NULL, # NULL when native_args don't need init (laplace, generate_quantities)
+  init = NULL, # resolves to default init; unused by laplace/generate_quantities
   native_args_fn, # function(seed, resolved_init, model) -> list
   payload_fn # function(result) -> list of method-specific fields
 ) {
   started <- proc.time()[["elapsed"]]
   seed <- .newstan_seed(seed)
-  resolved_init <- if (!is.null(init)) resolve_init(init)
+  resolved_init <- resolve_init(init)
   # Tuple-typed data/init values arrive as bare unnamed R lists; flatten
   # them into the dotted per-leaf entries `r_data_context` expects before
   # they reach any native call. `self$variables()` pays the stanc-info cost,
   # so gate it behind a cheap check for any list-valued entry.
   has_list <- function(x) any(vapply(x, is.list, logical(1)))
-  if (
-    has_list(data) ||
-      (!is.null(resolved_init) && has_list(resolved_init$values))
-  ) {
+  if (has_list(data) || has_list(resolved_init$values)) {
     declared <- self$variables()
     data <- .newstan_flatten_tuple_values(data, declared$data)
-    if (!is.null(resolved_init)) {
-      resolved_init$values <- .newstan_flatten_tuple_values(
-        resolved_init$values,
-        declared$parameters
-      )
-    }
+    resolved_init$values <- .newstan_flatten_tuple_values(
+      resolved_init$values,
+      declared$parameters
+    )
   }
   model <- self$new_model(data, seed)
   native_args <- native_args_fn(seed, resolved_init, model)
@@ -962,6 +957,19 @@ stan_model_sample <- function(
   term_buffer <- .newstan_int(term_buffer, "term_buffer")
   window <- .newstan_int(window, "window")
 
+  diagnostic_vars <- if (!fixed_param && engine == "static") {
+    c("accept_stat__", "stepsize__", "int_time__")
+  } else {
+    c(
+      "accept_stat__",
+      "stepsize__",
+      "treedepth__",
+      "n_leapfrog__",
+      "divergent__",
+      "energy__"
+    )
+  }
+
   native_args_fn <- function(seed, resolved_init, model) {
     native <- list(
       method = "sample",
@@ -992,7 +1000,8 @@ stan_model_sample <- function(
       init = resolved_init$values,
       verbose = show_messages,
       show_exceptions = show_exceptions,
-      num_threads = num_threads
+      num_threads = num_threads,
+      diagnostic_names = diagnostic_vars
     )
     if (!is.null(inv_metric)) {
       native$inv_metric <- inv_metric
@@ -1004,43 +1013,17 @@ stan_model_sample <- function(
     if (result$return_code != 0) {
       list(draws = NULL, diagnostics = NULL)
     } else {
-      draw_names <- dimnames(result$samples)[[3]]
-      if (!fixed_param && engine == "static") {
-        diagnostic_vars <- c("accept_stat__", "stepsize__", "int_time__")
+      draws <- posterior::as_draws_array(result$samples)
+      diagnostics <- if (dim(result$diagnostics)[3] > 0) {
+        posterior::as_draws_array(result$diagnostics)
       } else {
-        diagnostic_vars <- c(
-          "accept_stat__",
-          "stepsize__",
-          "treedepth__",
-          "n_leapfrog__",
-          "divergent__",
-          "energy__"
+        posterior::draws_df(
+          "stepsize__" = NA,
+          "treedepth__" = NA,
+          "n_leapfrog__" = NA,
+          "divergent__" = NA,
+          "energy__" = NA
         )
-      }
-      par_vars <- draw_names[!(draw_names %in% diagnostic_vars)]
-
-      if (fixed_param) {
-        present <- intersect(diagnostic_vars, draw_names)
-        all_draws <- posterior::as_draws_array(result$samples)
-        diagnostics <- if (length(present)) {
-          posterior::subset_draws(all_draws, variable = present)
-        } else {
-          posterior::draws_df(
-            "stepsize__" = NA,
-            "treedepth__" = NA,
-            "n_leapfrog__" = NA,
-            "divergent__" = NA,
-            "energy__" = NA
-          )
-        }
-        draws <- posterior::subset_draws(all_draws, par_vars)
-      } else {
-        all_draws <- posterior::as_draws_array(result$samples)
-        diagnostics <- posterior::subset_draws(
-          all_draws,
-          variable = diagnostic_vars
-        )
-        draws <- posterior::subset_draws(all_draws, par_vars)
       }
 
       list(
@@ -1383,9 +1366,9 @@ stan_model_laplace <- function(
     list(draws = posterior::as_draws_matrix(result$draws))
   }
 
-  # `init` is not part of laplace's native_args (the Laplace approximation is
-  # centered at `mode`, not resolved via init), so no `resolve_init()` call is
-  # made here -- pass init = NULL to the shared runner to preserve that.
+  # `init` is not part of laplace's native args (the Laplace approximation is
+  # centered at `mode`, not resolved via init), so the resolved default is
+  # simply unused here.
   res <- .newstan_run_service(
     self = self,
     data = data,
@@ -1878,8 +1861,9 @@ stan_model_diagnose <- function(
   payload_fn <- function(result) {
     n_failed <- as.integer(result$num_failed)
 
-    # Parse output messages from Stan's test_gradients()
-    parsed <- .newstan_parse_diagnose_output(result$output)
+    # The gradient-table text from Stan's test_gradients() is now separate
+    # from `result$output` (the full log, matching every other service).
+    parsed <- .newstan_parse_diagnose_output(result$gradient_lines)
 
     list(
       num_failed = n_failed,

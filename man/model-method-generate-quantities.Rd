@@ -41,7 +41,7 @@ array element, which is only correct when that slot is itself a plain
 \code{complex_vector} tuple slot), use the list shapes above instead.}
 
 \item{num_threads}{(integer) The total number of threads to use across all
-chains. Defaults to \code{parallel::detectCores()} (all available threads).}
+chains. Defaults to \code{RcppParallel::defaultNumThreads()} (all available threads).}
 
 \item{opencl_ids}{(integer vector) \code{c(platform_id, device_id)} identifying
 the OpenCL platform/device to run on. Only meaningful for a model

@@ -1,9 +1,13 @@
 # Normalize the public initialization forms to the radius/values pair consumed
-# by the native var_context adapter. A scalar is the CmdStan initialization
-# radius; a list or named numeric vector supplies constrained parameter values
-# (with a default radius of 2, matching CmdStan's default `init` behavior for
-# perturbing any parameters not covered by the supplied values).
+# by the native var_context adapter, where `NULL` selects the default radius.
+# A scalar is the CmdStan initialization radius; a list or named numeric
+# vector supplies constrained parameter values (with a default radius of 2,
+# matching CmdStan's default `init` behavior for perturbing any parameters
+# not covered by the supplied values).
 resolve_init <- function(init) {
+  if (is.null(init)) {
+    return(list(radius = 2, values = list()))
+  }
   is_radius <- isTRUE(
     length(init) == 1L &&
       is.null(names(init)) &&
@@ -49,5 +53,8 @@ resolve_init <- function(init) {
 # Keep service results small: data, initialization values, draws, and metrics can
 # be large and are inputs rather than service configuration.
 service_args <- function(args) {
-  args[setdiff(names(args), c("data", "init", "draws", "inv_metric"))]
+  args[setdiff(
+    names(args),
+    c("data", "init", "draws", "inv_metric", "diagnostic_names")
+  )]
 }

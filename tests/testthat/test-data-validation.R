@@ -139,4 +139,75 @@ test_that("numeric initialization radius is accepted", {
   )
 })
 
+test_that("a numeric data.frame is accepted in place of matrix data", {
+  mod <- test_model("hierarchical_logistic")
+  x_values <- rbind(
+    c(1, -1),
+    c(1, -0.5),
+    c(1, 0),
+    c(1, 0.5),
+    c(1, 1),
+    c(1, -0.8),
+    c(1, 0.3),
+    c(1, 0.8)
+  )
+  base_data <- list(
+    N = 8,
+    K = 2,
+    G = 2,
+    group = c(1L, 1L, 1L, 1L, 2L, 2L, 2L, 2L),
+    y = c(0L, 0L, 1L, 1L, 1L, 0L, 1L, 1L)
+  )
+
+  result_matrix <- mod$sample(
+    data = c(base_data, list(X = x_values)),
+    iter_warmup = 5,
+    iter_sampling = 5,
+    chains = 1,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+  result_frame <- mod$sample(
+    data = c(base_data, list(X = as.data.frame(x_values))),
+    iter_warmup = 5,
+    iter_sampling = 5,
+    chains = 1,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+
+  expect_equal(result_frame$return_codes(), 0L)
+  expect_equal(
+    as.numeric(result_frame$draws()),
+    as.numeric(result_matrix$draws())
+  )
+})
+
+test_that("a data.frame with a non-numeric column is rejected", {
+  mod <- test_model("hierarchical_logistic")
+  data <- list(
+    N = 2L,
+    K = 2L,
+    G = 1L,
+    X = data.frame(V1 = c(1, 1), V2 = c("a", "b")),
+    group = c(1L, 1L),
+    y = c(0L, 1L)
+  )
+
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      chains = 1,
+      seed = 42,
+      show_messages = FALSE,
+      num_threads = test_threads()
+    ),
+    "numeric"
+  )
+})
+
 withr::deferred_run()

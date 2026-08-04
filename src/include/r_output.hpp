@@ -9,7 +9,6 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <stdexcept>
 #include <vector>
 #include <string>
@@ -99,8 +98,9 @@ class r_sample_writer : public stan::callbacks::writer {
     messages_.push_back(message);
   }
 
+  // Stan's writer callback delivers draws in several shapes: a matrix is
+  // one sample per row; a column or row vector is a single sample.
   void operator()(const Eigen::MatrixXd& values) override {
-    // Handle matrix outputs. Each row is treated as a sample.
     check_initialized();
     for (Eigen::Index i = 0; i < values.rows(); ++i) {
       this->append_row(values.row(i));
@@ -108,13 +108,11 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   void operator()(const Eigen::Matrix<double, -1, 1>& values) override {
-    // Column vector — treat as a single row sample (transposed)
     check_initialized();
     this->append_row(values.transpose());
   }
 
   void operator()(const Eigen::Matrix<double, 1, -1>& values) override {
-    // Row vector — treat as a single row sample (used by pathfinder)
     check_initialized();
     this->append_row(values);
   }
@@ -137,16 +135,14 @@ class r_sample_writer : public stan::callbacks::writer {
     return r_mat;
   }
 
-  // Copy column v (n_rows_ contiguous doubles) into slice [ , chain, v] of a
-  // preallocated iterations x chains x variables array. Main R thread only.
-  void copy_to_r_array_chain(double* dest, int n_iterations, int n_chains,
-                             int chain_index) const {
-    for (int v = 0; v < n_cols_; ++v) {
-      std::memcpy(dest + (static_cast<size_t>(v) * n_chains + chain_index) * n_iterations,
-                  values_.col(v).data(),
-                  static_cast<size_t>(n_rows_) * sizeof(double));
-    }
-  }
+  // Column v's data (first n_rows_ entries valid; the buffer may be
+  // over-allocated from growth, same as the memcpy this replaces relied
+  // on). Main R thread only.
+  const double* column_ptr(int v) const { return values_.col(v).data(); }
+
+  // Frees the sample buffer once its chain has been copied out. The writer
+  // is unusable for further appends afterwards.
+  void release() { values_.resize(0, 0); }
 
   const std::vector<std::string>& colnames() const { return colnames_; }
   const std::vector<std::string>& messages() const { return messages_; }

@@ -40,10 +40,11 @@ array element, which is only correct when that slot is itself a plain
 
 \item{refresh}{(integer) How often (in iterations) to print progress.}
 
-\item{init}{Initial values for parameters. Either a non-negative number,
-used as the range of CmdStan-style random initialization
-(\code{Uniform(-init, init)} on the unconstrained scale; the default is 2),
-or a named list / named numeric vector of constrained parameter values.
+\item{init}{Initial values for parameters. Either \code{NULL} (equivalent to
+the default radius of 2), a non-negative number, used as the range of
+CmdStan-style random initialization (\code{Uniform(-init, init)} on the
+unconstrained scale; the default is 2), or a named list / named numeric
+vector of constrained parameter values.
 Supplied values are shared by all chains; parameters not covered by the
 supplied values are randomly initialized with the default range. A named
 list may include tuple-shaped list entries and R complex values for
@@ -55,7 +56,7 @@ list may include tuple-shaped list entries and R complex values for
 \item{chain_ids}{(integer vector) The IDs for each chain.}
 
 \item{num_threads}{(integer) The total number of threads to use across all
-chains. Defaults to \code{parallel::detectCores()} (all available threads).}
+chains. Defaults to \code{RcppParallel::defaultNumThreads()} (all available threads).}
 
 \item{iter_warmup}{(integer) The number of warmup iterations.}
 

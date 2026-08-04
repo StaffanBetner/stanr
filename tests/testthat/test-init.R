@@ -14,6 +14,12 @@ test_that("resolve_init() accepts a non-negative radius", {
   expect_equal(result$values, list())
 })
 
+test_that("resolve_init() treats NULL as the default radius", {
+  result <- newstan:::resolve_init(NULL)
+  expect_equal(result$radius, 2)
+  expect_equal(result$values, list())
+})
+
 test_that("resolve_init() rejects a negative radius with a radius-specific message", {
   expect_error(
     newstan:::resolve_init(-1),
