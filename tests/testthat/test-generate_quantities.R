@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("generate_quantities")
+
 test_that("generated_quantities returns expected structure", {
   mod <- test_model("bernoulli_gqs")
   data <- bernoulli_data
@@ -105,3 +109,5 @@ test_that("generated_quantities errors on an unnamed draws matrix", {
     "mu\\[1\\]"
   )
 })
+
+withr::deferred_run()

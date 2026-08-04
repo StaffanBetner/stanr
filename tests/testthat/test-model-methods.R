@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("model-methods")
+
 .newstan_model_method_state <- new.env(parent = emptyenv())
 
 .newstan_model_method_data <- function(double = FALSE) {
@@ -719,3 +723,5 @@ test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/comp
   expect_equal(back$zm_out, data$zm)
   expect_equal(back$za_out, data$za)
 })
+
+withr::deferred_run()

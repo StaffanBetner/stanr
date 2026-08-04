@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("stanc")
+
 test_that("stanc resolves nested includes from include_directories", {
   code <- paste(
     readLines(test_path("test-models/include_model.stan")),
@@ -327,3 +331,5 @@ test_that("StanModel$variables() works with external_cpp", {
   vars <- mod$variables()
   expect_named(vars$parameters, "mu")
 })
+
+withr::deferred_run()

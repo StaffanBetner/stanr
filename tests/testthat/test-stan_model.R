@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("stan_model")
+
 test_that("stan_model compiles from file", {
   path <- test_path("test-models/bernoulli.stan")
   mod <- stan_model(stan_file = path)
@@ -520,3 +524,5 @@ test_that("stan_model falls back to tempdir when the cache dir is unwritable", {
   # Nothing should have been written into the unwritable dir itself.
   expect_equal(length(list.files(unwritable)), 0L)
 })
+
+withr::deferred_run()

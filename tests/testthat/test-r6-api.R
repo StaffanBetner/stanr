@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("r6-api")
+
 test_that("the old procedural API is not exported", {
   expect_false(any(
     c(
@@ -55,3 +59,5 @@ test_that("each StanModel service method returns the documented fit class", {
     expect_s3_class(fit, "R6")
   }
 })
+
+withr::deferred_run()

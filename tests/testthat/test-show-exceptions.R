@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("show-exceptions")
+
 # Helper: cached model instance to avoid recompilation across test_that()
 # blocks. The model rejects any draw with |x| > 0.5, which reliably triggers
 # both known "exception chatter" sources during a short run with a fixed
@@ -146,3 +150,5 @@ test_that("show_exceptions wiring also works for a non-sampling service ($optimi
     )
   )
 })
+
+withr::deferred_run()

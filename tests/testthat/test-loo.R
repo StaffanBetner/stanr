@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("loo")
+
 # Setup ------------------------------------------------------------------
 
 skip_if_not_installed("loo")
@@ -88,3 +92,5 @@ test_that("$loo() errors when log_lik is not in draws", {
   )
   expect_error(bernoulli_no_ll_fit$loo(), "log_lik")
 })
+
+withr::deferred_run()

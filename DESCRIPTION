@@ -40,3 +40,4 @@ Config/roxygen2/version: 8.0.0
 NeedsCompilation: yes
 UseLTO: true
 SystemRequirements: GNU make
+Config/testthat/parallel: true

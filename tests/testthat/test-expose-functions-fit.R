@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("expose-functions-fit")
+
 # Tests for StanFit's delegation of expose_stan_functions()/expose_functions()
 # and the `$functions` active binding to the bound StanModel. Model-side
 # behavior is covered by test-expose-functions.R; these tests only check that
@@ -101,3 +105,5 @@ test_that("delegation reaches the model: a second model-level expose is a cheap 
   expect_true(is.function(fm$fit$functions$my_add))
   expect_equal(fm$fit$functions$my_add(4, 5), 9)
 })
+
+withr::deferred_run()

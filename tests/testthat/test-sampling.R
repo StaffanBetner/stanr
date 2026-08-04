@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("sampling")
+
 test_that("sampling returns expected structure", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -949,3 +953,5 @@ test_that("diagnostic_summary() counts per-chain divergences for a pathological 
   # just that the structural NA/zero cases work), not exactly how many.
   expect_true(sum(summary_df$num_divergent) > 0)
 })
+
+withr::deferred_run()

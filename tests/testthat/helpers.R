@@ -35,3 +35,16 @@ battery_data <- function() {
     nt = list(999, list(list(1, 1 + 2i), list(2, 3 + 4i)))
   )
 }
+
+# Initialise a unique cache per test file, per run.
+init_test_cache <- function(test_name) {
+  cache_path <- file.path(tempdir(), "test-cache", test_name)
+  if (dir.exists(cache_path)) {
+    unlink(cache_path, recursive = TRUE, force = TRUE)
+  }
+
+  options(
+    newstan_cache_dir = file.path(cache_path, "models"),
+    newstan_pch_dir = file.path(cache_path, "pch")
+  )
+}

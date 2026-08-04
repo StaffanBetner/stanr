@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("normalize")
+
 # Tests for the shared normalization and defaults layer
 
 test_that("chain validation rejects invalid chains", {
@@ -88,3 +92,5 @@ test_that("seed resolution resolves NULL seed", {
   expect_true(is.integer(seed))
   expect_true(seed >= 1 && seed <= .Machine$integer.max)
 })
+
+withr::deferred_run()

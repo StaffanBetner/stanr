@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("pch")
+
 # Tests for precompiled-header subprocess memoization (see .newstan_memo)
 
 reset_pch_memo <- function() {
@@ -242,3 +246,5 @@ test_that(".newstan_dependency_cppflags() memoizes across calls without shelling
   # RcppParallel::CxxFlags() is captured in-process, so this never shells out.
   expect_equal(call_count, 0)
 })
+
+withr::deferred_run()

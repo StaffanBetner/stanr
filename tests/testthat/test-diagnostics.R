@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("diagnostics")
+
 # Direct unit coverage for .newstan_parse_diagnose_output() (Task 3.3): the
 # black-box mod$diagnose() tests below exercise it only with real Stan
 # gradient-check output, which never contains more than one "Log
@@ -206,3 +210,5 @@ test_that("metadata includes num_failed", {
   expect_true("num_failed" %in% names(meta))
   expect_equal(meta$num_failed, result$num_failed())
 })
+
+withr::deferred_run()

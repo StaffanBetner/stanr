@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("complex-models")
+
 test_that("reduce_sum model runs with a configured TBB thread pool", {
   mod <- test_model("reduce_sum_normal")
 
@@ -74,3 +78,5 @@ test_that("hierarchical non-centred logistic model samples", {
       posterior::variables(result$draws())
   ))
 })
+
+withr::deferred_run()

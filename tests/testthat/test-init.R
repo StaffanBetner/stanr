@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("init")
+
 # Tests for resolve_init(), pure R with no Stan compilation involved.
 
 test_that("resolve_init() accepts a non-negative radius", {
@@ -53,3 +57,5 @@ test_that("resolve_init() rejects unsupported init types", {
     "must be a non-negative radius"
   )
 })
+
+withr::deferred_run()

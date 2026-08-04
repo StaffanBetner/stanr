@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("opencl")
+
 test_that("use_opencl = TRUE stores and reports the flag without compiling", {
   mod <- stan_model(
     code = "
@@ -12,3 +16,5 @@ test_that("use_opencl = TRUE stores and reports the flag without compiling", {
   expect_true(mod$use_opencl())
   expect_false(mod$is_compiled())
 })
+
+withr::deferred_run()

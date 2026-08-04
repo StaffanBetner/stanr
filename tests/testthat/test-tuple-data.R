@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("tuple-data")
+
 # Coverage for the tuple/complex data & init interop: the pure-R flattener
 # (`R/tuples.R`), its wiring into `.newstan_run_service()` /
 # `fit$unconstrain_variables()`, and the windowed-complex storage in
@@ -453,3 +457,5 @@ test_that("sample() accepts a tuple/complex init list end to end", {
   )
   expect_equal(fit$return_codes(), 0L)
 })
+
+withr::deferred_run()

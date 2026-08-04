@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("optimizing")
+
 test_that("optimizing returns expected structure", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -136,3 +140,5 @@ test_that("mle() errors on an unknown variable name", {
 
   expect_error(result$mle(variables = "theta_typo"), "Unknown variable")
 })
+
+withr::deferred_run()

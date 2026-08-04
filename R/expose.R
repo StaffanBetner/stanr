@@ -344,7 +344,7 @@
 .newstan_rng_wrapper <- function(fn, compiled_env) {
   base_formals <- formals(fn)
   arg_names <- names(base_formals) %||% character()
-  wrapper <- function() {
+  wrapper <- function(seed = NULL) {
     if (!is.null(seed)) {
       compiled_env$newstan_rng_set_seed(seed)
     }

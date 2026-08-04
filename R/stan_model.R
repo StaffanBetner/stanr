@@ -36,24 +36,26 @@
   cache_dir,
   verbose
 ) {
-  withr::with_makevars(
-    .newstan_apply_makevars(
-      c(
-        USE_CXX17 = "1",
-        PKG_CPPFLAGS = cppflags,
-        PKG_LIBS = libs,
-        CXXFLAGS = .newstan_opt_flags,
-        CXX17FLAGS = .newstan_opt_flags
+  withr::with_envvar(
+    c(USE_CXX17 = "1"),
+    withr::with_makevars(
+      .newstan_apply_makevars(
+        c(
+          PKG_CPPFLAGS = cppflags,
+          PKG_LIBS = libs,
+          CXXFLAGS = .newstan_opt_flags,
+          CXX17FLAGS = .newstan_opt_flags
+        ),
+        extra_assignments
       ),
-      extra_assignments
-    ),
-    assignment = "+=",
-    Rcpp::sourceCpp(
-      file = cpp_file,
-      env = env,
-      rebuild = rebuild,
-      cacheDir = cache_dir,
-      verbose = verbose
+      assignment = "+=",
+      Rcpp::sourceCpp(
+        file = cpp_file,
+        env = env,
+        rebuild = rebuild,
+        cacheDir = cache_dir,
+        verbose = verbose
+      )
     )
   )
 }

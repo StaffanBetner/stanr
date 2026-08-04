@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("expose-functions")
+
 # Fixtures under test-models/expose-fixture-*.cpp are byte-for-byte output
 # of stanc(code, standalone_functions = TRUE) against the bundled stanc.js,
 # captured once rather than regenerated per test run (still compiler-free:
@@ -861,3 +865,5 @@ model {
   expect_true(is.function(mod$functions$combined_tuple_fn))
   expect_equal(mod$functions$combined_tuple_fn(3), list(3, 6))
 })
+
+withr::deferred_run()

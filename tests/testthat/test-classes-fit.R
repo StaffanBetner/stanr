@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("classes-fit")
+
 # Tests for internal helpers in R/classes-fit.R
 
 test_that(".newstan_bracket_names converts dotted Stan names to bracket form", {
@@ -180,3 +184,5 @@ test_that("save_object() does not serialize the fit data twice", {
     c("seed", "data", "arguments", "model_name")
   )
 })
+
+withr::deferred_run()

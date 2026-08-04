@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("data-validation")
+
 test_that("numeric values are accepted for Stan integer data only when integral", {
   mod <- test_model("bernoulli")
 
@@ -125,3 +129,5 @@ test_that("numeric initialization radius is accepted", {
     )
   )
 })
+
+withr::deferred_run()

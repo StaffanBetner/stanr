@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("advi")
+
 test_that("advi returns expected structure", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -65,3 +69,5 @@ test_that("advi with an invalid algorithm errors before reaching C++", {
     "`algorithm` must be one of"
   )
 })
+
+withr::deferred_run()

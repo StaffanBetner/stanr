@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("laplace")
+
 test_that("laplace evaluates model-side gradients in the generated model library", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -165,3 +169,5 @@ test_that("laplace rejects opt_args that override reserved arguments", {
     "`opt_args` cannot override"
   )
 })
+
+withr::deferred_run()

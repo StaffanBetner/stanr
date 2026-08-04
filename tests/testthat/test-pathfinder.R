@@ -1,3 +1,7 @@
+local_test_context()
+
+init_test_cache("pathfinder")
+
 test_that("pathfinder single path returns expected structure", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -78,3 +82,5 @@ test_that("pathfinder multi-path with num_paths = 1 uses single pathfinder", {
   expect_s3_class(result$draws(format = "draws_df"), "draws_df")
   expect_equal(posterior::ndraws(result$draws()), 50L)
 })
+
+withr::deferred_run()
