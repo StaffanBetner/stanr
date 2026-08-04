@@ -11,9 +11,11 @@
 
   # Floating-point contraction handling can cause numerical inaccuracies
   # at double-precision on ARM64
-  if (.Platform$r_arch == "aarch64") {
+  if (R.version$arch == "aarch64") {
     flags <- paste(flags, "-ffp-contract=off")
   }
+
+  flags
 }
 
 
@@ -290,7 +292,7 @@
         character(1)
       ),
       cppflags = pch_cppflags,
-      opt_flags = .newstan_opt_flags,
+      opt_flags = .newstan_opt_flags(),
       # md5 of model_pch.hpp alone (not each header it transitively
       # includes) is sufficient: the newstan wrapper headers it pulls in
       # only change on package reinstall, which is already covered by the
@@ -363,7 +365,7 @@
             if (compiler_type == "gcc") cache_header else header
           )),
           shQuote(paste0("PKG_CPPFLAGS=", pch_cppflags)),
-          shQuote(paste0("EXTRA_CXXFLAGS=", .newstan_opt_flags)),
+          shQuote(paste0("EXTRA_CXXFLAGS=", .newstan_opt_flags())),
           "pch"
         ),
         stdout = TRUE,

@@ -11,7 +11,8 @@ test_that("advi returns expected structure", {
     iter = 1000,
     draws = 100,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_s3_class(result, "StanVB")
@@ -31,7 +32,8 @@ test_that("advi with meanfield algorithm works", {
     iter = 1000,
     draws = 100,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -46,7 +48,8 @@ test_that("advi requested draw count is respected and lp__ is not included", {
     iter = 1000,
     draws = 100,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(posterior::ndraws(result$draws()), 100L)
@@ -64,7 +67,8 @@ test_that("advi with an invalid algorithm errors before reaching C++", {
       iter = 1000,
       draws = 100,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`algorithm` must be one of"
   )

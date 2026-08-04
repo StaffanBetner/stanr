@@ -13,7 +13,8 @@ test_that("generated_quantities returns expected structure", {
     iter_sampling = 20,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   # Extract numeric matrix from draws (drop posterior dim columns)
@@ -23,7 +24,8 @@ test_that("generated_quantities returns expected structure", {
     fitted_params = draws_mat,
     data = data,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_s3_class(result, "StanGQ")
@@ -44,7 +46,8 @@ test_that("generated_quantities produces log_lik column", {
     iter_sampling = 20,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   draws_mat <- posterior::as_draws_matrix(samp$draws())
@@ -53,7 +56,8 @@ test_that("generated_quantities produces log_lik column", {
     fitted_params = draws_mat,
     data = data,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true("log_lik" %in% posterior::variables(result$draws()))
@@ -69,14 +73,16 @@ test_that("generated_quantities matches bracket-normalized names for vector para
     iter_sampling = 20,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   result <- mod$generate_quantities(
     fitted_params = samp,
     data = data,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true("mu_sum" %in% posterior::variables(result$draws()))
@@ -93,7 +99,8 @@ test_that("generated_quantities errors on an unnamed draws matrix", {
     iter_sampling = 20,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   draws_mat <- samp$draws(format = "draws_matrix")
@@ -104,7 +111,8 @@ test_that("generated_quantities errors on an unnamed draws matrix", {
       fitted_params = plain,
       data = data,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "mu\\[1\\]"
   )

@@ -13,7 +13,8 @@ test_that("laplace evaluates model-side gradients in the generated model library
     calculate_lp = TRUE,
     refresh = 0,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -34,7 +35,8 @@ test_that("laplace with mode = NULL works for models with vector/array parameter
     refresh = 0,
     seed = 42,
     jacobian = FALSE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -51,7 +53,7 @@ test_that("laplace with mode = StanMLE works for models with vector parameters",
   mod <- stan_model(stan_file = path, quiet = TRUE)
   data <- list(N = 4, y = c(1L, 1L, 1L, 0L), mu = 0)
 
-  opt_fit <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  opt_fit <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   result <- mod$laplace(
     data = data,
@@ -60,7 +62,8 @@ test_that("laplace with mode = StanMLE works for models with vector parameters",
     refresh = 0,
     seed = 42,
     jacobian = FALSE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -75,7 +78,7 @@ test_that("laplace with a raw numeric mode vector uses bracket-format names for 
   mod <- stan_model(stan_file = path, quiet = TRUE)
   data <- list(N = 4, y = c(1L, 1L, 1L, 0L), mu = 0)
 
-  opt_fit <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  opt_fit <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
   mode_vec <- opt_fit$mle()
   expect_true(all(c("theta", "beta[1]", "beta[2]") %in% names(mode_vec)))
 
@@ -86,7 +89,8 @@ test_that("laplace with a raw numeric mode vector uses bracket-format names for 
     refresh = 0,
     seed = 42,
     jacobian = FALSE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -105,7 +109,8 @@ test_that("laplace with no mode and default jacobian succeeds", {
     draws = 5,
     refresh = 0,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -121,7 +126,8 @@ test_that("laplace with jacobian = TRUE and mode = StanMLE fitted with jacobian 
     data = data,
     seed = 42,
     jacobian = TRUE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   result <- mod$laplace(
@@ -131,7 +137,8 @@ test_that("laplace with jacobian = TRUE and mode = StanMLE fitted with jacobian 
     refresh = 0,
     seed = 42,
     jacobian = TRUE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -149,7 +156,8 @@ test_that("laplace rejects mode and opt_args together", {
       mode = c(theta = 0.5),
       opt_args = list(iter = 100L),
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`mode` and `opt_args` cannot both be supplied"
   )
@@ -164,7 +172,8 @@ test_that("laplace rejects opt_args that override reserved arguments", {
       data = data,
       opt_args = list(jacobian = TRUE),
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`opt_args` cannot override"
   )

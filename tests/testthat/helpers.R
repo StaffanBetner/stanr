@@ -48,3 +48,11 @@ init_test_cache <- function(test_name) {
     newstan_pch_dir = file.path(cache_path, "pch")
   )
 }
+
+test_threads <- function() {
+  if (utils::getFromNamespace("on_cran", "testthat")()) {
+    1
+  } else {
+    RcppParallel::defaultNumThreads()
+  }
+}

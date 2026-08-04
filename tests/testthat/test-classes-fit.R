@@ -30,7 +30,7 @@ test_that("optimize() fit errors on draws(inc_warmup = TRUE)", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   expect_error(
     result$draws(inc_warmup = TRUE),
@@ -50,7 +50,8 @@ test_that("direct fit method coverage: time, init, code, print, lp, num_chains",
     chains = 2,
     seed = 42,
     init = list(theta = 0.5),
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(is.numeric(fit$time()$total))
@@ -89,7 +90,8 @@ test_that("pathfinder fit$lp_approx() contains only lp_approx__", {
     draws = 10,
     num_paths = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(posterior::variables(fit$lp_approx()), "lp_approx__")
@@ -105,7 +107,8 @@ test_that("StanGQ$num_chains() reports the draws' own chain count, 0L with no dr
     iter_sampling = 5,
     chains = 2,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   draws_mat <- posterior::as_draws_matrix(samp$draws())
 
@@ -113,7 +116,8 @@ test_that("StanGQ$num_chains() reports the draws' own chain count, 0L with no dr
     fitted_params = draws_mat,
     data = data,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   # `generate_quantities()` always flattens `fitted_params` to a chainless
   # draws_matrix before the native call, so its output is one logical chain

@@ -295,7 +295,8 @@ test_that("the battery model echoes every input exactly via generated quantities
     iter_sampling = 2,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 
@@ -345,7 +346,8 @@ test_that("a list for a variable not declared as a tuple errors (compiled model)
       iter_sampling = 1,
       chains = 1,
       seed = 1,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "not declared as a tuple"
   )
@@ -362,7 +364,8 @@ test_that("wrong tuple arity errors (compiled model)", {
       iter_sampling = 1,
       chains = 1,
       seed = 1,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "length 2"
   )
@@ -379,7 +382,8 @@ test_that("a named tuple list errors (compiled model)", {
       iter_sampling = 1,
       chains = 1,
       seed = 1,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "unnamed list"
   )
@@ -396,7 +400,8 @@ test_that("a dotted-name collision errors (compiled model)", {
       iter_sampling = 1,
       chains = 1,
       seed = 1,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "collide|already exist"
   )
@@ -416,7 +421,8 @@ test_that("a non-rectangular tuple array errors (compiled model)", {
       iter_sampling = 1,
       chains = 1,
       seed = 1,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "not a rectangular tuple array"
   )
@@ -433,7 +439,8 @@ test_that("unconstrain_variables() is the identity for unbounded tuple/complex p
     chains = 1,
     seed = 1,
     show_messages = FALSE,
-    init = list(t = list(0.5, c(1, 2)), z = 0.1 + 0.2i)
+    init = list(t = list(0.5, c(1, 2)), z = 0.1 + 0.2i),
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 
@@ -453,7 +460,8 @@ test_that("sample() accepts a tuple/complex init list end to end", {
     chains = 1,
     seed = 7,
     show_messages = FALSE,
-    init = list(t = list(0, c(0, 0)), z = 0 + 0i)
+    init = list(t = list(0, c(0, 0)), z = 0 + 0i),
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 })

@@ -11,7 +11,8 @@ test_that("numeric values are accepted for Stan integer data only when integral"
     iter_sampling = 5,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -23,7 +24,8 @@ test_that("numeric values are accepted for Stan integer data only when integral"
       iter_sampling = 5,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "int variable contained non-int values"
   )
@@ -39,7 +41,8 @@ test_that("NA integer data is rejected before Stan services run", {
       iter_sampling = 5,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "Integer variable 'y' contains NA"
   )
@@ -56,7 +59,8 @@ test_that("NA/NaN real data is rejected before Stan services run", {
       iter_sampling = 5,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "Real variable 'mu' contains NA or NaN"
   )
@@ -69,7 +73,8 @@ test_that("NA/NaN real data is rejected before Stan services run", {
       iter_sampling = 5,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "Real variable 'mu' contains NA or NaN"
   )
@@ -86,7 +91,8 @@ test_that("invalid sampling counts throw a configuration error", {
       iter_warmup = 5,
       iter_sampling = 5,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`chains` must be a single integer"
   )
@@ -97,7 +103,8 @@ test_that("invalid sampling counts throw a configuration error", {
       iter_warmup = 5,
       iter_sampling = 5,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`thin` must be a single integer >= 1"
   )
@@ -109,7 +116,8 @@ test_that("invalid sampling counts throw a configuration error", {
       save_warmup = TRUE,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "Requested number of saved draws is too large"
   )
@@ -125,7 +133,8 @@ test_that("numeric initialization radius is accepted", {
       iter_sampling = 2,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     )
   )
 })

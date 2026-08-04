@@ -32,7 +32,8 @@ test_that("ODE model evaluates solver output during fixed-parameter sampling", {
     iter_sampling = 2,
     chains = 1,
     seed = 123,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -69,7 +70,8 @@ test_that("hierarchical non-centred logistic model samples", {
     iter_sampling = 10,
     chains = 1,
     seed = 123,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)

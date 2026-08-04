@@ -12,7 +12,8 @@ test_that("sampling returns expected structure", {
     iter_sampling = 20,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_s3_class(result, "StanMCMC")
@@ -39,7 +40,8 @@ test_that("sampling rejects a non-logical flag argument", {
       iter_sampling = 20,
       chains = 1,
       seed = 42,
-      show_messages = "yes"
+      show_messages = "yes",
+      num_threads = test_threads()
     ),
     "`show_messages` must be TRUE or FALSE"
   )
@@ -55,7 +57,8 @@ test_that("sampling output() returns non-empty Stan log messages", {
     iter_sampling = 20,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_type(result$output(), "character")
@@ -73,7 +76,8 @@ test_that("show_messages = FALSE silences the console but output() still works",
       iter_sampling = 20,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     )
   )
 
@@ -93,7 +97,8 @@ test_that("explicit tuning values are plumbed into the native args", {
     max_treedepth = 15L,
     metric = "dense_e",
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   args <- result$metadata()$arguments
@@ -112,7 +117,8 @@ test_that("sampling with multiple chains works", {
     iter_sampling = 50,
     chains = 2,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(all(result$return_codes() == 0L))
@@ -130,7 +136,8 @@ test_that("sampling with fixed_param algorithm works", {
     chains = 1,
     fixed_param = TRUE,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -147,7 +154,8 @@ test_that("fixed_param sampler diagnostics keep whatever columns the service emi
     chains = 2,
     fixed_param = TRUE,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   diagnostics <- result$sampler_diagnostics()
@@ -168,7 +176,8 @@ test_that("sampling with fixed_param and save_warmup warns and drops warmup draw
       fixed_param = TRUE,
       save_warmup = TRUE,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "save_warmup.*ignored.*fixed_param"
   )
@@ -191,7 +200,8 @@ test_that("sampling with fixed_param and save_warmup warns when iter_sampling is
       fixed_param = TRUE,
       save_warmup = TRUE,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "save_warmup.*ignored.*fixed_param"
   )
@@ -213,7 +223,8 @@ test_that("sampling with adapt_engaged = FALSE works", {
     adapt_engaged = FALSE,
     step_size = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -231,7 +242,8 @@ test_that("sampling with adapt_engaged = FALSE and iter_warmup = 0 works", {
     adapt_engaged = FALSE,
     step_size = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -248,7 +260,8 @@ test_that("sampling with adapt_engaged = TRUE and iter_warmup = 0 fails with a c
     chains = 1,
     adapt_engaged = TRUE,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(all(result$return_codes() != 0L))
@@ -273,7 +286,8 @@ test_that("sampling with inv_metric (diag_e) works", {
     metric = "diag_e",
     inv_metric = c(1.0),
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -293,7 +307,8 @@ test_that("sampling with a per-chain inv_metric list works", {
     metric = "diag_e",
     inv_metric = list(c(1), c(1)),
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(all(result$return_codes() == 0L))
@@ -312,7 +327,8 @@ test_that("sampling with inv_metric (diag_e, too short) fails with a clear messa
     metric = "diag_e",
     inv_metric = numeric(0),
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(all(result$return_codes() != 0L))
@@ -335,7 +351,8 @@ test_that("sampling with inv_metric (diag_e, too long) fails with a clear messag
     metric = "diag_e",
     inv_metric = c(1, 1),
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(all(result$return_codes() != 0L))
@@ -358,7 +375,8 @@ test_that("sampling with inv_metric (dense_e, wrong shape) fails with a clear me
     metric = "dense_e",
     inv_metric = matrix(1, 2, 2),
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(all(result$return_codes() != 0L))
@@ -378,7 +396,8 @@ test_that("fit$inv_metric() returns per-chain matrices for a diag_e adaptive fit
     iter_sampling = 50,
     chains = 2,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   metric <- result$inv_metric()
@@ -408,7 +427,8 @@ test_that("fit$inv_metric() returns dense matrices for metric = 'dense_e' and er
     engine = "nuts",
     metric = "dense_e",
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   metric <- result$inv_metric()
@@ -434,7 +454,8 @@ test_that("fit$inv_metric() errors when sampling ran without adaptation", {
     adapt_engaged = FALSE,
     step_size = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_error(result$inv_metric(), "no adapted metric is available")
@@ -450,7 +471,8 @@ test_that("fit$metadata()$step_size_adaptation reports one adapted step size per
     iter_sampling = 50,
     chains = 2,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   step_size_adaptation <- result$metadata()$step_size_adaptation
@@ -471,7 +493,8 @@ test_that("fit$metadata() omits step_size_adaptation when sampling ran without a
     adapt_engaged = FALSE,
     step_size = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_false("step_size_adaptation" %in% names(result$metadata()))
@@ -488,7 +511,8 @@ test_that("sampling with save_warmup increases draws", {
     save_warmup = FALSE,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   result_warmup <- mod$sample(
@@ -498,7 +522,8 @@ test_that("sampling with save_warmup increases draws", {
     save_warmup = TRUE,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_error(
@@ -522,7 +547,8 @@ test_that("sampler_diagnostics(inc_warmup = TRUE) errors like draws() when warmu
     save_warmup = FALSE,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_error(
@@ -542,7 +568,8 @@ test_that("sampler_diagnostics(inc_warmup = TRUE) includes warmup iterations whe
     save_warmup = TRUE,
     chains = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(
@@ -566,7 +593,8 @@ test_that("sampling with static HMC engine works (unit_e, adapt)", {
     step_size = 1,
     int_time = 10,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -592,7 +620,8 @@ test_that("sampling with static HMC engine works (unit_e, no adapt)", {
     step_size = 1,
     int_time = 10,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -614,7 +643,8 @@ test_that("sampling with static HMC engine works (diag_e, adapt)", {
     step_size = 1,
     int_time = 10,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -636,7 +666,8 @@ test_that("sampling with static HMC engine works (diag_e, no adapt)", {
     step_size = 1,
     int_time = 10,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -660,7 +691,8 @@ test_that("sampling with static HMC engine works (dense_e, adapt)", {
     step_size = 1,
     int_time = 10,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -682,7 +714,8 @@ test_that("sampling with static HMC engine works (dense_e, no adapt)", {
     step_size = 1,
     int_time = 10,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -706,7 +739,8 @@ test_that("sampling with static HMC + inv_metric (diag_e) works", {
     step_size = 1,
     int_time = 10,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -725,7 +759,8 @@ test_that("static HMC with multiple chains throws a configuration error", {
       chains = 2,
       engine = "static",
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "Static HMC only supports a single chain"
   )
@@ -743,7 +778,8 @@ test_that("sampling with an invalid engine errors before reaching C++", {
       chains = 1,
       engine = "typo",
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`engine` must be one of"
   )
@@ -761,7 +797,8 @@ test_that("sampling with an invalid metric errors before reaching C++", {
       chains = 1,
       metric = "typo",
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`metric` must be one of"
   )
@@ -825,7 +862,8 @@ test_that("sampling with a non-numeric iter_warmup errors", {
       iter_sampling = 20,
       chains = 1,
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`iter_warmup` must be a single integer"
   )
@@ -845,7 +883,8 @@ test_that("diagnostic_summary() returns one row per chain with expected columns"
     iter_sampling = 50,
     chains = 3,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   summary_df <- result$diagnostic_summary()
@@ -890,7 +929,8 @@ test_that("diagnostic_summary() chain column reflects supplied chain_ids", {
     chains = 2,
     chain_ids = 5:6,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   summary_df <- result$diagnostic_summary()
@@ -908,7 +948,8 @@ test_that("diagnostic_summary() returns NA_integer_ per row for fixed_param runs
     chains = 2,
     fixed_param = TRUE,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   summary_df <- result$diagnostic_summary()
@@ -943,7 +984,8 @@ test_that("diagnostic_summary() counts per-chain divergences for a pathological 
     chains = 3,
     adapt_delta = 0.6,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   summary_df <- result$diagnostic_summary()

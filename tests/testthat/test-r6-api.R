@@ -22,7 +22,12 @@ test_that("the old procedural API is not exported", {
 test_that("each StanModel service method returns the documented fit class", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
-  args <- list(data = data, seed = 42, show_messages = FALSE)
+  args <- list(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   mcmc <- do.call(
     mod$sample,

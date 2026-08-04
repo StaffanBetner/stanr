@@ -6,7 +6,7 @@ test_that("optimizing returns expected structure", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   expect_s3_class(result, "StanMLE")
   expect_s3_class(result, "StanFit")
@@ -26,7 +26,8 @@ test_that("optimizing with lbfgs algorithm works", {
     data = data,
     algorithm = "lbfgs",
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
@@ -41,7 +42,8 @@ test_that("optimizing with an invalid algorithm errors before reaching C++", {
       data = data,
       algorithm = "typo",
       seed = 42,
-      show_messages = FALSE
+      show_messages = FALSE,
+      num_threads = test_threads()
     ),
     "`algorithm` must be one of"
   )
@@ -52,7 +54,7 @@ test_that("optimizing finds reasonable theta for bernoulli", {
   # 5 successes out of 10 -> MLE theta = 0.5
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   expect_true(result$mle("theta") > 0.3)
   expect_true(result$mle("theta") < 0.7)
@@ -62,7 +64,7 @@ test_that("optimizing output() returns non-empty Stan log messages", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   expect_type(result$output(), "character")
   expect_true(length(result$output()) > 0)
@@ -76,13 +78,15 @@ test_that("optimizing with jacobian = TRUE vs FALSE gives different mle() for co
     data = data,
     seed = 42,
     jacobian = FALSE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   result_jacobian <- mod$optimize(
     data = data,
     seed = 42,
     jacobian = TRUE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result_no_jacobian$return_codes(), 0L)
@@ -101,9 +105,10 @@ test_that("optimizing with save_iterations = TRUE exposes the full optimization 
     data = data,
     seed = 42,
     save_iterations = TRUE,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
-  result_default <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  result_default <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   expect_equal(result$return_codes(), 0L)
   draws <- unclass(as.matrix(result$draws()))
@@ -126,7 +131,7 @@ test_that("optimizing default save_iterations yields a single row in draws()", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   draws <- unclass(as.matrix(result$draws()))
   expect_equal(nrow(draws), 1L)
@@ -136,7 +141,7 @@ test_that("mle() errors on an unknown variable name", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE)
+  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
 
   expect_error(result$mle(variables = "theta_typo"), "Unknown variable")
 })

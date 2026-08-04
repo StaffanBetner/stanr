@@ -33,7 +33,8 @@ init_test_cache("model-methods")
       iter = 50,
       refresh = 0,
       show_messages = FALSE,
-      show_exceptions = FALSE
+      show_exceptions = FALSE,
+      num_threads = test_threads()
     )
     assign(key, fit, envir = .newstan_model_method_state)
   }
@@ -212,7 +213,8 @@ test_that("model-method RNG is fit-local and advances across calls", {
     iter = 50,
     refresh = 0,
     show_messages = FALSE,
-    show_exceptions = FALSE
+    show_exceptions = FALSE,
+    num_threads = test_threads()
   )
   fresh_first <- fresh_fit$constrain_variables(upars)$stochastic_gq
 
@@ -386,7 +388,8 @@ test_that("model methods on a tuple-data fit still work after readRDS()", {
     iter_sampling = 1,
     chains = 1,
     seed = 18,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 
@@ -418,7 +421,8 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
     iter = 50,
     refresh = 0,
     show_messages = FALSE,
-    show_exceptions = FALSE
+    show_exceptions = FALSE,
+    num_threads = test_threads()
   )
   upars <- c(0.2, -0.3, 0.4)
   expected_lp <- fit$log_prob(upars)
@@ -445,7 +449,8 @@ test_that("ensure_native()'s probe is invoked exactly once across N consecutive 
     iter = 50,
     refresh = 0,
     show_messages = FALSE,
-    show_exceptions = FALSE
+    show_exceptions = FALSE,
+    num_threads = test_threads()
   )
   upars <- c(0.2, -0.3, 0.4)
 
@@ -495,7 +500,8 @@ test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tupl
     chains = 1,
     seed = 11,
     show_messages = FALSE,
-    init = list(t = list(0, c(0, 0)), z = 0 + 0i)
+    init = list(t = list(0, c(0, 0)), z = 0 + 0i),
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 
@@ -520,7 +526,8 @@ test_that("variable_skeleton() has the exact golden nested-list/array shape for 
     iter_sampling = 1,
     chains = 1,
     seed = 12,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 
@@ -570,7 +577,8 @@ test_that("unconstrain_draws() still works on a tuple/complex-model fit (regress
     chains = 1,
     seed = 13,
     show_messages = FALSE,
-    init = list(t = list(0, c(0, 0)), z = 0 + 0i)
+    init = list(t = list(0, c(0, 0)), z = 0 + 0i),
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 
@@ -595,7 +603,8 @@ test_that("$optimize() and $laplace() succeed on a tuple/complex model (regressi
     init = init,
     refresh = 0,
     show_messages = FALSE,
-    show_exceptions = FALSE
+    show_exceptions = FALSE,
+    num_threads = test_threads()
   )
   expect_s3_class(fit_opt, "StanMLE")
   # Every parameter has a std_normal() prior and no data -- the MLE is 0 for
@@ -621,7 +630,8 @@ test_that("$optimize() and $laplace() succeed on a tuple/complex model (regressi
     draws = 50,
     refresh = 0,
     show_messages = FALSE,
-    show_exceptions = FALSE
+    show_exceptions = FALSE,
+    num_threads = test_threads()
   )
   expect_s3_class(fit_lap, "StanLaplace")
   draws <- fit_lap$draws(format = "draws_matrix")
@@ -638,7 +648,8 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
     iter_sampling = 2,
     chains = 1,
     seed = 16,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 
@@ -646,7 +657,8 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
     fitted_params = fit,
     data = data,
     seed = 17,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   expect_s3_class(gq, "StanGQ")
 
@@ -704,7 +716,8 @@ test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/comp
     iter_sampling = 1,
     chains = 1,
     seed = 18,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   expect_equal(fit$return_codes(), 0L)
 

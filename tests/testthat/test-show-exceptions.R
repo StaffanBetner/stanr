@@ -61,7 +61,8 @@ test_that("show_exceptions = TRUE (default) prints Metropolis rejection chatter 
       seed = 42,
       refresh = 1,
       show_messages = TRUE,
-      show_exceptions = TRUE
+      show_exceptions = TRUE,
+      num_threads = test_threads()
     )
   )
 
@@ -80,7 +81,8 @@ test_that("show_exceptions = FALSE silences exception chatter on both streams bu
       seed = 42,
       refresh = 1,
       show_messages = TRUE,
-      show_exceptions = FALSE
+      show_exceptions = FALSE,
+      num_threads = test_threads()
     )
   )
 
@@ -111,7 +113,8 @@ test_that("show_messages = FALSE silences progress output but show_exceptions = 
       seed = 42,
       refresh = 1,
       show_messages = FALSE,
-      show_exceptions = TRUE
+      show_exceptions = TRUE,
+      num_threads = test_threads()
     )
   )
 
@@ -129,7 +132,8 @@ test_that("multi-chain run with show_exceptions = FALSE completes and retains ch
     chains = 2,
     seed = 42,
     refresh = 1,
-    show_exceptions = FALSE
+    show_exceptions = FALSE,
+    num_threads = test_threads()
   )
 
   expect_true(all(result$return_codes() == 0L))
@@ -146,7 +150,8 @@ test_that("show_exceptions wiring also works for a non-sampling service ($optimi
     mod$optimize(
       data = list(),
       seed = 42,
-      show_exceptions = FALSE
+      show_exceptions = FALSE,
+      num_threads = test_threads()
     )
   )
 })

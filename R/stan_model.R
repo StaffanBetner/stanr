@@ -43,8 +43,8 @@
         c(
           PKG_CPPFLAGS = cppflags,
           PKG_LIBS = libs,
-          CXXFLAGS = .newstan_opt_flags,
-          CXX17FLAGS = .newstan_opt_flags
+          CXXFLAGS = .newstan_opt_flags(),
+          CXX17FLAGS = .newstan_opt_flags()
         ),
         extra_assignments
       ),
@@ -96,7 +96,7 @@
 # OpenCL-specific flags on top of this when `use_opencl = TRUE`.
 .newstan_base_cppflags <- function() {
   paste(
-    paste0("-I", system.file("include", package = "newstan", mustWork = TRUE)),
+    paste0("-I", shQuote(system.file("include", package = "newstan", mustWork = TRUE))),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS"
   )
 }

@@ -631,7 +631,8 @@ model {
     iter_warmup = 10,
     iter_sampling = 10,
     refresh = 0,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
   expect_equal(result$return_codes(), 0L)
   expect_true("theta" %in% posterior::variables(result$draws()))

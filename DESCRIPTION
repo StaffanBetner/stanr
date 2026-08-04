@@ -38,6 +38,5 @@ Roxygen: list(markdown = TRUE)
 Config/build/compilation-database: true
 Config/roxygen2/version: 8.0.0
 NeedsCompilation: yes
-UseLTO: true
 SystemRequirements: GNU make
 Config/testthat/parallel: true

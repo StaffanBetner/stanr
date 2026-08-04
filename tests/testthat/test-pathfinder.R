@@ -13,7 +13,8 @@ test_that("pathfinder single path returns expected structure", {
     draws = 100,
     num_paths = 4,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_s3_class(result, "StanPathfinder")
@@ -32,7 +33,8 @@ test_that("pathfinder single path returns draws_df", {
     single_path_draws = 50,
     num_paths = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   draws <- result$draws(format = "draws_df")
@@ -52,7 +54,8 @@ test_that("pathfinder multi-path returns expected structure", {
     num_paths = 4,
     draws = 100,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   draws <- result$draws(format = "draws_df")
@@ -75,7 +78,8 @@ test_that("pathfinder multi-path with num_paths = 1 uses single pathfinder", {
     single_path_draws = 50,
     num_paths = 1,
     seed = 42,
-    show_messages = FALSE
+    show_messages = FALSE,
+    num_threads = test_threads()
   )
 
   expect_equal(result$return_codes(), 0L)
