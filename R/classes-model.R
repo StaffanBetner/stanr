@@ -954,6 +954,12 @@ stan_model_sample <- function(
       list(
         draws = draws,
         diagnostics = diagnostics,
+        warmup_draws = if (!is.null(result$warmup_samples)) {
+          posterior::as_draws_array(result$warmup_samples)
+        },
+        warmup_diagnostics = if (!is.null(result$warmup_diagnostics)) {
+          posterior::as_draws_array(result$warmup_diagnostics)
+        },
         inv_metric = result$inv_metric,
         step_size = result$step_size
       )
@@ -1787,9 +1793,9 @@ StanModel$set("public", "diagnose", stan_model_diagnose)
 # These remain public because sourceCpp functions live in a model-specific
 # environment. They are not the user-facing API.
 
-stan_model_new_model <- function(data, seed) {
+stan_model_new_model <- function(data, seed, declarations = NULL) {
   private$ensure_compiled()
-  private$compiled_env_$new_model(data, seed)
+  private$compiled_env_$new_model(data, seed, declarations)
 }
 StanModel$set("public", "new_model", stan_model_new_model)
 

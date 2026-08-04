@@ -127,21 +127,22 @@
   started <- proc.time()[["elapsed"]]
   seed <- .stanr_seed(seed)
   resolved_init <- resolve_init(init)
-  # Tuple-typed data/init values arrive as bare unnamed R lists; flatten
-  # them into the dotted per-leaf entries `r_data_context` expects before
-  # they reach any native call. `self$variables()` pays the stanc-info cost,
-  # so gate it behind a cheap check for any list-valued entry.
+  # Tuple-typed data/init values (bare unnamed R lists) are flattened inside
+  # the native `r_data_context`, which needs the declared structure.
+  # `self$variables()` pays the stanc-info cost, so gate it behind a cheap
+  # check for any list-valued entry.
   has_list <- function(x) any(vapply(x, is.list, logical(1)))
+  data_declarations <- init_declarations <- NULL
   if (has_list(data) || has_list(resolved_init$values)) {
     declared <- self$variables()
-    data <- .stanr_flatten_tuple_values(data, declared$data)
-    resolved_init$values <- .stanr_flatten_tuple_values(
-      resolved_init$values,
-      declared$parameters
-    )
+    data_declarations <- declared$data
+    init_declarations <- declared$parameters
   }
-  model <- self$new_model(data, seed)
+  model <- self$new_model(data, seed, data_declarations)
   native_args <- native_args_fn(seed, resolved_init, model)
+  # `[<- list(...)` keeps the element present even when NULL; `$<- NULL`
+  # would drop it, and the native side reads it unconditionally.
+  native_args["init_declarations"] <- list(init_declarations)
   result <- self$run_model(model, native_args)
   payload <- c(
     payload_fn(result),
@@ -386,6 +387,13 @@ resolve_init <- function(init) {
 service_args <- function(args) {
   args[setdiff(
     names(args),
-    c("data", "init", "draws", "inv_metric", "diagnostic_names")
+    c(
+      "data",
+      "init",
+      "init_declarations",
+      "draws",
+      "inv_metric",
+      "diagnostic_names"
+    )
   )]
 }

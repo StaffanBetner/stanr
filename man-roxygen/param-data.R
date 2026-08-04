@@ -24,8 +24,7 @@
 #'   pre-flattened using dotted names (e.g. `list(t.1 = ..., t.2 = ...)` for
 #'   a tuple `t`), bypassing the list-shape conversion above; this is not the
 #'   primary documented path. One caveat applies: a dotted entry for a
-#'   `complex` tuple slot that omits the internal `stanr_array_dims`
-#'   attribute is assumed to hold exactly one complex value per enclosing
-#'   array element, which is only correct when that slot is itself a plain
-#'   (non-container) `complex` -- for anything else (e.g. a
+#'   `complex` tuple slot is assumed to hold exactly one complex value per
+#'   enclosing array element, which is only correct when that slot is itself
+#'   a plain (non-container) `complex` -- for anything else (e.g. a
 #'   `complex_vector` tuple slot), use the list shapes above instead.

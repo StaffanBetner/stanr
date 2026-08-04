@@ -8,8 +8,9 @@
 // [[Rcpp::depends(RcppParallel)]]
 
 // [[Rcpp::export]]
-Rcpp::XPtr<stan::model::model_base> new_model(Rcpp::List data, unsigned int seed) {
-  stanr::r_data_context data_context(data);
+Rcpp::XPtr<stan::model::model_base> new_model(Rcpp::List data, unsigned int seed,
+                                              SEXP declarations = R_NilValue) {
+  stanr::r_data_context data_context(data, declarations);
   // Sampling services may execute this model on a native worker thread.
   // A generated model keeps this stream pointer, so it cannot point at an R
   // stream even though construction itself occurs on the R thread.
@@ -80,8 +81,9 @@ Rcpp::List model_hessian(Rcpp::XPtr<stan::model::model_base> model,
 
 // [[Rcpp::export]]
 Rcpp::NumericVector model_unconstrain(Rcpp::XPtr<stan::model::model_base> model,
-                                      Rcpp::List variables) {
-  return stanr::model_unconstrain(*model, variables);
+                                      Rcpp::List variables,
+                                      SEXP declarations = R_NilValue) {
+  return stanr::model_unconstrain(*model, variables, declarations);
 }
 
 // [[Rcpp::export]]
@@ -107,6 +109,24 @@ Rcpp::NumericMatrix model_constrain_matrix(
     bool include_gqs = true) {
   return stanr::model_constrain_matrix(*model, *rng, upars, include_tparams,
                                          include_gqs);
+}
+
+// [[Rcpp::export]]
+Rcpp::List model_constrain_variables(
+    Rcpp::XPtr<stan::model::model_base> model, Rcpp::XPtr<stan::rng_t> rng,
+    Rcpp::NumericVector upars, bool include_tparams, bool include_gqs,
+    Rcpp::List declarations) {
+  return stanr::model_constrain_variables(*model, *rng, upars,
+                                          include_tparams, include_gqs,
+                                          declarations);
+}
+
+// [[Rcpp::export]]
+Rcpp::List model_variable_skeleton(Rcpp::XPtr<stan::model::model_base> model,
+                                   bool include_tparams, bool include_gqs,
+                                   Rcpp::List declarations) {
+  return stanr::model_variable_skeleton(*model, include_tparams, include_gqs,
+                                        declarations);
 }
 
 // [[Rcpp::export]]

@@ -17,13 +17,15 @@ namespace stanr {
   // arrays (Fortran/column-major order, matching posterior::draws_array).
   // Columns are routed into a parameter array and a diagnostics array by
   // name membership in diagnostic_names, preserving each group's original
-  // relative column order. Each chain's writer buffer is released right
-  // after its columns are copied, so peak native memory during this step is
-  // one destination copy plus one remaining source chain buffer, rather
-  // than two full combined-array copies.
+  // relative column order, and the first `num_warmup_rows` iterations of
+  // each chain are split into separate warmup arrays (NULL when zero).
+  // Each chain's writer buffer is released right after its columns are
+  // copied, so peak native memory during this step is one destination copy
+  // plus one remaining source chain buffer.
   inline Rcpp::List writer_chains_to_arrays(
       std::vector<r_sample_writer>& writers,
-      const std::vector<std::string>& diagnostic_names) {
+      const std::vector<std::string>& diagnostic_names,
+      int num_warmup_rows) {
 
     const int num_chains = static_cast<int>(writers.size());
     const int n_iterations = num_chains > 0 ? writers[0].n_rows() : 0;
@@ -39,6 +41,9 @@ namespace stanr {
             std::to_string(n_iterations) + ", " + std::to_string(n_cols) + ").");
       }
     }
+
+    const int n_warmup = std::min(num_warmup_rows, n_iterations);
+    const int n_post = n_iterations - n_warmup;
 
     const std::vector<std::string> colnames =
         num_chains > 0 ? writers[0].colnames() : std::vector<std::string>();
@@ -63,45 +68,66 @@ namespace stanr {
     const int n_params = static_cast<int>(param_cols.size());
     const int n_diagnostics = static_cast<int>(diag_cols.size());
 
-    Rcpp::NumericVector samples(
-        static_cast<R_xlen_t>(n_iterations) * num_chains * n_params);
-    Rcpp::NumericVector diagnostics(
-        static_cast<R_xlen_t>(n_iterations) * num_chains * n_diagnostics);
+    const auto make_array = [&](int iterations, int variables,
+                                const std::vector<std::string>& names) {
+      Rcpp::NumericVector array(
+          static_cast<R_xlen_t>(iterations) * num_chains * variables);
+      array.attr("dim") =
+          Rcpp::IntegerVector::create(iterations, num_chains, variables);
+      array.attr("dimnames") = Rcpp::List::create(
+          R_NilValue, R_NilValue,
+          Rcpp::CharacterVector(names.begin(), names.end()));
+      return array;
+    };
+
+    Rcpp::NumericVector samples = make_array(n_post, n_params, param_names);
+    Rcpp::NumericVector diagnostics =
+        make_array(n_post, n_diagnostics, diag_names);
+    Rcpp::NumericVector warmup_samples;
+    Rcpp::NumericVector warmup_diagnostics;
+    if (n_warmup > 0) {
+      warmup_samples = make_array(n_warmup, n_params, param_names);
+      warmup_diagnostics = make_array(n_warmup, n_diagnostics, diag_names);
+    }
+
+    // Column layout is iteration-major within a chain buffer, so the warmup
+    // rows are a contiguous prefix of each source column.
+    const auto copy_column = [&](Rcpp::NumericVector& post,
+                                 Rcpp::NumericVector& warmup,
+                                 const double* source, int chain, int group) {
+      if (n_warmup > 0) {
+        std::memcpy(
+            REAL(warmup) +
+                (static_cast<size_t>(group) * num_chains + chain) * n_warmup,
+            source, static_cast<size_t>(n_warmup) * sizeof(double));
+      }
+      std::memcpy(
+          REAL(post) +
+              (static_cast<size_t>(group) * num_chains + chain) * n_post,
+          source + n_warmup, static_cast<size_t>(n_post) * sizeof(double));
+    };
 
     if (n_iterations > 0) {
       for (int i = 0; i < num_chains; ++i) {
         for (int g = 0; g < n_params; ++g) {
-          std::memcpy(
-              REAL(samples) +
-                  (static_cast<size_t>(g) * num_chains + i) * n_iterations,
-              writers[i].column_ptr(param_cols[g]),
-              static_cast<size_t>(n_iterations) * sizeof(double));
+          copy_column(samples, warmup_samples,
+                      writers[i].column_ptr(param_cols[g]), i, g);
         }
         for (int g = 0; g < n_diagnostics; ++g) {
-          std::memcpy(
-              REAL(diagnostics) +
-                  (static_cast<size_t>(g) * num_chains + i) * n_iterations,
-              writers[i].column_ptr(diag_cols[g]),
-              static_cast<size_t>(n_iterations) * sizeof(double));
+          copy_column(diagnostics, warmup_diagnostics,
+                      writers[i].column_ptr(diag_cols[g]), i, g);
         }
         writers[i].release();
       }
     }
 
-    samples.attr("dim") =
-        Rcpp::IntegerVector::create(n_iterations, num_chains, n_params);
-    samples.attr("dimnames") = Rcpp::List::create(
-        R_NilValue, R_NilValue,
-        Rcpp::CharacterVector(param_names.begin(), param_names.end()));
-
-    diagnostics.attr("dim") =
-        Rcpp::IntegerVector::create(n_iterations, num_chains, n_diagnostics);
-    diagnostics.attr("dimnames") = Rcpp::List::create(
-        R_NilValue, R_NilValue,
-        Rcpp::CharacterVector(diag_names.begin(), diag_names.end()));
-
-    return Rcpp::List::create(Rcpp::_["samples"] = samples,
-                               Rcpp::_["diagnostics"] = diagnostics);
+    return Rcpp::List::create(
+        Rcpp::_["samples"] = samples,
+        Rcpp::_["diagnostics"] = diagnostics,
+        Rcpp::_["warmup_samples"] =
+            n_warmup > 0 ? SEXP(warmup_samples) : R_NilValue,
+        Rcpp::_["warmup_diagnostics"] =
+            n_warmup > 0 ? SEXP(warmup_diagnostics) : R_NilValue);
   }
 }
 

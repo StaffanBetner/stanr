@@ -123,8 +123,8 @@ namespace stanr {
     const auto saved_rows = [num_thin](int iterations) {
       return iterations / num_thin + (iterations % num_thin != 0);
     };
-    const int expected_rows = saved_rows(num_samples)
-        + (save_warmup ? saved_rows(num_warmup) : 0);
+    const int warmup_rows = save_warmup ? saved_rows(num_warmup) : 0;
+    const int expected_rows = saved_rows(num_samples) + warmup_rows;
     const unsigned int init_buffer = static_cast<unsigned int>(init_buffer_arg);
     const unsigned int term_buffer = static_cast<unsigned int>(term_buffer_arg);
     const unsigned int window = static_cast<unsigned int>(window_arg);
@@ -132,7 +132,8 @@ namespace stanr {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     // --- Build per-chain contexts and writers ---
-    const auto init_ctx = std::make_shared<stanr::r_data_context>(init_list);
+    const auto init_ctx = std::make_shared<stanr::r_data_context>(
+        init_list, args["init_declarations"]);
     std::vector<std::shared_ptr<stanr::r_data_context>> init_ctxs(
         num_chains, init_ctx);
     // Base stan::callbacks::writer instances are no-ops: the unconstrained
@@ -345,10 +346,13 @@ namespace stanr {
 
     // --- Combine results (R thread only) ---
     Rcpp::List chain_arrays = return_code == 0
-        ? writer_chains_to_arrays(sample_writers, diagnostic_names)
+        ? writer_chains_to_arrays(sample_writers, diagnostic_names,
+                                  warmup_rows)
         : Rcpp::List::create(
               Rcpp::_["samples"] = Rcpp::NumericVector(0),
-              Rcpp::_["diagnostics"] = Rcpp::NumericVector(0));
+              Rcpp::_["diagnostics"] = Rcpp::NumericVector(0),
+              Rcpp::_["warmup_samples"] = R_NilValue,
+              Rcpp::_["warmup_diagnostics"] = R_NilValue);
     Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
 
     bool metric_captured = false;
@@ -362,6 +366,8 @@ namespace stanr {
     Rcpp::List result = Rcpp::List::create(
       Rcpp::_["samples"] = chain_arrays["samples"],
       Rcpp::_["diagnostics"] = chain_arrays["diagnostics"],
+      Rcpp::_["warmup_samples"] = chain_arrays["warmup_samples"],
+      Rcpp::_["warmup_diagnostics"] = chain_arrays["warmup_diagnostics"],
       Rcpp::_["return_code"] = return_code,
       Rcpp::_["inv_metric"] = R_NilValue,
       Rcpp::_["step_size"] = R_NilValue,

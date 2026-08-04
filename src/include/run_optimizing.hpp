@@ -80,7 +80,7 @@ namespace stanr {
 
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
-    stanr::r_data_context init_ctx(init_list);
+    stanr::r_data_context init_ctx(init_list, args["init_declarations"]);
     stan::callbacks::writer init_writer;
     // With saved iterations Stan writes the initial point plus at most iter
     // updates; otherwise it writes only the final point.

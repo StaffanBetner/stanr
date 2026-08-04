@@ -138,27 +138,20 @@ StanFit <- R6Class(
     model_ptr_ = NULL,
     rng_ptr_ = NULL,
     native_generation_ = NA_integer_,
-    sized_structure_ = NULL,
-    sized_generation_ = NA_integer_,
     initialize_pointer = function(force = FALSE) {
       if (!inherits(private$model_, "StanModel")) {
         return(invisible(NULL))
       }
       if (force || is.null(private$model_ptr_)) {
-        # `r_data_context` only accepts atomic data values, so tuple-typed
-        # entries (stored on `private$data_` as bare R lists, unflattened,
-        # so `$metadata()$data` keeps returning what the user supplied) must
-        # be flattened to their dotted per-leaf form here, the same
-        # conversion `.stanr_run_service()` applies when a fit is built
-        # fresh instead of restored.
         data <- private$data_
-        if (any(vapply(data, is.list, logical(1)))) {
-          data <- .stanr_flatten_tuple_values(
-            data,
-            private$model_$variables()$data
-          )
+        declarations <- if (any(vapply(data, is.list, logical(1)))) {
+          private$model_$variables()$data
         }
-        private$model_ptr_ <- private$model_$new_model(data, private$seed_)
+        private$model_ptr_ <- private$model_$new_model(
+          data,
+          private$seed_,
+          declarations
+        )
       }
       if (force || is.null(private$rng_ptr_)) {
         rng <- private$model_$native_function("new_base_rng", required = FALSE)
@@ -218,84 +211,21 @@ StanFit <- R6Class(
       private$ensure_native()
       private$model_$native_function(name)(private$model_ptr_, ...)
     },
-    # The sized-structure tree is immutable per compiled model, but building
-    # it costs a native metadata call plus an R recursion over every
-    # variable, so it is memoized per compile generation rather than rebuilt
-    # on every `constrain_variables()`/`variable_skeleton()` call.
-    sized_structure = function() {
-      private$ensure_native()
-      generation <- private$model_$compile_generation()
-      if (
-        is.null(private$sized_structure_) ||
-          !identical(private$sized_generation_, generation)
-      ) {
-        private$sized_structure_ <- .stanr_sized_structure(
-          private$model_,
-          private$native_call("model_param_metadata")
-        )
-        private$sized_generation_ <- generation
-      }
-      private$sized_structure_
+    # The declared type structure the native relist/skeleton builders need,
+    # covering every output block.
+    variable_declarations = function() {
+      declared <- private$model_$variables()
+      c(
+        declared$parameters,
+        declared$transformed_parameters,
+        declared$generated_quantities
+      )
     },
     check_jacobian = function(jacobian) {
       if (!is.logical(jacobian) || length(jacobian) != 1L || is.na(jacobian)) {
         stop("`jacobian` must be TRUE or FALSE.", call. = FALSE)
       }
       invisible(NULL)
-    },
-    relist_constrained = function(
-      flat,
-      sized,
-      transformed_parameters,
-      generated_quantities
-    ) {
-      # Positional reader over the flat native vector `model_constrain`
-      # returns (full native order -- the flat constrained-draws order,
-      # distinct from the input side's blocked-AoS order); no name matching,
-      # because dotted metadata names and colon-separated flat names do not
-      # align, so name matching cannot work for tuples.
-      keep <- vapply(
-        sized,
-        .stanr_sized_stage_kept,
-        logical(1),
-        transformed_parameters = transformed_parameters,
-        generated_quantities = generated_quantities
-      )
-      kept <- sized[keep]
-      reader <- .stanr_flat_reader(as.numeric(unname(flat)))
-      result <- lapply(kept, function(entry) {
-        .stanr_consume_node(entry$node, reader)
-      })
-      if (reader$position() != length(flat)) {
-        stop(
-          "stanr internal error: the constrained output length (",
-          length(flat),
-          ") did not match the expected variable structure ",
-          "(consumed ",
-          reader$position(),
-          ").",
-          call. = FALSE
-        )
-      }
-      names(result) <- names(kept)
-      result
-    },
-    metadata_skeleton = function(
-      sized,
-      transformed_parameters,
-      generated_quantities
-    ) {
-      keep <- vapply(
-        sized,
-        .stanr_sized_stage_kept,
-        logical(1),
-        transformed_parameters = transformed_parameters,
-        generated_quantities = generated_quantities
-      )
-      kept <- sized[keep]
-      result <- lapply(kept, function(entry) .stanr_skeleton_node(entry$node))
-      names(result) <- names(kept)
-      result
     }
   ),
   cloneable = FALSE
@@ -646,18 +576,13 @@ fit_constrain_variables <- function(
     "generated_quantities"
   )
   private$ensure_native()
-  flat <- private$model_$native_function("model_constrain")(
+  private$model_$native_function("model_constrain_variables")(
     private$model_ptr_,
     private$rng_ptr_,
     as.double(unconstrained_variables),
-    as.logical(transformed_parameters),
-    as.logical(generated_quantities)
-  )
-  private$relist_constrained(
-    flat,
-    private$sized_structure(),
     transformed_parameters,
-    generated_quantities
+    generated_quantities,
+    private$variable_declarations()
   )
 }
 StanFit$set("public", "constrain_variables", fit_constrain_variables)
@@ -672,15 +597,14 @@ fit_unconstrain_variables <- function(variables) {
   if (!inherits(private$model_, "StanModel")) {
     stop("This fit does not retain a model binding.", call. = FALSE)
   }
-  # Tuple-typed entries arrive as bare unnamed R lists; flatten them into
-  # the dotted per-leaf entries `r_data_context` expects before the native
-  # call. Gate the stanc-info cost behind a cheap list check.
-  if (any(vapply(variables, is.list, logical(1)))) {
-    declared <- private$model_$variables()
-    variables <- .stanr_flatten_tuple_values(variables, declared$parameters)
+  # Tuple-typed entries (bare unnamed R lists) are flattened natively, which
+  # needs the declared structure; gate the stanc-info cost behind a cheap
+  # list check.
+  declarations <- if (any(vapply(variables, is.list, logical(1)))) {
+    private$model_$variables()$parameters
   }
   tryCatch(
-    private$native_call("model_unconstrain", variables),
+    private$native_call("model_unconstrain", variables, declarations),
     error = function(error) {
       stop(
         "Could not unconstrain variables; check parameter names, ",
@@ -753,10 +677,11 @@ fit_variable_skeleton <- function(
     generated_quantities,
     "generated_quantities"
   )
-  private$metadata_skeleton(
-    private$sized_structure(),
-    transformed_parameters = transformed_parameters,
-    generated_quantities = generated_quantities
+  private$native_call(
+    "model_variable_skeleton",
+    transformed_parameters,
+    generated_quantities,
+    private$variable_declarations()
   )
 }
 StanFit$set("public", "variable_skeleton", fit_variable_skeleton)
@@ -847,43 +772,6 @@ StanMCMC <- R6Class(
       elapsed = NA_real_,
       metadata = list()
     ) {
-      warmup <- NULL
-      warmup_diagnostics <- NULL
-      if (isTRUE(payload$args$save_warmup) && !is.null(payload$draws)) {
-        all_draws <- payload$draws
-        warmup_iterations <- ceiling(
-          (payload$args$num_warmup %||% 0L) / (payload$args$thin %||% 1L)
-        )
-        if (
-          warmup_iterations > 0L &&
-            posterior::niterations(all_draws) >= warmup_iterations
-        ) {
-          warmup <- all_draws[seq_len(warmup_iterations), , , drop = FALSE]
-          sampling_iterations <- if (
-            warmup_iterations < posterior::niterations(all_draws)
-          ) {
-            seq.int(warmup_iterations + 1L, posterior::niterations(all_draws))
-          } else {
-            integer()
-          }
-          payload$draws <- all_draws[sampling_iterations, , , drop = FALSE]
-          if (!is.null(payload$diagnostics)) {
-            all_diagnostics <- posterior::as_draws_array(payload$diagnostics)
-            warmup_diagnostics <- all_diagnostics[
-              seq_len(warmup_iterations),
-              ,
-              ,
-              drop = FALSE
-            ]
-            payload$diagnostics <- all_diagnostics[
-              sampling_iterations,
-              ,
-              ,
-              drop = FALSE
-            ]
-          }
-        }
-      }
       super$initialize(
         payload,
         model,
@@ -894,9 +782,12 @@ StanMCMC <- R6Class(
         metadata,
         default_format = "draws_array"
       )
-      private$warmup_draws_ <- .stanr_normalize_draw_names(warmup)
-      private$warmup_diagnostics_ <-
-        .stanr_normalize_draw_names(warmup_diagnostics)
+      private$warmup_draws_ <- .stanr_normalize_draw_names(
+        payload$warmup_draws
+      )
+      private$warmup_diagnostics_ <- .stanr_normalize_draw_names(
+        payload$warmup_diagnostics
+      )
       # Mirrors cmdstanr's `CmdStanMCMC$initialize()`: warn about sampler
       # problems unprompted, right after sampling. Skipped when sampling
       # produced nothing to check (`private$diagnostics_` stays `NULL` when

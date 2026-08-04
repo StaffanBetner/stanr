@@ -2,207 +2,9 @@ local_test_context()
 
 init_test_cache("tuple-data")
 
-# Coverage for the tuple/complex data & init interop: the pure-R flattener
-# (`R/tuples.R`), its wiring into `.stanr_run_service()` /
-# `fit$unconstrain_variables()`, and the windowed-complex storage in
-# `src/r_data_context.cpp`.
-
-# --- .stanr_flatten_tuple_values(): pure-R unit tests, no compilation ------
-
-test_that("the fast path returns data/init values unchanged when nothing is a list", {
-  values <- list(N = 4L, y = c(1, 0, 1, 0), z = 1 + 2i)
-  out <- .stanr_flatten_tuple_values(values, list())
-  expect_identical(out, values)
-})
-
-test_that("flattening a tuple-array variable reproduces the worked example exactly", {
-  # array[2] tuple(complex_vector[3], real) acv
-  declared <- list(
-    acv = list(
-      type = data.frame(type = c("complex", "real"), dimensions = c(1, 0)),
-      dimensions = 1
-    )
-  )
-  cv1 <- complex(real = 1:3, imaginary = 11:13)
-  cv2 <- complex(real = 4:6, imaginary = 14:16)
-  values <- list(acv = list(list(cv1, 10), list(cv2, 20)))
-
-  out <- .stanr_flatten_tuple_values(values, declared)
-
-  expect_equal(as.complex(out$acv.1), c(cv1, cv2))
-  expect_equal(dim(out$acv.1), c(2L, 3L))
-  expect_equal(attr(out$acv.1, "stanr_array_dims"), 1L)
-  expect_equal(out$acv.2, c(10, 20))
-  expect_null(dim(out$acv.2))
-})
-
-test_that("a plain (non-array) tuple flattens to per-slot scalars/vectors", {
-  declared <- list(
-    td = list(
-      type = data.frame(type = c("real", "real"), dimensions = c(0, 1)),
-      dimensions = 0
-    )
-  )
-  out <- .stanr_flatten_tuple_values(
-    list(td = list(1.5, c(2, 3))),
-    declared
-  )
-  expect_equal(out$td.1, 1.5)
-  expect_equal(out$td.2, c(2, 3))
-  expect_null(dim(out$td.1))
-})
-
-test_that("array[2,3] tuple(int, real) flattens in blocked-AoS order", {
-  declared <- list(
-    g = list(
-      type = data.frame(type = c("int", "real"), dimensions = c(0, 0)),
-      dimensions = 2
-    )
-  )
-  # Canonical shape: list (over first index, size 2) of lists (over second
-  # index, size 3) of tuples.
-  value <- list(
-    list(list(11L, 1.1), list(12L, 1.2), list(13L, 1.3)),
-    list(list(21L, 2.1), list(22L, 2.2), list(23L, 2.3))
-  )
-  out <- .stanr_flatten_tuple_values(list(g = value), declared)
-
-  # Hand-computed blocked-AoS order: enclosing-array elements enumerated
-  # column-major (first index fastest) -- (1,1),(2,1),(1,2),(2,2),(1,3),(2,3).
-  expect_equal(out$g.1, c(11L, 21L, 12L, 22L, 13L, 23L), ignore_attr = TRUE)
-  expect_equal(out$g.2, c(1.1, 2.1, 1.2, 2.2, 1.3, 2.3), ignore_attr = TRUE)
-  expect_equal(dim(out$g.1), c(2L, 3L))
-  expect_true(is.integer(out$g.1))
-})
-
-test_that("nested tuple(real, array[2] tuple(real, complex)) flattens correctly", {
-  inner_df <- data.frame(type = c("real", "complex"), dimensions = c(0, 0))
-  declared <- list(
-    nt = list(
-      type = data.frame(
-        type = I(list("real", inner_df)),
-        dimensions = c(0, 1)
-      ),
-      dimensions = 0
-    )
-  )
-  value <- list(100, list(list(1, 1 + 2i), list(2, 3 + 4i)))
-  out <- .stanr_flatten_tuple_values(list(nt = value), declared)
-
-  expect_equal(out$nt.1, 100)
-  expect_equal(out$nt.2.1, c(1, 2))
-  expect_equal(out$nt.2.2, c(1 + 2i, 3 + 4i), ignore_attr = TRUE)
-  expect_equal(attr(out$nt.2.2, "stanr_array_dims"), 1L)
-})
-
-test_that("real-valued input is accepted where a tuple slot declares complex", {
-  declared <- list(
-    tad = list(
-      type = data.frame(type = c("int", "complex"), dimensions = c(0, 0)),
-      dimensions = 1
-    )
-  )
-  out <- .stanr_flatten_tuple_values(
-    list(tad = list(list(1L, 2), list(3L, 4))),
-    declared
-  )
-  expect_true(is.complex(out$tad.2))
-  expect_equal(out$tad.2, as.complex(c(2, 4)), ignore_attr = TRUE)
-})
-
-test_that("a shape mismatch across enclosing array elements errors", {
-  declared <- list(
-    g = list(
-      type = data.frame(type = "real", dimensions = 1),
-      dimensions = 1
-    )
-  )
-  expect_error(
-    .stanr_flatten_tuple_values(
-      list(g = list(list(c(1, 2)), list(c(1, 2, 3)))),
-      declared
-    ),
-    "inconsistent value shapes"
-  )
-})
-
-test_that("a named tuple list errors", {
-  declared <- list(
-    td = list(
-      type = data.frame(type = c("real", "real"), dimensions = c(0, 1)),
-      dimensions = 0
-    )
-  )
-  expect_error(
-    .stanr_flatten_tuple_values(
-      list(td = list(a = 1.5, b = c(2, 3))),
-      declared
-    ),
-    "unnamed list"
-  )
-})
-
-test_that("a list for a variable not declared as a tuple errors", {
-  declared <- list(x = list(type = "real", dimensions = 0))
-  expect_error(
-    .stanr_flatten_tuple_values(list(x = list(1, 2)), declared),
-    "not declared as a tuple"
-  )
-  # Also covers a missing declaration entirely (same error class).
-  expect_error(
-    .stanr_flatten_tuple_values(list(zzz = list(1, 2)), declared),
-    "not declared as a tuple"
-  )
-})
-
-test_that("a dotted-name collision with a generated leaf errors", {
-  declared <- list(
-    td = list(
-      type = data.frame(type = c("real", "real"), dimensions = c(0, 1)),
-      dimensions = 0
-    )
-  )
-  expect_error(
-    .stanr_flatten_tuple_values(
-      list(td = list(1.5, c(2, 3)), `td.1` = 99),
-      declared
-    ),
-    "collide|already exist"
-  )
-})
-
-test_that("wrong tuple arity errors", {
-  declared <- list(
-    td = list(
-      type = data.frame(type = c("real", "real"), dimensions = c(0, 1)),
-      dimensions = 0
-    )
-  )
-  expect_error(
-    .stanr_flatten_tuple_values(
-      list(td = list(1.5, c(2, 3), 99)),
-      declared
-    ),
-    "length 2"
-  )
-})
-
-test_that("a non-rectangular tuple array errors", {
-  declared <- list(
-    g = list(
-      type = data.frame(type = c("int", "real"), dimensions = c(0, 0)),
-      dimensions = 2
-    )
-  )
-  value <- list(
-    list(list(11L, 1.1), list(12L, 1.2), list(13L, 1.3)),
-    list(list(21L, 2.1), list(22L, 2.2))
-  )
-  expect_error(
-    .stanr_flatten_tuple_values(list(g = value), declared),
-    "not a rectangular tuple array"
-  )
-})
+# Coverage for the tuple/complex data & init interop: the native flattening
+# and windowed-complex storage in `src/r_data_context.cpp`, and its wiring
+# into `.stanr_run_service()` / `fit$unconstrain_variables()`.
 
 # --- Codegen-contract battery: compiled model, exact-equality draw echo -----
 #
@@ -427,6 +229,27 @@ test_that("a non-rectangular tuple array errors (compiled model)", {
       num_threads = test_threads()
     ),
     "not a rectangular tuple array"
+  )
+})
+
+test_that("a shape mismatch across enclosing array elements errors (compiled model)", {
+  mod <- test_model("tuple_complex_battery")
+  data <- battery_data()
+  data$acv <- list(
+    list(complex(real = 1:3, imaginary = 11:13), 100),
+    list(complex(real = 4:5, imaginary = 14:15), 200)
+  )
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 1,
+      iter_sampling = 1,
+      chains = 1,
+      seed = 1,
+      show_messages = FALSE,
+      num_threads = test_threads()
+    ),
+    "inconsistent value shapes"
   )
 })
 

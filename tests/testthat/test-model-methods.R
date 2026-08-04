@@ -760,17 +760,13 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
 })
 
 test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/complex-in-tuple-array values exactly (not just shape)", {
-  # The golden-shape test above exercises `.stanr_skeleton_node()` (no
-  # values), and the generate_quantities()/draws test above exercises the
-  # pre-existing `$draws()` bracket-name path, unaffected by tuple/complex
-  # support -- neither calls `.stanr_consume_node()`, the element-major
-  # reconstruction `constrain_variables()` actually uses. This test does, on
-  # every
-  # array-of-tuple shape the battery model declares (`acv_out`: complex
-  # inside a 1-D tuple array; `t2d_out`: a 2-D tuple array; `tad_out`: a
-  # simple 1-D tuple array; `nt_out`: a tuple nesting a 1-D tuple array),
-  # checking reconstructed *values* land at the exact right position, not
-  # just that the shape matches.
+  # The golden-shape test above exercises the native skeleton builder (no
+  # values); this one exercises the element-major native reconstruction on
+  # every array-of-tuple shape the battery model declares (`acv_out`:
+  # complex inside a 1-D tuple array; `t2d_out`: a 2-D tuple array;
+  # `tad_out`: a simple 1-D tuple array; `nt_out`: a tuple nesting a 1-D
+  # tuple array), checking reconstructed *values* land at the exact right
+  # position, not just that the shape matches.
   mod <- test_model("tuple_complex_battery")
   data <- battery_data()
   # iter_sampling = 1 is below the 3-iteration minimum for E-BFMI, which

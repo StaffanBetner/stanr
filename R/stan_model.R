@@ -294,6 +294,8 @@
   "model_unconstrain_matrix",
   "model_constrain",
   "model_constrain_matrix",
+  "model_constrain_variables",
+  "model_variable_skeleton",
   "select_opencl_device"
 )
 

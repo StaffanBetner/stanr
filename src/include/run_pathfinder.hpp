@@ -48,7 +48,7 @@ namespace stanr {
 
     if (num_paths <= 1) {
       // Single pathfinder
-      stanr::r_data_context init_ctx(init_list);
+      stanr::r_data_context init_ctx(init_list, args["init_declarations"]);
       stan::callbacks::writer init_writer;
       stanr::r_sample_writer sample_writer(num_draws);
       // No-op: the LBFGS inverse-metric estimate is not exposed to R.
@@ -76,7 +76,8 @@ namespace stanr {
       // Multi-path Pathfinder runs in a coordinator std::thread. All data
       // contexts and writers are C++ owned before that thread is launched.
       // The immutable context is safe to share across all paths.
-      const auto init_ctx = std::make_unique<stanr::r_data_context>(init_list);
+      const auto init_ctx = std::make_unique<stanr::r_data_context>(
+          init_list, args["init_declarations"]);
       std::vector<stan::io::var_context*> init_ctxs(num_paths, init_ctx.get());
 
       // The package returns only the PSIS-resampled draws.  Base writers are

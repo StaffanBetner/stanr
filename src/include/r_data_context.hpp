@@ -20,6 +20,19 @@ namespace stanr {
 
 // R list -> stan::io::var_context adapter. Values are copied during
 // construction, so Stan worker threads never access the R API.
+//
+// Tuple-typed values arrive as (nested) unnamed R lists and are flattened
+// here into the dotted per-leaf entries the generated Stan reader expects,
+// guided by `declarations` (one block of `model$variables()`):
+//
+//   * Every tuple-typed variable `x` is read by generated code slot-by-slot,
+//     never as a whole -- dotted names `x.1`, `x.2.1`, ... one per leaf.
+//   * For array-of-tuple variables the flat value order is "blocked AoS":
+//     enclosing-array elements are enumerated column-major (first index
+//     fastest) and each element's leaf payload is concatenated contiguously.
+//   * A tuple-slot complex leaf is stored in the windowed vals_c() layout
+//     stanc 2.39's generated reader indexes: per-enclosing-array-element
+//     windows of size 2m that are only half used (see store_complex()).
 class r_data_context : public stan::io::var_context {
  private:
   struct value_entry {
@@ -32,9 +45,31 @@ class r_data_context : public stan::io::var_context {
   // Keep all data associated with a variable in one node.  This stores its
   // name once instead of once per real, integer, and dimension map.
   std::map<std::string, value_entry> values_;
+  // Every top-level name in the input list; flattened tuple leaves must not
+  // collide with any of them (or with each other).
+  std::set<std::string> reserved_names_;
+
+  void add_value(const std::string& name, SEXP value);
+  void store_numeric(const std::string& name, std::vector<double> values,
+                     std::vector<size_t> dims);
+  void store_complex(const std::string& name,
+                     std::vector<std::complex<double>> values,
+                     std::vector<size_t> dims, size_t enclosing_dims);
+  void store_leaf(const std::string& name, SEXP value,
+                  std::vector<size_t> dims);
+  void flatten_tuple(const std::string& name, SEXP value, Rcpp::List type_df,
+                     int n_array_dims);
+  void flatten_recurse(const std::string& name,
+                       const std::vector<SEXP>& elements,
+                       const std::vector<int>& array_sizes,
+                       Rcpp::List type_df);
+  void flatten_leaf(const std::string& name,
+                    const std::vector<SEXP>& slot_values,
+                    const std::string& kind,
+                    const std::vector<int>& array_sizes);
 
  public:
-  explicit r_data_context(Rcpp::List list);
+  explicit r_data_context(Rcpp::List list, SEXP declarations = R_NilValue);
 
   bool contains_r(const std::string& name) const override;
   std::vector<double> vals_r(const std::string& name) const override;
