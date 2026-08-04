@@ -13,6 +13,7 @@ approximation to the posterior centered at the mode.
 \code{StanLaplace} objects have:\tabular{ll}{
    \strong{Method} \tab \strong{Description} \cr
    \code{\link[=fit-method-laplace-mode]{$mode()}} \tab Return the mode used for the approximation. \cr
+   \code{\link[=fit-method-lp]{$lp_approx()}} \tab Extract the log density approximation draws. \cr
 }
 }
 

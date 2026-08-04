@@ -8,3 +8,11 @@ A \code{StanPathfinder} object is returned by
 \code{\link[=model-method-pathfinder]{$pathfinder()}} and contains approximate
 posterior draws from the Pathfinder algorithm.
 }
+\section{Methods}{
+ In addition to the methods inherited from \code{\link{StanFit}},
+\code{StanPathfinder} objects have:\tabular{ll}{
+   \strong{Method} \tab \strong{Description} \cr
+   \code{\link[=fit-method-lp]{$lp_approx()}} \tab Extract the log density approximation draws. \cr
+}
+}
+

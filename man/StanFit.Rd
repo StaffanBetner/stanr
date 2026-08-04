@@ -37,7 +37,6 @@ approximation), \code{\link{StanVB}} (variational inference), \code{\link{StanPa
 \subsection{Log density}{\tabular{ll}{
    \strong{Method} \tab \strong{Description} \cr
    \code{\link[=fit-method-lp]{$lp()}} \tab Extract the log density (\code{lp__}) draws. \cr
-   \code{\link[=fit-method-lp]{$lp_approx()}} \tab Extract the log density approximation draws. \cr
 }
 
 }

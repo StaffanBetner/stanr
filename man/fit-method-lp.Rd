@@ -4,11 +4,13 @@
 \alias{fit-method-lp}
 \title{Extract log density draws}
 \value{
-The log density draws in the default format for the fitting method.
+A numeric vector, with one element per (post-warmup) draw, or a
+single value for optimization.
 }
 \description{
 Extract the log density (\code{lp__}) or log density approximation
-(\code{lp_approx__}) draws from a fitted model object.
+(\code{lp_approx__}) as a numeric vector. \verb{$lp_approx()} is only available on
+\code{\link{StanLaplace}}, \code{\link{StanVB}}, and \code{\link{StanPathfinder}} objects.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{lp()
 lp_approx()

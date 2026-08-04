@@ -56,6 +56,23 @@ test_that("advi requested draw count is respected and lp__ is not included", {
   expect_false("lp__" %in% posterior::variables(result$draws()))
 })
 
+test_that("advi lp_approx() returns a numeric vector", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$variational(
+    data = data,
+    iter = 1000,
+    draws = 10,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+
+  expect_true(is.numeric(result$lp_approx()))
+  expect_length(result$lp_approx(), 10L)
+})
+
 test_that("advi with an invalid algorithm errors before reaching C++", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data

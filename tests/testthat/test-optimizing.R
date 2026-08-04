@@ -6,7 +6,12 @@ test_that("optimizing returns expected structure", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
+  result <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   expect_s3_class(result, "StanMLE")
   expect_s3_class(result, "StanFit")
@@ -54,7 +59,12 @@ test_that("optimizing finds reasonable theta for bernoulli", {
   # 5 successes out of 10 -> MLE theta = 0.5
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
+  result <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   expect_true(result$mle("theta") > 0.3)
   expect_true(result$mle("theta") < 0.7)
@@ -64,7 +74,12 @@ test_that("optimizing output() returns non-empty Stan log messages", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
+  result <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   expect_type(result$output(), "character")
   expect_true(length(result$output()) > 0)
@@ -108,7 +123,12 @@ test_that("optimizing with save_iterations = TRUE exposes the full optimization 
     show_messages = FALSE,
     num_threads = test_threads()
   )
-  result_default <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
+  result_default <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   expect_equal(result$return_codes(), 0L)
   draws <- unclass(as.matrix(result$draws()))
@@ -131,17 +151,55 @@ test_that("optimizing default save_iterations yields a single row in draws()", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
+  result <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   draws <- unclass(as.matrix(result$draws()))
   expect_equal(nrow(draws), 1L)
+})
+
+test_that("draws(variables = ...) works for both default and save_iterations = TRUE optimize() fits", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  default_fit <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+  expect_equal(
+    posterior::variables(default_fit$draws(variables = "lp__")),
+    "lp__"
+  )
+
+  full_path_fit <- mod$optimize(
+    data = data,
+    seed = 42,
+    save_iterations = TRUE,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+  expect_equal(
+    posterior::variables(full_path_fit$draws(variables = "lp__")),
+    "lp__"
+  )
 })
 
 test_that("mle() errors on an unknown variable name", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
+  result <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   expect_error(result$mle(variables = "theta_typo"), "Unknown variable")
 })

@@ -30,7 +30,12 @@ test_that("optimize() fit errors on draws(inc_warmup = TRUE)", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
-  result <- mod$optimize(data = data, seed = 42, show_messages = FALSE, num_threads = test_threads())
+  result <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
 
   expect_error(
     result$draws(inc_warmup = TRUE),
@@ -74,12 +79,13 @@ test_that("direct fit method coverage: time, init, code, print, lp, num_chains",
   expect_output(fit$print())
   expect_identical(fit$print(), fit)
 
-  expect_equal(posterior::variables(fit$lp()), "lp__")
+  expect_true(is.numeric(fit$lp()))
+  expect_length(fit$lp(), 10L)
 
   expect_equal(fit$num_chains(), 2L)
 })
 
-test_that("pathfinder fit$lp_approx() contains only lp_approx__", {
+test_that("pathfinder fit$lp_approx() returns a numeric vector", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
@@ -94,7 +100,47 @@ test_that("pathfinder fit$lp_approx() contains only lp_approx__", {
     num_threads = test_threads()
   )
 
-  expect_equal(posterior::variables(fit$lp_approx()), "lp_approx__")
+  expect_true(is.numeric(fit$lp_approx()))
+  expect_length(fit$lp_approx(), 10L)
+})
+
+test_that("$lp_approx() is only available on StanLaplace/StanVB/StanPathfinder", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  mcmc <- mod$sample(
+    data = data,
+    iter_warmup = 5,
+    iter_sampling = 5,
+    chains = 1,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+  mle <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+
+  expect_false("lp_approx" %in% names(mcmc))
+  expect_false("lp_approx" %in% names(mle))
+})
+
+test_that("$lp() returns a numeric vector for optimize()", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  fit <- mod$optimize(
+    data = data,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  )
+
+  expect_true(is.numeric(fit$lp()))
+  expect_length(fit$lp(), 1L)
 })
 
 test_that("StanGQ$num_chains() reports the draws' own chain count, 0L with no draws", {

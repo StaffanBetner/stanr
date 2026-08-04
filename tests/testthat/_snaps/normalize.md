@@ -21,3 +21,4 @@
     Condition
       Error:
       ! `seed` must be NULL or a single integer between 0 and 2^31 - 1.
+

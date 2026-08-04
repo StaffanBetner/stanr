@@ -36,7 +36,6 @@
 #'  |**Method**|**Description**|
 #'  |:----------|:---------------|
 #'  [`$lp()`][fit-method-lp] | Extract the log density (`lp__`) draws. |
-#'  [`$lp_approx()`][fit-method-lp] | Extract the log density approximation draws. |
 #'
 #'  ## Model methods
 #'
@@ -467,24 +466,31 @@ StanFit$set("public", "code", fit_code)
 #' @family StanFit methods
 #'
 #' @description Extract the log density (`lp__`) or log density approximation
-#'   (`lp_approx__`) draws from a fitted model object.
+#'   (`lp_approx__`) as a numeric vector. `$lp_approx()` is only available on
+#'   [`StanLaplace`], [`StanVB`], and [`StanPathfinder`] objects.
 #'
 #'   ```
 #'   lp()
 #'   lp_approx()
 #'   ```
 #'
-#' @return The log density draws in the default format for the fitting method.
+#' @return A numeric vector, with one element per (post-warmup) draw, or a
+#'   single value for optimization.
 #'
 #' @seealso [`$draws()`][fit-method-draws]
 #'
 NULL
 
-fit_lp <- function() self$draws(variables = "lp__")
+fit_lp <- function() {
+  as.numeric(self$draws(variables = "lp__", format = "draws_matrix"))
+}
 StanFit$set("public", "lp", fit_lp)
 
-fit_lp_approx <- function() self$draws(variables = "lp_approx__")
-StanFit$set("public", "lp_approx", fit_lp_approx)
+# Attached to StanLaplace/StanVB/StanPathfinder below, not StanFit itself --
+# MCMC, MLE, and GQ have no approximating distribution to report.
+fit_lp_approx <- function() {
+  as.numeric(self$draws(variables = "lp_approx__", format = "draws_matrix"))
+}
 
 # StanFit save methods ---------------------------------------------------------
 
@@ -1210,6 +1216,12 @@ StanMLE <- R6Class(
           dimnames = list(NULL, c("lp__", names(par)))
         )
       }
+      # Every other fit type's draws arrive already `posterior`-classed;
+      # this one is assembled by hand above, so `$draws(variables = ...)`
+      # (via `subset_draws()`) needs it classed too.
+      if (!is.null(payload$draws)) {
+        payload$draws <- posterior::as_draws_matrix(payload$draws)
+      }
       super$initialize(
         payload,
         model,
@@ -1291,6 +1303,7 @@ StanMLE$set("public", "summary", mle_summary)
 #'  |**Method**|**Description**|
 #'  |:----------|:---------------|
 #'  [`$mode()`][fit-method-laplace-mode] | Return the mode used for the approximation. |
+#'  [`$lp_approx()`][fit-method-lp] | Extract the log density approximation draws. |
 #'
 NULL
 
@@ -1345,6 +1358,7 @@ NULL
 
 laplace_mode <- function() private$mode_
 StanLaplace$set("public", "mode", laplace_mode)
+StanLaplace$set("public", "lp_approx", fit_lp_approx)
 
 # StanVB class -----------------------------------------------------------------
 
@@ -1354,6 +1368,13 @@ StanLaplace$set("public", "mode", laplace_mode)
 #' @description A `StanVB` object is returned by
 #'   [`$variational()`][model-method-variational] and contains approximate
 #'   posterior draws from Automatic Differentiation Variational Inference (ADVI).
+#'
+#' @section Methods: In addition to the methods inherited from [`StanFit`],
+#'   `StanVB` objects have:
+#'
+#'  |**Method**|**Description**|
+#'  |:----------|:---------------|
+#'  [`$lp_approx()`][fit-method-lp] | Extract the log density approximation draws. |
 #'
 NULL
 
@@ -1405,6 +1426,7 @@ StanVB <- R6Class(
   ),
   cloneable = FALSE
 )
+StanVB$set("public", "lp_approx", fit_lp_approx)
 
 # StanPathfinder class ---------------------------------------------------------
 
@@ -1414,6 +1436,13 @@ StanVB <- R6Class(
 #' @description A `StanPathfinder` object is returned by
 #'   [`$pathfinder()`][model-method-pathfinder] and contains approximate
 #'   posterior draws from the Pathfinder algorithm.
+#'
+#' @section Methods: In addition to the methods inherited from [`StanFit`],
+#'   `StanPathfinder` objects have:
+#'
+#'  |**Method**|**Description**|
+#'  |:----------|:---------------|
+#'  [`$lp_approx()`][fit-method-lp] | Extract the log density approximation draws. |
 #'
 NULL
 
@@ -1445,6 +1474,7 @@ StanPathfinder <- R6Class(
   ),
   cloneable = FALSE
 )
+StanPathfinder$set("public", "lp_approx", fit_lp_approx)
 
 # StanGQ class -----------------------------------------------------------------
 

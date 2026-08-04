@@ -8,3 +8,11 @@ A \code{StanVB} object is returned by
 \code{\link[=model-method-variational]{$variational()}} and contains approximate
 posterior draws from Automatic Differentiation Variational Inference (ADVI).
 }
+\section{Methods}{
+ In addition to the methods inherited from \code{\link{StanFit}},
+\code{StanVB} objects have:\tabular{ll}{
+   \strong{Method} \tab \strong{Description} \cr
+   \code{\link[=fit-method-lp]{$lp_approx()}} \tab Extract the log density approximation draws. \cr
+}
+}
+
