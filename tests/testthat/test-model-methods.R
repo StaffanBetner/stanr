@@ -382,7 +382,9 @@ test_that("serialized fits lazily rebuild data-bound model methods", {
 test_that("model methods on a tuple-data fit still work after readRDS()", {
   mod <- test_model("tuple_complex_battery")
   data <- battery_data()
-  fit <- mod$sample(
+  # iter_sampling = 1 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = data,
     iter_warmup = 1,
     iter_sampling = 1,
@@ -390,7 +392,7 @@ test_that("model methods on a tuple-data fit still work after readRDS()", {
     seed = 18,
     show_messages = FALSE,
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   expected <- fit$constrain_variables(fit$unconstrain_variables(list(x = 0)))
@@ -516,7 +518,9 @@ test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tupl
   # unconstrain -> constrain the identity transform, so this is a property
   # test, not just a shape check.
   mod <- test_model("tuple_complex_unbounded")
-  fit <- mod$sample(
+  # iter_sampling = 1 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = list(),
     iter_warmup = 1,
     iter_sampling = 1,
@@ -525,7 +529,7 @@ test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tupl
     show_messages = FALSE,
     init = list(t = list(0, c(0, 0)), z = 0 + 0i),
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   x <- list(t = list(1.25, c(-0.5, 3)), z = 2 - 1.5i)
@@ -543,7 +547,9 @@ test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tupl
 
 test_that("variable_skeleton() has the exact golden nested-list/array shape for the tuple/complex battery model", {
   mod <- test_model("tuple_complex_battery")
-  fit <- mod$sample(
+  # iter_sampling = 1 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = battery_data(),
     iter_warmup = 1,
     iter_sampling = 1,
@@ -551,7 +557,7 @@ test_that("variable_skeleton() has the exact golden nested-list/array shape for 
     seed = 12,
     show_messages = FALSE,
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   skeleton <- fit$variable_skeleton()
@@ -593,7 +599,9 @@ test_that("variable_skeleton() has the exact golden nested-list/array shape for 
 
 test_that("unconstrain_draws() still works on a tuple/complex-model fit (regression: bracket-name path unaffected by tuple/complex support)", {
   mod <- test_model("tuple_complex_unbounded")
-  fit <- mod$sample(
+  # iter_sampling = 2 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = list(),
     iter_warmup = 2,
     iter_sampling = 2,
@@ -602,7 +610,7 @@ test_that("unconstrain_draws() still works on a tuple/complex-model fit (regress
     show_messages = FALSE,
     init = list(t = list(0, c(0, 0)), z = 0 + 0i),
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   unconstrained <- fit$unconstrain_draws(format = "draws_matrix")
@@ -665,7 +673,9 @@ test_that("$optimize() and $laplace() succeed on a tuple/complex model (regressi
 test_that("generate_quantities() runs on draws from a tuple/complex-model $sample() fit", {
   mod <- test_model("tuple_complex_battery")
   data <- battery_data()
-  fit <- mod$sample(
+  # iter_sampling = 2 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = data,
     iter_warmup = 1,
     iter_sampling = 2,
@@ -673,7 +683,7 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
     seed = 16,
     show_messages = FALSE,
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   gq <- mod$generate_quantities(
@@ -733,7 +743,9 @@ test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/comp
   # just that the shape matches.
   mod <- test_model("tuple_complex_battery")
   data <- battery_data()
-  fit <- mod$sample(
+  # iter_sampling = 1 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = data,
     iter_warmup = 1,
     iter_sampling = 1,
@@ -741,7 +753,7 @@ test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/comp
     seed = 18,
     show_messages = FALSE,
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   # The generated quantities are pure echoes of `data`, independent of `x`;

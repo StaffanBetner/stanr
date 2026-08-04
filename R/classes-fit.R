@@ -886,6 +886,17 @@ StanMCMC <- R6Class(
       private$warmup_draws_ <- .stanr_normalize_draw_names(warmup)
       private$warmup_diagnostics_ <-
         .stanr_normalize_draw_names(warmup_diagnostics)
+      # Mirrors cmdstanr's `CmdStanMCMC$initialize()`: warn about sampler
+      # problems unprompted, right after sampling. Skipped when sampling
+      # produced nothing to check (`private$diagnostics_` stays `NULL` when
+      # `$sample()`'s native call itself failed) or for `fixed_param` runs,
+      # which have no HMC diagnostics to report.
+      if (!is.null(private$diagnostics_) && !isTRUE(metadata$fixed_param)) {
+        invisible(self$diagnostic_summary(
+          metadata$diagnostics %||% c("divergences", "treedepth", "ebfmi"),
+          quiet = FALSE
+        ))
+      }
     }
   ),
   cloneable = FALSE
@@ -902,7 +913,8 @@ StanMCMC <- R6Class(
 #'   ```
 #'   sampler_diagnostics(inc_warmup = FALSE, format = "draws_array")
 #'   num_chains()
-#'   diagnostic_summary()
+#'   diagnostic_summary(diagnostics = c("divergences", "treedepth", "ebfmi"),
+#'                       quiet = FALSE)
 #'   inv_metric(matrix = TRUE)
 #'   loo(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, ...)
 #'   ```
@@ -911,18 +923,26 @@ StanMCMC <- R6Class(
 #'   metric as a matrix? For a diagonal metric, `TRUE` (the default) wraps the
 #'   adapted diagonal in `diag()`; `FALSE` returns it as a vector. For a dense
 #'   metric, the matrix is always returned and `matrix = FALSE` is an error.
+#' @param diagnostics (character vector) For `$diagnostic_summary()`: which
+#'   diagnostics to check. One or more of `"divergences"`, `"treedepth"`, and
+#'   `"ebfmi"`. The default checks all three; `NULL` or `""` checks none.
+#' @param quiet (logical) For `$diagnostic_summary()`: should messages about
+#'   problems found in the requested diagnostics be suppressed? The default,
+#'   `FALSE`, prints them in addition to returning the values. Diagnostics
+#'   that could not be computed at all (rather than computed and found
+#'   problematic) always warn, regardless of `quiet`.
 #'
 #' @return
 #' * `$sampler_diagnostics()` returns sampler diagnostics (e.g., `divergent__`,
 #'   `treedepth__`, `accept__`) as a posterior draws object.
 #' * `$num_chains()` returns the number of MCMC chains.
-#' * `$diagnostic_summary()` returns a data frame with one row per chain and
-#'   columns `chain` (the chain identifier), `num_divergent` (count of
-#'   divergent transitions), and `num_max_treedepth` (count of iterations
-#'   that hit the max treedepth) for that chain. Either count column is
-#'   `NA_integer_` for every row if the corresponding diagnostic was not
-#'   collected (e.g. `divergent__`/`treedepth__` are unavailable for the
-#'   `static` engine, or are all-`NA` for `fixed_param` runs).
+#' * `$diagnostic_summary()` returns a list with one element per requested
+#'   diagnostic: `num_divergent` (divergent transitions per chain),
+#'   `num_max_treedepth` (iterations per chain that hit the max treedepth),
+#'   and/or `ebfmi` (E-BFMI per chain). An element is `NA` for every chain if
+#'   the corresponding diagnostic was not collected (e.g. `divergent__`/
+#'   `treedepth__`/`energy__` are unavailable for the `static` engine, or are
+#'   all-`NA` for `fixed_param` runs).
 #' * `$inv_metric()` returns a list (one element per chain) of the inverse
 #'   mass matrix adapted during sampling. Errors if the fit was not sampled
 #'   with adaptation.
@@ -965,44 +985,77 @@ mcmc_num_chains <- function() {
 }
 StanMCMC$set("public", "num_chains", mcmc_num_chains)
 
-mcmc_diagnostic_summary <- function() {
-  diagnostics <- self$sampler_diagnostics(format = "draws_array")
+mcmc_diagnostic_summary <- function(
+  diagnostics = c("divergences", "treedepth", "ebfmi"),
+  quiet = FALSE
+) {
+  quiet <- .stanr_flag(quiet, "quiet")
+  if (!length(diagnostics) || identical(diagnostics, "")) {
+    return(list())
+  }
+  diagnostics <- match.arg(
+    diagnostics,
+    choices = c("divergences", "treedepth", "ebfmi"),
+    several.ok = TRUE
+  )
+
+  draws <- self$sampler_diagnostics(format = "draws_array")
   n_chains <- self$num_chains()
-  chain_ids <- private$metadata_$chain_ids %||% seq_len(n_chains)
-  vars <- posterior::variables(diagnostics)
+  vars <- posterior::variables(draws)
+  n_draws <- posterior::niterations(draws) * n_chains
   # `fixed_param` runs store a single dummy (1 iteration x 1 chain) all-NA
   # placeholder for diagnostics regardless of how many chains were actually
   # sampled (see the `fixed_param` branch of `stan_model_sample()`'s
   # `payload_fn`), so the chain dimension can't always be indexed up to
-  # `n_chains`; treat that mismatch the same as "diagnostic not collected".
-  chains_match <- posterior::nchains(diagnostics) == n_chains
+  # `n_chains`; treat that mismatch the same as "diagnostic not collected"
+  # and stay silent -- there's nothing wrong to warn about, just nothing to
+  # check.
+  collected <- posterior::nchains(draws) == n_chains
 
-  num_divergent <- if (chains_match && "divergent__" %in% vars) {
-    vapply(
-      seq_len(n_chains),
-      function(i) sum(diagnostics[, i, "divergent__"] > 0),
-      integer(1)
-    )
-  } else {
-    rep(NA_integer_, n_chains)
+  out <- list()
+
+  if ("divergences" %in% diagnostics) {
+    num_divergent <- if (collected && "divergent__" %in% vars) {
+      vapply(
+        seq_len(n_chains),
+        function(i) sum(draws[, i, "divergent__"] > 0),
+        integer(1)
+      )
+    } else {
+      rep(NA_integer_, n_chains)
+    }
+    if (!quiet) {
+      .stanr_check_divergences(num_divergent, n_draws)
+    }
+    out$num_divergent <- num_divergent
   }
 
-  max_depth <- private$metadata_$arguments$max_depth %||% 10L
-  num_max_treedepth <- if (chains_match && "treedepth__" %in% vars) {
-    vapply(
-      seq_len(n_chains),
-      function(i) sum(diagnostics[, i, "treedepth__"] >= max_depth),
-      integer(1)
-    )
-  } else {
-    rep(NA_integer_, n_chains)
+  if ("treedepth" %in% diagnostics) {
+    max_depth <- private$metadata_$arguments$max_depth %||% 10L
+    num_max_treedepth <- if (collected && "treedepth__" %in% vars) {
+      vapply(
+        seq_len(n_chains),
+        function(i) sum(draws[, i, "treedepth__"] >= max_depth),
+        integer(1)
+      )
+    } else {
+      rep(NA_integer_, n_chains)
+    }
+    if (!quiet) {
+      .stanr_check_max_treedepth(num_max_treedepth, n_draws, max_depth)
+    }
+    out$num_max_treedepth <- num_max_treedepth
   }
 
-  data.frame(
-    chain = chain_ids,
-    num_divergent = num_divergent,
-    num_max_treedepth = num_max_treedepth
-  )
+  if ("ebfmi" %in% diagnostics) {
+    out$ebfmi <- if (collected && "energy__" %in% vars) {
+      .stanr_check_ebfmi(draws, n_chains, quiet)
+    } else {
+      rep(NA_real_, n_chains)
+    }
+  }
+
+  out
 }
 StanMCMC$set("public", "diagnostic_summary", mcmc_diagnostic_summary)
 

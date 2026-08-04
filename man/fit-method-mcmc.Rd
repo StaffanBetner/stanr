@@ -8,19 +8,29 @@
 metric as a matrix? For a diagonal metric, \code{TRUE} (the default) wraps the
 adapted diagonal in \code{diag()}; \code{FALSE} returns it as a vector. For a dense
 metric, the matrix is always returned and \code{matrix = FALSE} is an error.}
+
+\item{diagnostics}{(character vector) For \verb{$diagnostic_summary()}: which
+diagnostics to check. One or more of \code{"divergences"}, \code{"treedepth"}, and
+\code{"ebfmi"}. The default checks all three; \code{NULL} or \code{""} checks none.}
+
+\item{quiet}{(logical) For \verb{$diagnostic_summary()}: should messages about
+problems found in the requested diagnostics be suppressed? The default,
+\code{FALSE}, prints them in addition to returning the values. Diagnostics
+that could not be computed at all (rather than computed and found
+problematic) always warn, regardless of \code{quiet}.}
 }
 \value{
 \itemize{
 \item \verb{$sampler_diagnostics()} returns sampler diagnostics (e.g., \code{divergent__},
 \code{treedepth__}, \code{accept__}) as a posterior draws object.
 \item \verb{$num_chains()} returns the number of MCMC chains.
-\item \verb{$diagnostic_summary()} returns a data frame with one row per chain and
-columns \code{chain} (the chain identifier), \code{num_divergent} (count of
-divergent transitions), and \code{num_max_treedepth} (count of iterations
-that hit the max treedepth) for that chain. Either count column is
-\code{NA_integer_} for every row if the corresponding diagnostic was not
-collected (e.g. \code{divergent__}/\code{treedepth__} are unavailable for the
-\code{static} engine, or are all-\code{NA} for \code{fixed_param} runs).
+\item \verb{$diagnostic_summary()} returns a list with one element per requested
+diagnostic: \code{num_divergent} (divergent transitions per chain),
+\code{num_max_treedepth} (iterations per chain that hit the max treedepth),
+and/or \code{ebfmi} (E-BFMI per chain). An element is \code{NA} for every chain if
+the corresponding diagnostic was not collected (e.g. \code{divergent__}/
+\code{treedepth__}/\code{energy__} are unavailable for the \code{static} engine, or are
+all-\code{NA} for \code{fixed_param} runs).
 \item \verb{$inv_metric()} returns a list (one element per chain) of the inverse
 mass matrix adapted during sampling. Errors if the fit was not sampled
 with adaptation.
@@ -33,7 +43,8 @@ diagnostics, chain information, and model evaluation.
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{sampler_diagnostics(inc_warmup = FALSE, format = "draws_array")
 num_chains()
-diagnostic_summary()
+diagnostic_summary(diagnostics = c("divergences", "treedepth", "ebfmi"),
+                    quiet = FALSE)
 inv_metric(matrix = TRUE)
 loo(variables = "log_lik", r_eff = FALSE, moment_match = FALSE, ...)
 }\if{html}{\out{</div>}}

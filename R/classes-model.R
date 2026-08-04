@@ -746,6 +746,12 @@ StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 #'   proposal rejections and rejected initial values. Set to `FALSE` to
 #'   silence them. Suppressed messages are still recorded and available via
 #'   the fit's `$output()` method.
+#' @param diagnostics (character vector) Which sampler diagnostics to check
+#'   immediately after sampling, printing a warning message for any problems
+#'   found -- see [`$diagnostic_summary()`][fit-method-mcmc]. One or more of
+#'   `"divergences"`, `"treedepth"`, and `"ebfmi"`. The default checks all
+#'   three; `NULL` or `""` skips the check entirely. Ignored when
+#'   `fixed_param = TRUE`.
 #' @param engine (string) The sampling engine: `"nuts"` or `"static"`.
 #' @param int_time (number) Integration time for static HMC.
 #' @param step_size_jitter (number) Jitter for step size after adaptation.
@@ -788,6 +794,7 @@ stan_model_sample <- function(
   fixed_param = FALSE,
   show_messages = TRUE,
   show_exceptions = TRUE,
+  diagnostics = c("divergences", "treedepth", "ebfmi"),
   engine = "nuts",
   int_time = 2 * pi,
   step_size_jitter = 0,
@@ -804,6 +811,15 @@ stan_model_sample <- function(
   fixed_param <- .stanr_flag(fixed_param, "fixed_param")
   show_messages <- .stanr_flag(show_messages, "show_messages")
   show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
+  if (is.null(diagnostics) || identical(diagnostics, "")) {
+    diagnostics <- character()
+  } else {
+    diagnostics <- match.arg(
+      diagnostics,
+      choices = c("divergences", "treedepth", "ebfmi"),
+      several.ok = TRUE
+    )
+  }
   if (fixed_param && save_warmup) {
     warning(
       "`save_warmup` is ignored when `fixed_param = TRUE`.",
@@ -966,7 +982,9 @@ stan_model_sample <- function(
       chain_ids = ids$chain_ids,
       num_threads = num_threads,
       show_exceptions = show_exceptions,
-      save_warmup = save_warmup
+      save_warmup = save_warmup,
+      fixed_param = fixed_param,
+      diagnostics = diagnostics
     )
   )
 }

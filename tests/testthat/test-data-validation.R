@@ -130,7 +130,7 @@ test_that("numeric initialization radius is accepted", {
       data = list(N = 4L, y = c(1L, 0L, 1L, 0L)),
       init = c(0.1),
       iter_warmup = 2,
-      iter_sampling = 2,
+      iter_sampling = 3,
       chains = 1,
       seed = 42,
       show_messages = FALSE,

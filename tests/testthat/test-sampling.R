@@ -873,7 +873,7 @@ test_that("sampling with a non-numeric iter_warmup errors", {
 # $diagnostic_summary() method
 # ---------------------------------------------------------------------------
 
-test_that("diagnostic_summary() returns one row per chain with expected columns", {
+test_that("diagnostic_summary() returns a list with per-chain divergences, treedepth, and ebfmi", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
@@ -887,27 +887,26 @@ test_that("diagnostic_summary() returns one row per chain with expected columns"
     num_threads = test_threads()
   )
 
-  summary_df <- result$diagnostic_summary()
+  summary <- result$diagnostic_summary()
 
-  expect_true(is.data.frame(summary_df))
-  expect_equal(
-    colnames(summary_df),
-    c("chain", "num_divergent", "num_max_treedepth")
-  )
-  expect_equal(nrow(summary_df), 3L)
-  expect_equal(summary_df$chain, 1:3)
-  expect_type(summary_df$num_divergent, "integer")
-  expect_type(summary_df$num_max_treedepth, "integer")
+  expect_type(summary, "list")
+  expect_named(summary, c("num_divergent", "num_max_treedepth", "ebfmi"))
+  expect_length(summary$num_divergent, 3L)
+  expect_length(summary$num_max_treedepth, 3L)
+  expect_length(summary$ebfmi, 3L)
+  expect_type(summary$num_divergent, "integer")
+  expect_type(summary$num_max_treedepth, "integer")
+  expect_type(summary$ebfmi, "double")
 
   # Summing the per-chain counts must equal counting divergences/treedepth
   # hits across the combined draws.
   diagnostics <- result$sampler_diagnostics(format = "draws_matrix")
   expect_equal(
-    sum(summary_df$num_divergent),
+    sum(summary$num_divergent),
     sum(diagnostics[, "divergent__"] > 0)
   )
   expect_equal(
-    sum(summary_df$num_max_treedepth),
+    sum(summary$num_max_treedepth),
     sum(diagnostics[, "treedepth__"] >= 10L)
   )
 
@@ -918,7 +917,7 @@ test_that("diagnostic_summary() returns one row per chain with expected columns"
   )
 })
 
-test_that("diagnostic_summary() chain column reflects supplied chain_ids", {
+test_that("diagnostic_summary(diagnostics = ...) selects a subset", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
@@ -927,17 +926,20 @@ test_that("diagnostic_summary() chain column reflects supplied chain_ids", {
     iter_warmup = 20,
     iter_sampling = 20,
     chains = 2,
-    chain_ids = 5:6,
     seed = 42,
     show_messages = FALSE,
     num_threads = test_threads()
   )
 
-  summary_df <- result$diagnostic_summary()
-  expect_equal(summary_df$chain, 5:6)
+  expect_named(result$diagnostic_summary(diagnostics = "ebfmi"), "ebfmi")
+  expect_equal(result$diagnostic_summary(diagnostics = NULL), list())
+  expect_error(
+    result$diagnostic_summary(diagnostics = "not_a_diagnostic"),
+    "should be one of"
+  )
 })
 
-test_that("diagnostic_summary() returns NA_integer_ per row for fixed_param runs", {
+test_that("diagnostic_summary() returns NA per chain for fixed_param runs", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
@@ -952,12 +954,13 @@ test_that("diagnostic_summary() returns NA_integer_ per row for fixed_param runs
     num_threads = test_threads()
   )
 
-  summary_df <- result$diagnostic_summary()
-  expect_equal(nrow(summary_df), 2L)
-  expect_true(all(is.na(summary_df$num_divergent)))
-  expect_true(all(is.na(summary_df$num_max_treedepth)))
-  expect_type(summary_df$num_divergent, "integer")
-  expect_type(summary_df$num_max_treedepth, "integer")
+  summary <- result$diagnostic_summary(quiet = TRUE)
+  expect_length(summary$num_divergent, 2L)
+  expect_true(all(is.na(summary$num_divergent)))
+  expect_true(all(is.na(summary$num_max_treedepth)))
+  expect_true(all(is.na(summary$ebfmi)))
+  expect_type(summary$num_divergent, "integer")
+  expect_type(summary$num_max_treedepth, "integer")
 })
 
 test_that("diagnostic_summary() counts per-chain divergences for a pathological model", {
@@ -977,8 +980,10 @@ test_that("diagnostic_summary() counts per-chain divergences for a pathological 
   )
 
   # Neal's funnel with a short warmup and a low adapt_delta reliably
-  # triggers divergent transitions (verified across several seeds).
-  result <- mod$sample(
+  # triggers divergent transitions (verified across several seeds). That
+  # also reliably trips the auto-printed divergence/E-BFMI warnings after
+  # $sample(), hence the suppressMessages().
+  result <- suppressMessages(mod$sample(
     iter_warmup = 15,
     iter_sampling = 200,
     chains = 3,
@@ -986,14 +991,55 @@ test_that("diagnostic_summary() counts per-chain divergences for a pathological 
     seed = 42,
     show_messages = FALSE,
     num_threads = test_threads()
-  )
+  ))
 
-  summary_df <- result$diagnostic_summary()
-  expect_equal(nrow(summary_df), 3L)
+  summary <- result$diagnostic_summary(quiet = TRUE)
+  expect_length(summary$num_divergent, 3L)
   # Neal's funnel reliably produces some divergences under default tuning;
   # the point of this test is that divergences are actually counted (not
   # just that the structural NA/zero cases work), not exactly how many.
-  expect_true(sum(summary_df$num_divergent) > 0)
+  expect_true(sum(summary$num_divergent) > 0)
+})
+
+test_that("$sample() prints a divergence warning unprompted, suppressed by diagnostics = NULL", {
+  funnel_code <- "
+    parameters {
+      real y;
+      vector[30] x;
+    }
+    model {
+      y ~ normal(0, 3);
+      x ~ normal(0, exp(y / 2));
+    }
+  "
+  mod <- stan_model(
+    code = funnel_code,
+    model_name = "funnel_diagnostics_arg"
+  )
+
+  expect_message(
+    mod$sample(
+      iter_warmup = 15,
+      iter_sampling = 200,
+      chains = 3,
+      adapt_delta = 0.6,
+      seed = 42,
+      show_messages = FALSE,
+      num_threads = test_threads()
+    ),
+    "transitions ended with a divergence"
+  )
+
+  expect_no_message(mod$sample(
+    iter_warmup = 15,
+    iter_sampling = 200,
+    chains = 3,
+    adapt_delta = 0.6,
+    diagnostics = NULL,
+    seed = 42,
+    show_messages = FALSE,
+    num_threads = test_threads()
+  ))
 })
 
 withr::deferred_run()

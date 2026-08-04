@@ -289,7 +289,9 @@ test_that("the battery model echoes every input exactly via generated quantities
   mod <- test_model("tuple_complex_battery")
   data <- battery_data()
 
-  fit <- mod$sample(
+  # iter_sampling = 2 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = data,
     iter_warmup = 2,
     iter_sampling = 2,
@@ -297,7 +299,7 @@ test_that("the battery model echoes every input exactly via generated quantities
     seed = 42,
     show_messages = FALSE,
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   expected <- .stanr_battery_expected(data)
@@ -432,7 +434,9 @@ test_that("a non-rectangular tuple array errors (compiled model)", {
 
 test_that("unconstrain_variables() is the identity for unbounded tuple/complex parameters", {
   mod <- test_model("tuple_complex_unbounded")
-  fit <- mod$sample(
+  # iter_sampling = 2 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = list(),
     iter_warmup = 2,
     iter_sampling = 2,
@@ -441,7 +445,7 @@ test_that("unconstrain_variables() is the identity for unbounded tuple/complex p
     show_messages = FALSE,
     init = list(t = list(0.5, c(1, 2)), z = 0.1 + 0.2i),
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 
   upars <- fit$unconstrain_variables(list(
@@ -453,7 +457,9 @@ test_that("unconstrain_variables() is the identity for unbounded tuple/complex p
 
 test_that("sample() accepts a tuple/complex init list end to end", {
   mod <- test_model("tuple_complex_unbounded")
-  fit <- mod$sample(
+  # iter_sampling = 1 is below the 3-iteration minimum for E-BFMI, which
+  # $sample() would otherwise warn about unprompted; irrelevant here.
+  fit <- suppressWarnings(mod$sample(
     data = list(),
     iter_warmup = 1,
     iter_sampling = 1,
@@ -462,7 +468,7 @@ test_that("sample() accepts a tuple/complex init list end to end", {
     show_messages = FALSE,
     init = list(t = list(0, c(0, 0)), z = 0 + 0i),
     num_threads = test_threads()
-  )
+  ))
   expect_equal(fit$return_codes(), 0L)
 })
 

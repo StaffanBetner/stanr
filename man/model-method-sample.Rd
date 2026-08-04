@@ -100,6 +100,13 @@ proposal rejections and rejected initial values. Set to \code{FALSE} to
 silence them. Suppressed messages are still recorded and available via
 the fit's \verb{$output()} method.}
 
+\item{diagnostics}{(character vector) Which sampler diagnostics to check
+immediately after sampling, printing a warning message for any problems
+found -- see \code{\link[=fit-method-mcmc]{$diagnostic_summary()}}. One or more of
+\code{"divergences"}, \code{"treedepth"}, and \code{"ebfmi"}. The default checks all
+three; \code{NULL} or \code{""} skips the check entirely. Ignored when
+\code{fixed_param = TRUE}.}
+
 \item{engine}{(string) The sampling engine: \code{"nuts"} or \code{"static"}.}
 
 \item{int_time}{(number) Integration time for static HMC.}
