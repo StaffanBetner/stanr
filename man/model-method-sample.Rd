@@ -55,10 +55,7 @@ list may include tuple-shaped list entries and R complex values for
 \item{chain_ids}{(integer vector) The IDs for each chain.}
 
 \item{num_threads}{(integer) The total number of threads to use across all
-chains. The request is capped at the machine's hardware concurrency, and
-any other active TBB \code{global_control} in the process (e.g. from
-\code{RcppParallel::setThreadOptions()}) can lower the effective count
-further.}
+chains. Defaults to \code{-1} (all available threads).}
 
 \item{iter_warmup}{(integer) The number of warmup iterations.}
 

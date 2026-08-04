@@ -805,10 +805,7 @@ StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 #' @param chains (integer) The number of MCMC chains.
 #' @param chain_ids (integer vector) The IDs for each chain.
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains. The request is capped at the machine's hardware concurrency, and
-#'   any other active TBB `global_control` in the process (e.g. from
-#'   `RcppParallel::setThreadOptions()`) can lower the effective count
-#'   further.
+#'   chains. Defaults to `-1` (all available threads).
 #' @param iter_warmup (integer) The number of warmup iterations.
 #' @param iter_sampling (integer) The number of sampling iterations.
 #' @param save_warmup (logical) Should warmup samples be saved? Ignored when
@@ -861,7 +858,7 @@ stan_model_sample <- function(
   sig_figs = NULL,
   chains = 4,
   chain_ids = seq_len(chains),
-  num_threads = getOption("mc.cores", 1),
+  num_threads = -1,
   opencl_ids = NULL,
   iter_warmup = 1000L,
   iter_sampling = 1000L,
@@ -1113,11 +1110,8 @@ StanModel$set("public", "sample", stan_model_sample)
 #'   including the initial point) instead of a single row for the final
 #'   estimate. [`$mle()`][fit-method-mle] is unaffected either way and always
 #'   reflects the final iteration.
-#' @param num_threads (integer) The total number of threads to use. The
-#'   request is capped at the machine's hardware concurrency, and any other
-#'   active TBB `global_control` in the process (e.g. from
-#'   `RcppParallel::setThreadOptions()`) can lower the effective count
-#'   further.
+#' @param num_threads (integer) The total number of threads to use across all
+#'   chains. Defaults to `-1` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanMLE`] object containing the point estimate.
@@ -1135,7 +1129,7 @@ stan_model_optimize <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = NULL,
+  num_threads = -1,
   opencl_ids = NULL,
   algorithm = "lbfgs",
   jacobian = FALSE,
@@ -1264,11 +1258,8 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #' @param draws (integer) The number of draws from the Laplace approximation.
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
-#' @param num_threads (integer) The total number of threads to use. The
-#'   request is capped at the machine's hardware concurrency, and any other
-#'   active TBB `global_control` in the process (e.g. from
-#'   `RcppParallel::setThreadOptions()`) can lower the effective count
-#'   further.
+#' @param num_threads (integer) The total number of threads to use across all
+#'   chains. Defaults to `-1` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanLaplace`] object containing approximate posterior draws.
@@ -1286,7 +1277,7 @@ stan_model_laplace <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = NULL,
+  num_threads = -1,
   opencl_ids = NULL,
   mode = NULL,
   opt_args = NULL,
@@ -1446,11 +1437,8 @@ StanModel$set("public", "laplace", stan_model_laplace)
 #' @param tol_rel_obj (number) Relative tolerance for ELBO convergence.
 #' @param eval_elbo (integer) How often to evaluate the ELBO.
 #' @param draws (integer) The number of draws from the variational approximation.
-#' @param num_threads (integer) The total number of threads to use. The
-#'   request is capped at the machine's hardware concurrency, and any other
-#'   active TBB `global_control` in the process (e.g. from
-#'   `RcppParallel::setThreadOptions()`) can lower the effective count
-#'   further.
+#' @param num_threads (integer) The total number of threads to use across all
+#'   chains. Defaults to `-1` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanVB`] object containing approximate posterior draws.
@@ -1469,7 +1457,7 @@ stan_model_variational <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = NULL,
+  num_threads = -1,
   opencl_ids = NULL,
   algorithm = "meanfield",
   iter = 10000L,
@@ -1598,11 +1586,8 @@ StanModel$set("public", "variational", stan_model_variational)
 #' @param psis_resample (logical) Should Pareto smoothed importance sampling
 #'   resampling be used?
 #' @param calculate_lp (logical) Should the log density be calculated?
-#' @param num_threads (integer) The total number of threads to use. The
-#'   request is capped at the machine's hardware concurrency, and any other
-#'   active TBB `global_control` in the process (e.g. from
-#'   `RcppParallel::setThreadOptions()`) can lower the effective count
-#'   further.
+#' @param num_threads (integer) The total number of threads to use across all
+#'   chains. Defaults to `-1` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanPathfinder`] object containing approximate posterior draws.
@@ -1620,7 +1605,7 @@ stan_model_pathfinder <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = NULL,
+  num_threads = -1,
   opencl_ids = NULL,
   init_alpha = 0.001,
   tol_obj = 1e-12,
@@ -1748,7 +1733,8 @@ StanModel$set("public", "pathfinder", stan_model_pathfinder)
 #'   [posterior::as_draws_matrix()], containing draws with every model
 #'   parameter present by name (e.g. `beta[1]`, not a positional column).
 #' @template param-data
-#' @param num_threads (integer) The total number of threads to use.
+#' @param num_threads (integer) The total number of threads to use across all
+#'   chains. Defaults to `-1` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanGQ`] object containing the generated quantities.
@@ -1764,7 +1750,7 @@ stan_model_generate_quantities <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = getOption("mc.cores", 1),
+  num_threads = -1,
   opencl_ids = NULL,
   show_messages = TRUE,
   show_exceptions = TRUE
@@ -1884,7 +1870,7 @@ stan_model_diagnose <- function(
       init_radius = resolved_init$radius,
       verbose = show_messages,
       show_exceptions = show_exceptions,
-      num_threads = 1L,
+      num_threads = -1,
       init = resolved_init$values
     )
   }
