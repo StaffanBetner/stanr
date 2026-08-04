@@ -68,7 +68,7 @@ or \code{"fullrank"}.}
 \item{draws}{(integer) The number of draws from the variational approximation.}
 
 \item{num_threads}{(integer) The total number of threads to use across all
-chains. Defaults to \code{-1} (all available threads).}
+chains. Defaults to \code{parallel::detectCores()} (all available threads).}
 
 \item{opencl_ids}{(integer vector) \code{c(platform_id, device_id)} identifying
 the OpenCL platform/device to run on. Only meaningful for a model

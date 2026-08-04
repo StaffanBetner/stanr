@@ -805,7 +805,7 @@ StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 #' @param chains (integer) The number of MCMC chains.
 #' @param chain_ids (integer vector) The IDs for each chain.
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `-1` (all available threads).
+#'   chains. Defaults to `parallel::detectCores()` (all available threads).
 #' @param iter_warmup (integer) The number of warmup iterations.
 #' @param iter_sampling (integer) The number of sampling iterations.
 #' @param save_warmup (logical) Should warmup samples be saved? Ignored when
@@ -858,7 +858,7 @@ stan_model_sample <- function(
   sig_figs = NULL,
   chains = 4,
   chain_ids = seq_len(chains),
-  num_threads = -1,
+  num_threads = parallel::detectCores(),
   opencl_ids = NULL,
   iter_warmup = 1000L,
   iter_sampling = 1000L,
@@ -1111,7 +1111,7 @@ StanModel$set("public", "sample", stan_model_sample)
 #'   estimate. [`$mle()`][fit-method-mle] is unaffected either way and always
 #'   reflects the final iteration.
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `-1` (all available threads).
+#'   chains. Defaults to `parallel::detectCores()` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanMLE`] object containing the point estimate.
@@ -1129,7 +1129,7 @@ stan_model_optimize <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = -1,
+  num_threads = parallel::detectCores(),
   opencl_ids = NULL,
   algorithm = "lbfgs",
   jacobian = FALSE,
@@ -1259,7 +1259,7 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `-1` (all available threads).
+#'   chains. Defaults to `parallel::detectCores()` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanLaplace`] object containing approximate posterior draws.
@@ -1277,7 +1277,7 @@ stan_model_laplace <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = -1,
+  num_threads = parallel::detectCores(),
   opencl_ids = NULL,
   mode = NULL,
   opt_args = NULL,
@@ -1438,7 +1438,7 @@ StanModel$set("public", "laplace", stan_model_laplace)
 #' @param eval_elbo (integer) How often to evaluate the ELBO.
 #' @param draws (integer) The number of draws from the variational approximation.
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `-1` (all available threads).
+#'   chains. Defaults to `parallel::detectCores()` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanVB`] object containing approximate posterior draws.
@@ -1457,7 +1457,7 @@ stan_model_variational <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = -1,
+  num_threads = parallel::detectCores(),
   opencl_ids = NULL,
   algorithm = "meanfield",
   iter = 10000L,
@@ -1587,7 +1587,7 @@ StanModel$set("public", "variational", stan_model_variational)
 #'   resampling be used?
 #' @param calculate_lp (logical) Should the log density be calculated?
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `-1` (all available threads).
+#'   chains. Defaults to `parallel::detectCores()` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanPathfinder`] object containing approximate posterior draws.
@@ -1605,7 +1605,7 @@ stan_model_pathfinder <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = -1,
+  num_threads = parallel::detectCores(),
   opencl_ids = NULL,
   init_alpha = 0.001,
   tol_obj = 1e-12,
@@ -1734,7 +1734,7 @@ StanModel$set("public", "pathfinder", stan_model_pathfinder)
 #'   parameter present by name (e.g. `beta[1]`, not a positional column).
 #' @template param-data
 #' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `-1` (all available threads).
+#'   chains. Defaults to `parallel::detectCores()` (all available threads).
 #' @template param-opencl_ids
 #'
 #' @return A [`StanGQ`] object containing the generated quantities.
@@ -1750,7 +1750,7 @@ stan_model_generate_quantities <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  num_threads = -1,
+  num_threads = parallel::detectCores(),
   opencl_ids = NULL,
   show_messages = TRUE,
   show_exceptions = TRUE
@@ -1870,7 +1870,7 @@ stan_model_diagnose <- function(
       init_radius = resolved_init$radius,
       verbose = show_messages,
       show_exceptions = show_exceptions,
-      num_threads = -1,
+      num_threads = parallel::detectCores(),
       init = resolved_init$values
     )
   }

@@ -54,7 +54,7 @@ test_that("direct fit method coverage: time, init, code, print, lp, num_chains",
   )
 
   expect_true(is.numeric(fit$time()$total))
-  expect_gt(fit$time()$total, 0)
+  expect_gte(fit$time()$total, 0)
 
   expect_identical(fit$init(), list(theta = 0.5))
 

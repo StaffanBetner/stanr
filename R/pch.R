@@ -6,7 +6,16 @@
 # lived in PKG_CPPFLAGS. Defined once and shared between the model TU compile
 # (R/stan_model.R) and the precompiled header build below so the two stay
 # byte-identical -- GCC/clang reject a PCH built with mismatched flags.
-.newstan_opt_flags <- "-O3 -g0 -w"
+.newstan_opt_flags <- function() {
+  flags <- "-O3 -g0 -w"
+
+  # Floating-point contraction handling can cause numerical inaccuracies
+  # at double-precision on ARM64
+  if (.Platform$r_arch == "aarch64") {
+    flags <- paste(flags, "-ffp-contract=off")
+  }
+}
+
 
 #' Thin wrapper around `system2()`.
 #'

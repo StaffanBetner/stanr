@@ -14,6 +14,13 @@ endif
 
 PKG_LIBS += $(TBB_LIBS)
 
+# Floating-point contraction handling can cause numerical inaccuracies
+# at double-precision on ARM64
+ARM64_CHECK := $(shell echo | $(CXX) -E -dM -  | $(STR_SEARCH) __aarch64__)
+ifneq ($(ARM64_CHECK),)
+  PKG_CPPFLAGS += -ffp-contract=off
+endif
+
 SUNDIALS_CVODES := \
 	$(wildcard math/lib/sundials_*/src/cvodes/*.c) \
 	$(wildcard math/lib/sundials_*/src/sundials/*.c) \
