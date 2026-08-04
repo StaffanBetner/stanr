@@ -28,6 +28,7 @@
 #include "r_worker.hpp"
 #include <stanr/r_data_context.hpp>
 #include "stack_writer_chains.hpp"
+#include "run_walnuts.hpp"
 
 namespace stanr {
 
@@ -84,8 +85,12 @@ namespace stanr {
 
   template <class Model>
   Rcpp::List run_sampling(Model& model, Rcpp::List args) {
-    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
     const std::string engine = Rcpp::as<std::string>(args["engine"]);
+    if (engine == "walnuts") {
+      return run_walnuts(model, args);
+    }
+
+    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
     const std::string metric = Rcpp::as<std::string>(args["metric"]);
     const bool adapt_engaged = Rcpp::as<bool>(args["adapt_engaged"]);
     const bool verbose = Rcpp::as<bool>(args["verbose"]);

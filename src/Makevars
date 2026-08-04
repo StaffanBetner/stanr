@@ -55,6 +55,7 @@ package:
 	@cp -Rf math/lib/sundials_*/src/sundials .
 	@rm -rf ../inst/include/stanr
 	@cp -Rf include/. ../inst/include/stanr
+	@cp -Rf walnutpie/include/. ../inst/include/
 
 static: $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 	@mkdir -p ../inst/lib/$(R_ARCH)

@@ -752,12 +752,41 @@ StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 #'   `"divergences"`, `"treedepth"`, and `"ebfmi"`. The default checks all
 #'   three; `NULL` or `""` skips the check entirely. Ignored when
 #'   `fixed_param = TRUE`.
-#' @param engine (string) The sampling engine: `"nuts"` or `"static"`.
+#' @param engine (string) The sampling engine: `"nuts"`, `"static"`, or
+#'   `"walnuts"` (see [walnutpie](https://github.com/flatironinstitute/walnutpie)).
+#'   `walnuts` only supports `metric = "diag_e"` and `adapt_engaged = TRUE`.
+#'   It reuses `max_treedepth` as the maximum trajectory doublings,
+#'   `adapt_delta` as the step size acceptance target, and `step_size` as the
+#'   initial step size; `refresh`, `step_size_jitter`, `init_buffer`,
+#'   `term_buffer`, `window`, and `adapt_gamma`/`adapt_kappa`/`adapt_t0` are
+#'   ignored, and no sampler diagnostics or progress output are produced.
 #' @param int_time (number) Integration time for static HMC.
 #' @param step_size_jitter (number) Jitter for step size after adaptation.
 #' @param adapt_gamma (number) Adaptation hyperparameter for dual averaging.
 #' @param adapt_kappa (number) Adaptation hyperparameter for dual averaging.
 #' @param adapt_t0 (number) Adaptation hyperparameter for dual averaging.
+#' @param max_step_halvings (integer) `walnuts` only: maximum number of step
+#'   size halvings per macro step.
+#' @param min_micro_steps (integer) `walnuts` only: minimum number of micro
+#'   steps per macro step.
+#' @param max_hamiltonian_error (number) `walnuts` only: maximum allowed
+#'   error in the Hamiltonian at a macro step.
+#' @param mass_init_count (number) `walnuts` only: initial count for the
+#'   mass matrix estimator.
+#' @param mass_additive_smoothing (number) `walnuts` only: additive
+#'   smoothing for the mass matrix estimator.
+#' @param max_macro_steps_target (number) `walnuts` only: target number of
+#'   macro steps per iteration.
+#' @param step_learning_rate (number) `walnuts` only: learning rate for the
+#'   Adam step size adaptation.
+#' @param step_gradient_decay (number) `walnuts` only: gradient decay rate
+#'   for the Adam step size adaptation.
+#' @param step_sq_gradient_decay (number) `walnuts` only: squared gradient
+#'   decay rate for the Adam step size adaptation.
+#' @param step_stabilization (number) `walnuts` only: stabilization term for
+#'   the Adam step size adaptation.
+#' @param step_learn_rate_decay (number) `walnuts` only: learning rate decay
+#'   exponent for the Adam step size adaptation.
 #' @template param-opencl_ids
 #'
 #' @return A [`StanMCMC`] object containing posterior draws and diagnostics.
@@ -800,7 +829,18 @@ stan_model_sample <- function(
   step_size_jitter = 0,
   adapt_gamma = 0.05,
   adapt_kappa = 0.75,
-  adapt_t0 = 10
+  adapt_t0 = 10,
+  max_step_halvings = 5L,
+  min_micro_steps = 1L,
+  max_hamiltonian_error = 0.5,
+  mass_init_count = 4,
+  mass_additive_smoothing = 1e-5,
+  max_macro_steps_target = 15,
+  step_learning_rate = 0.05,
+  step_gradient_decay = 0.8,
+  step_sq_gradient_decay = 0.9,
+  step_stabilization = 1e-4,
+  step_learn_rate_decay = 0.5
 ) {
   save_latent_dynamics <- .stanr_flag(
     save_latent_dynamics,
@@ -839,14 +879,37 @@ stan_model_sample <- function(
       call. = FALSE
     )
   }
-  if (!engine %in% c("nuts", "static")) {
-    stop("`engine` must be one of \"nuts\", \"static\".", call. = FALSE)
+  if (!engine %in% c("nuts", "static", "walnuts")) {
+    stop(
+      "`engine` must be one of \"nuts\", \"static\", \"walnuts\".",
+      call. = FALSE
+    )
   }
   if (!metric %in% c("diag_e", "dense_e", "unit_e")) {
     stop(
       "`metric` must be one of \"diag_e\", \"dense_e\", \"unit_e\".",
       call. = FALSE
     )
+  }
+  if (engine == "walnuts") {
+    if (fixed_param) {
+      stop(
+        "`fixed_param` is not supported by `engine = \"walnuts\"`.",
+        call. = FALSE
+      )
+    }
+    if (!adapt_engaged) {
+      stop(
+        "`adapt_engaged = FALSE` is not supported by `engine = \"walnuts\"`.",
+        call. = FALSE
+      )
+    }
+    if (metric != "diag_e") {
+      stop(
+        "`engine = \"walnuts\"` only supports `metric = \"diag_e\"`.",
+        call. = FALSE
+      )
+    }
   }
   ids <- .stanr_validate_chains(chains, chain_ids)
   chains <- ids$chains
@@ -881,8 +944,12 @@ stan_model_sample <- function(
   init_buffer <- .stanr_int(init_buffer, "init_buffer")
   term_buffer <- .stanr_int(term_buffer, "term_buffer")
   window <- .stanr_int(window, "window")
+  max_step_halvings <- .stanr_int(max_step_halvings, "max_step_halvings")
+  min_micro_steps <- .stanr_int(min_micro_steps, "min_micro_steps")
 
-  diagnostic_vars <- if (!fixed_param && engine == "static") {
+  diagnostic_vars <- if (engine == "walnuts") {
+    character()
+  } else if (!fixed_param && engine == "static") {
     c("accept_stat__", "stepsize__", "int_time__")
   } else {
     c(
@@ -926,7 +993,18 @@ stan_model_sample <- function(
       verbose = show_messages,
       show_exceptions = show_exceptions,
       num_threads = num_threads,
-      diagnostic_names = diagnostic_vars
+      diagnostic_names = diagnostic_vars,
+      max_step_halvings = max_step_halvings,
+      min_micro_steps = min_micro_steps,
+      max_hamiltonian_error = as.double(max_hamiltonian_error),
+      mass_init_count = as.double(mass_init_count),
+      mass_additive_smoothing = as.double(mass_additive_smoothing),
+      max_macro_steps_target = as.double(max_macro_steps_target),
+      step_learning_rate = as.double(step_learning_rate),
+      step_gradient_decay = as.double(step_gradient_decay),
+      step_sq_gradient_decay = as.double(step_sq_gradient_decay),
+      step_stabilization = as.double(step_stabilization),
+      step_learn_rate_decay = as.double(step_learn_rate_decay)
     )
     if (!is.null(inv_metric)) {
       native$inv_metric <- inv_metric
@@ -939,7 +1017,13 @@ stan_model_sample <- function(
       list(draws = NULL, diagnostics = NULL)
     } else {
       draws <- posterior::as_draws_array(result$samples)
-      diagnostics <- if (dim(result$diagnostics)[3] > 0) {
+      # walnuts collects no sampler diagnostics; a zero-variable array keeps
+      # the diagnostic checks honestly silent. Other engines that emit no
+      # diagnostic columns keep the all-NA placeholder (see
+      # `$diagnostic_summary()`).
+      diagnostics <- if (
+        engine == "walnuts" || dim(result$diagnostics)[3] > 0
+      ) {
         posterior::as_draws_array(result$diagnostics)
       } else {
         posterior::draws_df(

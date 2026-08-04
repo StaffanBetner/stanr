@@ -29,8 +29,8 @@ diagnostic: \code{num_divergent} (divergent transitions per chain),
 \code{num_max_treedepth} (iterations per chain that hit the max treedepth),
 and/or \code{ebfmi} (E-BFMI per chain). An element is \code{NA} for every chain if
 the corresponding diagnostic was not collected (e.g. \code{divergent__}/
-\code{treedepth__}/\code{energy__} are unavailable for the \code{static} engine, or are
-all-\code{NA} for \code{fixed_param} runs).
+\code{treedepth__}/\code{energy__} are unavailable for the \code{static} and \code{walnuts}
+engines, or are all-\code{NA} for \code{fixed_param} runs).
 \item \verb{$inv_metric()} returns a list (one element per chain) of the inverse
 mass matrix adapted during sampling. Errors if the fit was not sampled
 with adaptation.

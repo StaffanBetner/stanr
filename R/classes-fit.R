@@ -843,8 +843,8 @@ StanMCMC <- R6Class(
 #'   `num_max_treedepth` (iterations per chain that hit the max treedepth),
 #'   and/or `ebfmi` (E-BFMI per chain). An element is `NA` for every chain if
 #'   the corresponding diagnostic was not collected (e.g. `divergent__`/
-#'   `treedepth__`/`energy__` are unavailable for the `static` engine, or are
-#'   all-`NA` for `fixed_param` runs).
+#'   `treedepth__`/`energy__` are unavailable for the `static` and `walnuts`
+#'   engines, or are all-`NA` for `fixed_param` runs).
 #' * `$inv_metric()` returns a list (one element per chain) of the inverse
 #'   mass matrix adapted during sampling. Errors if the fit was not sampled
 #'   with adaptation.

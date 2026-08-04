@@ -106,7 +106,14 @@ found -- see \code{\link[=fit-method-mcmc]{$diagnostic_summary()}}. One or more 
 three; \code{NULL} or \code{""} skips the check entirely. Ignored when
 \code{fixed_param = TRUE}.}
 
-\item{engine}{(string) The sampling engine: \code{"nuts"} or \code{"static"}.}
+\item{engine}{(string) The sampling engine: \code{"nuts"}, \code{"static"}, or
+\code{"walnuts"} (see \href{https://github.com/flatironinstitute/walnutpie}{walnutpie}).
+\code{walnuts} only supports \code{metric = "diag_e"} and \code{adapt_engaged = TRUE}.
+It reuses \code{max_treedepth} as the maximum trajectory doublings,
+\code{adapt_delta} as the step size acceptance target, and \code{step_size} as the
+initial step size; \code{refresh}, \code{step_size_jitter}, \code{init_buffer},
+\code{term_buffer}, \code{window}, and \code{adapt_gamma}/\code{adapt_kappa}/\code{adapt_t0} are
+ignored, and no sampler diagnostics or progress output are produced.}
 
 \item{int_time}{(number) Integration time for static HMC.}
 
@@ -117,6 +124,39 @@ three; \code{NULL} or \code{""} skips the check entirely. Ignored when
 \item{adapt_kappa}{(number) Adaptation hyperparameter for dual averaging.}
 
 \item{adapt_t0}{(number) Adaptation hyperparameter for dual averaging.}
+
+\item{max_step_halvings}{(integer) \code{walnuts} only: maximum number of step
+size halvings per macro step.}
+
+\item{min_micro_steps}{(integer) \code{walnuts} only: minimum number of micro
+steps per macro step.}
+
+\item{max_hamiltonian_error}{(number) \code{walnuts} only: maximum allowed
+error in the Hamiltonian at a macro step.}
+
+\item{mass_init_count}{(number) \code{walnuts} only: initial count for the
+mass matrix estimator.}
+
+\item{mass_additive_smoothing}{(number) \code{walnuts} only: additive
+smoothing for the mass matrix estimator.}
+
+\item{max_macro_steps_target}{(number) \code{walnuts} only: target number of
+macro steps per iteration.}
+
+\item{step_learning_rate}{(number) \code{walnuts} only: learning rate for the
+Adam step size adaptation.}
+
+\item{step_gradient_decay}{(number) \code{walnuts} only: gradient decay rate
+for the Adam step size adaptation.}
+
+\item{step_sq_gradient_decay}{(number) \code{walnuts} only: squared gradient
+decay rate for the Adam step size adaptation.}
+
+\item{step_stabilization}{(number) \code{walnuts} only: stabilization term for
+the Adam step size adaptation.}
+
+\item{step_learn_rate_decay}{(number) \code{walnuts} only: learning rate decay
+exponent for the Adam step size adaptation.}
 
 \item{opencl_ids}{(integer vector) \code{c(platform_id, device_id)} identifying
 the OpenCL platform/device to run on. Only meaningful for a model

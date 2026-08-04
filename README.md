@@ -18,7 +18,7 @@ Results use `posterior` draw objects where possible.
 
 | Method | Purpose | Return type |
 |----|----|----|
-| `$sample()` | MCMC sampling (HMC/NUTS, static HMC, fixed param) | `StanMCMC` |
+| `$sample()` | MCMC sampling (HMC/NUTS, static HMC, WALNUTS, fixed param) | `StanMCMC` |
 | `$optimize()` | Posterior mode or maximum likelihood estimate | `StanMLE` |
 | `$laplace()` | Laplace approximation draws around a mode | `StanLaplace` |
 | `$variational()` | ADVI approximate posterior draws | `StanVB` |
@@ -228,6 +228,43 @@ posterior::variables(dense_fit$draws())
 #>  [1] "lp__"        "theta"       "log_lik[1]"  "log_lik[2]"  "log_lik[3]" 
 #>  [6] "log_lik[4]"  "log_lik[5]"  "log_lik[6]"  "log_lik[7]"  "log_lik[8]" 
 #> [11] "log_lik[9]"  "log_lik[10]"
+```
+
+### WALNUTS Engine
+
+`engine = "walnuts"` samples with
+[WALNUTS](https://github.com/flatironinstitute/walnutpie) instead of
+Stan’s NUTS – a locally-adaptive step size within each trajectory,
+useful for posteriors with varying curvature. It only supports
+`metric = "diag_e"` and `adapt_engaged = TRUE`.
+
+``` r
+walnuts_fit <- mod$sample(
+  data = data,
+  engine = "walnuts",
+  iter_warmup = 20,
+  iter_sampling = 20,
+  chains = 2,
+  seed = 123,
+  show_messages = FALSE
+)
+
+walnuts_fit$summary()
+#> # A tibble: 12 × 10
+#>    variable      mean median    sd   mad      q5    q95  rhat ess_bulk ess_tail
+#>    <chr>        <dbl>  <dbl> <dbl> <dbl>   <dbl>  <dbl> <dbl>    <dbl>    <dbl>
+#>  1 lp__        -8.79  -8.55  0.615 0.315 -10.1   -8.32   1.10    18.5      49.6
+#>  2 theta        0.525  0.536 0.133 0.119   0.317  0.753  1.30     7.70     56.9
+#>  3 log_lik[1]  -0.677 -0.623 0.268 0.207  -1.15  -0.284  1.30     7.70     56.9
+#>  4 log_lik[2]  -0.788 -0.769 0.307 0.265  -1.40  -0.382  1.30     7.70     56.9
+#>  5 log_lik[3]  -0.677 -0.623 0.268 0.207  -1.15  -0.284  1.30     7.70     56.9
+#>  6 log_lik[4]  -0.677 -0.623 0.268 0.207  -1.15  -0.284  1.30     7.70     56.9
+#>  7 log_lik[5]  -0.788 -0.769 0.307 0.265  -1.40  -0.382  1.30     7.70     56.9
+#>  8 log_lik[6]  -0.677 -0.623 0.268 0.207  -1.15  -0.284  1.30     7.70     56.9
+#>  9 log_lik[7]  -0.788 -0.769 0.307 0.265  -1.40  -0.382  1.30     7.70     56.9
+#> 10 log_lik[8]  -0.788 -0.769 0.307 0.265  -1.40  -0.382  1.30     7.70     56.9
+#> 11 log_lik[9]  -0.677 -0.623 0.268 0.207  -1.15  -0.284  1.30     7.70     56.9
+#> 12 log_lik[10] -0.788 -0.769 0.307 0.265  -1.40  -0.382  1.30     7.70     56.9
 ```
 
 ## Pathfinder

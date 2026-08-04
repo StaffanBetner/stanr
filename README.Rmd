@@ -29,7 +29,7 @@ with methods for extracting draws, summaries, and diagnostics. Results use
 
 | Method | Purpose | Return type |
 | --- | --- | --- |
-| `$sample()` | MCMC sampling (HMC/NUTS, static HMC, fixed param) | `StanMCMC` |
+| `$sample()` | MCMC sampling (HMC/NUTS, static HMC, WALNUTS, fixed param) | `StanMCMC` |
 | `$optimize()` | Posterior mode or maximum likelihood estimate | `StanMLE` |
 | `$laplace()` | Laplace approximation draws around a mode | `StanLaplace` |
 | `$variational()` | ADVI approximate posterior draws | `StanVB` |
@@ -198,6 +198,28 @@ dense_fit <- mod$sample(
 )
 
 posterior::variables(dense_fit$draws())
+```
+
+### WALNUTS Engine
+
+`engine = "walnuts"` samples with
+[WALNUTS](https://github.com/flatironinstitute/walnutpie) instead of Stan's
+NUTS -- a locally-adaptive step size within each trajectory, useful for
+posteriors with varying curvature. It only supports `metric = "diag_e"` and
+`adapt_engaged = TRUE`.
+
+```{r sampling-walnuts}
+walnuts_fit <- mod$sample(
+  data = data,
+  engine = "walnuts",
+  iter_warmup = 20,
+  iter_sampling = 20,
+  chains = 2,
+  seed = 123,
+  show_messages = FALSE
+)
+
+walnuts_fit$summary()
 ```
 
 ## Pathfinder
