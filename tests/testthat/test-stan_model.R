@@ -200,10 +200,19 @@ test_that("stan_model writes the .cpp and a built artifact under the resolved ca
   expect_equal(length(cpp_files_after), n_cpp_before)
 })
 
-test_that("force_recompile refreshes the cached artifact in place under cache_dir", {
+test_that("force_recompile builds a fresh artifact under cache_dir without retiring the mapped one", {
   cache_root <- withr::local_tempdir()
   withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
   cache_dir <- getOption("newstan_cache_dir")
+
+  artifacts <- function() {
+    list.files(
+      cache_dir,
+      pattern = "[.](so|dylib|dll)$",
+      recursive = TRUE,
+      full.names = TRUE
+    )
+  }
 
   code <- '
     parameters { real theta; }
@@ -212,15 +221,8 @@ test_that("force_recompile refreshes the cached artifact in place under cache_di
   mod <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
 
-  artifact_before <- list.files(
-    cache_dir,
-    pattern = "[.](so|dylib|dll)$",
-    recursive = TRUE,
-    full.names = TRUE
-  )
+  artifact_before <- artifacts()
   expect_gte(length(artifact_before), 1L)
-  artifact_dir <- unique(dirname(artifact_before))
-  expect_length(artifact_dir, 1L)
   rebuild_started <- Sys.time()
   Sys.sleep(1)
 
@@ -231,30 +233,16 @@ test_that("force_recompile refreshes the cached artifact in place under cache_di
   )
   expect_true(mod2$is_compiled())
 
-  artifact_after <- list.files(
-    artifact_dir,
-    pattern = "[.](so|dylib|dll)$",
-    full.names = TRUE
-  )
-  # The rebuild happens in place, under the same sourceCpp build directory
-  # inside cache_dir (sourceCpp itself may version the built filename, e.g.
-  # sourceCpp_2.so -> sourceCpp_3.so, removing the old one -- see
-  # Rcpp:::.sourceCppDynlibInsert / .sourceCppFindCacheEntryIndex). What
-  # matters on every platform is that this rebuild produced exactly one
-  # fresh artifact in that directory.
+  # The rebuild lands under cache_dir (not tempdir), and produces exactly one
+  # fresh artifact.
+  artifact_after <- artifacts()
   fresh <- artifact_after[file.info(artifact_after)$mtime > rebuild_started]
   expect_length(fresh, 1L)
 
-  # `mod` above still holds the superseded build mapped into this session.
-  # Rcpp retires it with file.remove(), which POSIX honours even while the
-  # file is mapped, so only the fresh artifact survives there. Windows
-  # refuses to unlink a mapped DLL (sourceCpp's own removal fails with
-  # "Permission denied"), so the superseded artifact legitimately lingers
-  # until the session ends -- a platform property, not a stale duplicate
-  # newstan failed to clean up.
-  if (.Platform$OS.type != "windows") {
-    expect_equal(length(artifact_after), 1L)
-  }
+  # `mod` still holds the superseded build mapped into this session, so the
+  # rebuild must not replace it (see `.newstan_forced_rebuild_target()`): it
+  # survives alongside the fresh artifact, on every platform.
+  expect_identical(setdiff(artifact_before, artifact_after), character())
 })
 
 test_that("model_hash is computed before stanc() is called, so a warm cache skips stanc entirely", {
@@ -322,6 +310,102 @@ test_that("the newstan_force_recompile option forces a fresh compile on a warm c
   mod2 <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod2$is_compiled())
   expect_equal(call_count, 2L)
+})
+
+test_that("a forced recompile loads an additional shared library and unloads none", {
+  cache_root <- withr::local_tempdir()
+  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+
+  code <- '
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+  '
+  mod <- stan_model(code = code, precompiled_headers = FALSE)
+  loaded_before <- newstan:::.newstan_loaded_dll_paths()
+
+  # Unloading the mapped library would leave `mod` (and any fit over the same
+  # program) holding pointers into unmapped memory -- see
+  # `.newstan_forced_rebuild_target()`.
+  mod$compile(force_recompile = TRUE, quiet = TRUE)
+  loaded_after <- newstan:::.newstan_loaded_dll_paths()
+
+  expect_identical(setdiff(loaded_before, loaded_after), character())
+  expect_gt(length(setdiff(loaded_after, loaded_before)), 0L)
+  expect_true(mod$is_compiled())
+
+  # The redirected rebuild leaves the canonical cache entry superseded; the
+  # stale marker is what stops the next session from loading it.
+  expect_length(
+    list.files(getOption("newstan_cache_dir"), pattern = "[.]stale$"),
+    1L
+  )
+})
+
+test_that(".newstan_forced_rebuild_target() redirects only while an artifact is mapped", {
+  # The decision itself, without paying for a compile. Cannot be covered
+  # end-to-end for the not-mapped branch: reaching it in-process would mean
+  # letting `sourceCpp()` unload a library this session is still using, which
+  # is the very crash under test.
+  registry <- newstan:::.newstan_dynlib_registry()
+  hash <- "0123456789abcdef"
+  cache <- withr::local_tempdir()
+  key <- newstan:::.newstan_registry_key(hash, cache)
+  withr::defer(suppressWarnings(rm(list = key, envir = registry)))
+
+  canonical <- file.path(cache, paste0("stan_", hash, ".cpp"))
+
+  # Nothing built yet, so there is nothing to pull out from under: stay on
+  # the canonical translation unit.
+  expect_equal(
+    newstan:::.newstan_forced_rebuild_target(hash, cache, TRUE),
+    list(cpp_file = canonical, alias = 0L)
+  )
+
+  # A recorded but unmapped artifact is still safe to rebuild in place.
+  newstan:::.newstan_register_dynlibs(
+    hash,
+    cache,
+    canonical,
+    0L,
+    "/no/such/lib.so"
+  )
+  expect_equal(
+    newstan:::.newstan_forced_rebuild_target(hash, cache, TRUE),
+    list(cpp_file = canonical, alias = 0L)
+  )
+
+  # A mapped one is not: redirect to an alias translation unit.
+  newstan:::.newstan_register_dynlibs(
+    hash,
+    cache,
+    canonical,
+    0L,
+    newstan:::.newstan_loaded_dll_paths()[[1L]]
+  )
+  redirected <- newstan:::.newstan_forced_rebuild_target(hash, cache, TRUE)
+  expect_identical(redirected$alias, 1L)
+  expect_false(identical(redirected$cpp_file, canonical))
+
+  # Once redirected, every later compile of this hash in this session stays on
+  # the redirected translation unit, so models over the same program share the
+  # newest artifact instead of splitting across old and new.
+  newstan:::.newstan_register_dynlibs(
+    hash,
+    cache,
+    redirected$cpp_file,
+    redirected$alias,
+    character()
+  )
+
+  # A different cache directory is a different set of artifacts on disk, with
+  # nothing of its own mapped, so it must not inherit this one's redirect.
+  other_cache <- withr::local_tempdir()
+  expect_identical(
+    newstan:::.newstan_forced_rebuild_target(hash, other_cache, TRUE)$alias,
+    0L
+  )
+  reused <- newstan:::.newstan_forced_rebuild_target(hash, cache, FALSE)
+  expect_identical(reused$cpp_file, redirected$cpp_file)
 })
 
 test_that("changing external_cpp file contents (same path) changes model_hash and triggers a fresh compile", {

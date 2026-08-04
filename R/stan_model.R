@@ -133,6 +133,134 @@
   cache_dir
 }
 
+#' Normalized paths of every shared library currently mapped into this session.
+#'
+#' @noRd
+.newstan_loaded_dll_paths <- function() {
+  vapply(
+    getLoadedDLLs(),
+    function(dll) normalizePath(dll[["path"]], winslash = "/", mustWork = FALSE),
+    character(1),
+    USE.NAMES = FALSE
+  )
+}
+
+#' Per-session record of the artifacts each cached translation unit produced.
+#'
+#' Entries are `list(cpp_file =, dynlibs =, alias =)`: the translation unit
+#' this session compiles that entry from, the shared libraries it has loaded
+#' for it, and how many forced rebuilds it has been redirected through.
+#' Consumed by `.newstan_forced_rebuild_target()`.
+#'
+#' @noRd
+.newstan_dynlib_registry <- function() {
+  if (is.null(.newstan_memo$dynlibs)) {
+    .newstan_memo$dynlibs <- new.env(parent = emptyenv())
+  }
+  .newstan_memo$dynlibs
+}
+
+#' Registry key: the canonical translation unit's path on disk.
+#'
+#' `model_hash` alone is not enough: it does not cover `cache_dir`, and the
+#' same program under a different `newstan_cache_dir` is a different set of
+#' artifacts with nothing of its own mapped, so it must not inherit another
+#' cache's redirects.
+#'
+#' @noRd
+.newstan_registry_key <- function(model_hash, cache_dir) {
+  normalizePath(
+    file.path(cache_dir, paste0("stan_", model_hash, ".cpp")),
+    winslash = "/",
+    mustWork = FALSE
+  )
+}
+
+#' Marker recording that a `model_hash`'s canonical cache entry is superseded.
+#'
+#' Written when a forced rebuild is redirected to an alias translation unit.
+#' Without it, the *next* session would load the superseded artifact from the
+#' canonical entry and silently undo the forced rebuild.
+#'
+#' @noRd
+.newstan_stale_marker <- function(model_hash, cache_dir) {
+  file.path(cache_dir, paste0("stan_", model_hash, ".stale"))
+}
+
+#' Decide which translation unit a (possibly forced) compile should build.
+#'
+#' `Rcpp::sourceCpp(rebuild = TRUE)` replaces a translation unit's shared
+#' library *in place*: it `dyn.unload()`s and deletes the previous one before
+#' building. Everything built from that library dies with it -- live fits'
+#' `model_ptr_`/`rng_ptr_` external pointers, the vtable their native calls
+#' dispatch through, and the `Rcpp::XPtr` finalizers R runs over them at the
+#' next garbage collection (not at process exit), which is where the session
+#' segfaults. Because the generated C++ is cached by content hash, two
+#' unrelated `StanModel` objects over the same program share one shared
+#' library, so one model's forced recompile can invalidate another model's
+#' live fits.
+#'
+#' A shared library must therefore never be unloaded while it is mapped. When
+#' one is, the forced rebuild is redirected to an alias translation unit,
+#' `stan_<hash>_r<N>.cpp`. `sourceCpp()` keys its build cache on the source
+#' path, so the alias gets its own build directory and loads an *additional*
+#' library; the mapped one stays mapped for the rest of the session. Later
+#' compiles of a redirected hash stay on the newest alias. The redirect
+#' target is always a translation unit this session has never loaded (`alias`
+#' only moves forward), so the caller can pass `rebuild = force_recompile`
+#' through to `sourceCpp()` unchanged: on the alias it can unload nothing
+#' mapped, and it guarantees a real rebuild even when a previous session left
+#' a byte-identical alias behind.
+#'
+#' @return `list(cpp_file =, alias =)`, where `alias` is 0 for the canonical
+#'   translation unit and the redirect counter otherwise.
+#' @noRd
+.newstan_forced_rebuild_target <- function(
+  model_hash,
+  cache_dir,
+  force_recompile
+) {
+  canonical <- .newstan_registry_key(model_hash, cache_dir)
+  entry <- .newstan_dynlib_registry()[[canonical]]
+  cpp_file <- entry$cpp_file %||%
+    file.path(cache_dir, paste0("stan_", model_hash, ".cpp"))
+  alias <- entry$alias %||% 0L
+  mapped <- any(
+    (entry$dynlibs %||% character()) %in% .newstan_loaded_dll_paths()
+  )
+  if (!force_recompile || !mapped) {
+    return(list(cpp_file = cpp_file, alias = alias))
+  }
+  alias <- alias + 1L
+  list(
+    cpp_file = file.path(
+      cache_dir,
+      sprintf("stan_%s_r%d.cpp", model_hash, alias)
+    ),
+    alias = alias
+  )
+}
+
+#' Record what a completed compile built and loaded.
+#'
+#' @noRd
+.newstan_register_dynlibs <- function(
+  model_hash,
+  cache_dir,
+  cpp_file,
+  alias,
+  dynlibs
+) {
+  registry <- .newstan_dynlib_registry()
+  key <- .newstan_registry_key(model_hash, cache_dir)
+  entry <- registry[[key]] %||% list(dynlibs = character())
+  entry$cpp_file <- cpp_file
+  entry$alias <- alias
+  entry$dynlibs <- union(entry$dynlibs, dynlibs)
+  registry[[key]] <- entry
+  invisible(entry)
+}
+
 # Kept in sync by hand with the `// [[Rcpp::export]]` function names in
 # inst/stan_model.cpp -- reserved so a combined-TU expose can't silently
 # shadow one of them.
@@ -221,7 +349,30 @@
 
   cache_dir <- .newstan_models_cache_dir()
 
-  cpp_file <- file.path(cache_dir, paste0("stan_", model_hash, ".cpp"))
+  stale_marker <- .newstan_stale_marker(model_hash, cache_dir)
+  # A forced rebuild redirected to an alias translation unit leaves the
+  # canonical cache entry holding the superseded artifact, so it is marked
+  # stale on disk. Honour that marker once per session, on the first compile
+  # of this hash -- the only point at which nothing has been built from the
+  # canonical entry yet, so rebuilding it in place is safe.
+  if (
+    !force_recompile &&
+      is.null(
+        .newstan_dynlib_registry()[[
+          .newstan_registry_key(model_hash, cache_dir)
+        ]]
+      ) &&
+      file.exists(stale_marker)
+  ) {
+    force_recompile <- TRUE
+  }
+
+  target <- .newstan_forced_rebuild_target(
+    model_hash,
+    cache_dir,
+    force_recompile
+  )
+  cpp_file <- target$cpp_file
   # Only invoked on a cache miss (nothing on disk matches `model_hash`).
   # `force_recompile` also forces regeneration here, since `sourceCpp(rebuild
   # = force_recompile)` below would otherwise silently reuse a stale `.cpp`.
@@ -351,6 +502,11 @@
     )
   }
 
+  # Diffed around the compile rather than derived from `cache_dir`, which is
+  # shared by every model: this has to attribute the shared library to *this*
+  # hash. A warm cache still loads its library here, so the first compile of a
+  # hash in a session always registers one.
+  loaded_before <- .newstan_loaded_dll_paths()
   .newstan_compile_with_pch_retry(
     compile_model,
     cppflags,
@@ -358,6 +514,19 @@
     pch_enabled,
     verbose
   )
+  .newstan_register_dynlibs(
+    model_hash,
+    cache_dir,
+    cpp_file,
+    target$alias,
+    setdiff(.newstan_loaded_dll_paths(), loaded_before)
+  )
+
+  if (target$alias > 0L) {
+    file.create(stale_marker, showWarnings = FALSE)
+  } else if (force_recompile) {
+    unlink(stale_marker)
+  }
 
   env
 }
@@ -525,16 +694,9 @@ stan_model <- function(
   if (!dir.exists(dir)) {
     return(character())
   }
-  normalize <- function(path) {
-    normalizePath(path, winslash = "/", mustWork = FALSE)
-  }
-  loaded <- vapply(
-    getLoadedDLLs(),
-    function(dll) normalize(dll[["path"]]),
-    character(1),
-    USE.NAMES = FALSE
-  )
-  loaded[startsWith(loaded, paste0(normalize(dir), "/"))]
+  loaded <- .newstan_loaded_dll_paths()
+  root <- normalizePath(dir, winslash = "/", mustWork = FALSE)
+  loaded[startsWith(loaded, paste0(root, "/"))]
 }
 
 #' Clear newstan's persistent compilation caches

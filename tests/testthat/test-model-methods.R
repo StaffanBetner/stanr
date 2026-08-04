@@ -407,9 +407,9 @@ test_that("model methods on a tuple-data fit still work after readRDS()", {
 })
 
 test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on a live fit", {
-  # A fresh (uncached) model/fit pair, so forcing a recompile here doesn't
-  # perturb the shared `.newstan_model_method_fit()` state used elsewhere in
-  # this file.
+  # Not an isolated pair: the generated C++ is cached by content hash, so this
+  # `mod` shares its shared library with the memoized fits used throughout
+  # this file, and forcing a recompile here reaches every live fit.
   mod <- stan_model(
     stan_file = test_path("test-models/model_methods.stan"),
     quiet = TRUE
@@ -427,6 +427,10 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
   upars <- c(0.2, -0.3, 0.4)
   expected_lp <- fit$log_prob(upars)
 
+  fit_private <- fit$.__enclos_env__$private
+  superseded_ptr <- fit_private$model_ptr_
+  loaded_before <- newstan:::.newstan_loaded_dll_paths()
+
   # Directly recompile the fit's underlying model while the fit is still
   # alive and holding a `model_ptr_` built against the *old* compiled
   # artifact -- this is the "generation changed mid-session" path from
@@ -434,7 +438,26 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
   # above.
   mod$compile(force_recompile = TRUE, quiet = TRUE)
 
+  # The invariant (see `.newstan_forced_rebuild_target()`): a forced recompile
+  # may load an additional shared library, but never unloads one.
+  expect_identical(
+    setdiff(loaded_before, newstan:::.newstan_loaded_dll_paths()),
+    character()
+  )
+
   expect_equal(fit$log_prob(upars), expected_lp, tolerance = 1e-10)
+
+  # ensure_native() must rebuild the pointer against the new artifact, not
+  # keep probing the superseded one.
+  expect_false(identical(fit_private$model_ptr_, superseded_ptr))
+  expect_identical(fit_private$native_generation_, mod$compile_generation())
+
+  # The original segfault fired only when a later GC ran the superseded
+  # pointers' finalizers; reaching the next expectation means both ran clean.
+  rm(fit, fit_private, superseded_ptr)
+  gc()
+  gc()
+  expect_true(mod$is_compiled())
 })
 
 test_that("ensure_native()'s probe is invoked exactly once across N consecutive native calls", {

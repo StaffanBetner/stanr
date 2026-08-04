@@ -182,7 +182,15 @@ StanFit <- R6Class(
       ) {
         return(invisible(NULL))
       }
-      private$initialize_pointer()
+      # A generation change means the model was recompiled underneath this
+      # fit: `model_ptr_`/`rng_ptr_` came from the superseded artifact and
+      # must be rebuilt, not probed through its vtable (see
+      # `.newstan_forced_rebuild_target()`). A restore (`native_generation_`
+      # NA) is not a generation change -- there the pointer is genuinely
+      # absent and the probe/recovery path below handles it.
+      generation_changed <- !is.na(private$native_generation_) &&
+        private$native_generation_ != private$model_$compile_generation()
+      private$initialize_pointer(force = generation_changed)
       probe <- private$model_$native_function(
         "model_num_upars",
         required = FALSE
