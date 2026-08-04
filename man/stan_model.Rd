@@ -69,7 +69,9 @@ has not been modified? The default is \code{FALSE}, but can be set via the
 \code{stanr_force_recompile} option.}
 
 \item{precompiled_headers}{(logical) Should precompiled headers be used to
-speed up compilation? The default is \code{TRUE}.}
+speed up compilation? The default is \code{TRUE}. Automatically disabled when
+\code{cpp_options} overrides compiler flags (e.g. \code{CXXFLAGS}), since the
+precompiled header is not built with those flags.}
 
 \item{quiet}{(logical) Should verbose output from compilation be suppressed?
 The default is \code{TRUE}.}

@@ -11,7 +11,6 @@
 
 #include <cmath>
 #include <cstddef>
-#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -77,11 +76,7 @@ Rcpp::XPtr<stan::rng_t> make_base_rng(unsigned int seed) {
 }
 
 int model_num_upars(const stan::model::model_base& model) {
-  const size_t count = model.num_params_r();
-  if (count > static_cast<size_t>(std::numeric_limits<int>::max())) {
-    throw std::overflow_error("The model has too many parameters for R.");
-  }
-  return static_cast<int>(count);
+  return static_cast<int>(model.num_params_r());
 }
 
 Rcpp::List model_param_metadata(
@@ -100,16 +95,6 @@ Rcpp::List model_param_metadata(
   model.get_param_names(all_names, true, true);
   model.get_dims(all_dims, true, true);
 
-  if (parameter_names.size() != parameter_dims.size()
-      || transformed_names.size() != transformed_dims.size()
-      || all_names.size() != all_dims.size()
-      || parameter_names.size() > transformed_names.size()
-      || transformed_names.size() > all_names.size()) {
-    throw std::runtime_error(
-        model_method_error_prefix(model, "model_param_metadata")
-        + "generated parameter names and dimensions are inconsistent.");
-  }
-
   Rcpp::CharacterVector names(all_names.size());
   Rcpp::List dimensions(all_names.size());
   Rcpp::CharacterVector stages(all_names.size());
@@ -117,12 +102,6 @@ Rcpp::List model_param_metadata(
     names[i] = all_names[i];
     Rcpp::IntegerVector dims(all_dims[i].size());
     for (size_t j = 0; j < all_dims[i].size(); ++j) {
-      if (all_dims[i][j]
-          > static_cast<size_t>(std::numeric_limits<int>::max())) {
-        throw std::overflow_error(
-            model_method_error_prefix(model, "model_param_metadata")
-            + "a declared dimension is too large for R.");
-      }
       dims[j] = static_cast<int>(all_dims[i][j]);
     }
     dimensions[i] = dims;
@@ -312,6 +291,61 @@ Rcpp::NumericMatrix model_unconstrain_matrix(
       = model_unconstrained_names(model);
   result.attr("dimnames")
       = Rcpp::List::create(R_NilValue, unconstrained_names);
+  attach_messages(result, messages);
+  return result;
+}
+
+Rcpp::NumericMatrix model_constrain_matrix(
+    const stan::model::model_base& model, stan::rng_t& rng,
+    Rcpp::NumericMatrix values, bool include_tparams, bool include_gqs) {
+  const int input_columns = model_num_upars(model);
+  if (values.ncol() != input_columns) {
+    throw std::invalid_argument(
+        model_method_error_prefix(model, "model_constrain_matrix")
+        + "expected " + std::to_string(input_columns)
+        + " unconstrained parameter column(s), but received "
+        + std::to_string(values.ncol()) + ".");
+  }
+
+  Rcpp::CharacterVector names
+      = model_constrained_names(model, include_tparams, include_gqs);
+  Rcpp::NumericMatrix result(values.nrow(), names.size());
+  std::ostringstream messages;
+  Eigen::VectorXd upars(input_columns);
+  Eigen::VectorXd constrained;
+  for (int row = 0; row < values.nrow(); ++row) {
+    for (int column = 0; column < input_columns; ++column) {
+      const double value = values(row, column);
+      if (!std::isfinite(value)) {
+        throw std::invalid_argument(
+            model_method_error_prefix(model, "model_constrain_matrix")
+            + "unconstrained parameter values must all be finite; row "
+            + std::to_string(row + 1) + ", column "
+            + std::to_string(column + 1) + " is not finite.");
+      }
+      upars[column] = value;
+    }
+
+    try {
+      model.write_array(rng, upars, constrained, include_tparams, include_gqs,
+                        &messages);
+    } catch (const std::exception& error) {
+      throw std::runtime_error(
+          model_method_error_prefix(model, "model_constrain_matrix")
+          + "row " + std::to_string(row + 1) + ": " + error.what());
+    }
+    if (constrained.size() != static_cast<Eigen::Index>(names.size())) {
+      throw std::runtime_error(
+          model_method_error_prefix(model, "model_constrain_matrix")
+          + "row " + std::to_string(row + 1)
+          + " produced an unexpected number of values.");
+    }
+    for (Eigen::Index column = 0; column < constrained.size(); ++column) {
+      result(row, column) = constrained[column];
+    }
+  }
+
+  result.attr("dimnames") = Rcpp::List::create(R_NilValue, names);
   attach_messages(result, messages);
   return result;
 }

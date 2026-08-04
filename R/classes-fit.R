@@ -138,6 +138,8 @@ StanFit <- R6Class(
     model_ptr_ = NULL,
     rng_ptr_ = NULL,
     native_generation_ = NA_integer_,
+    sized_structure_ = NULL,
+    sized_generation_ = NA_integer_,
     initialize_pointer = function(force = FALSE) {
       if (!inherits(private$model_, "StanModel")) {
         return(invisible(NULL))
@@ -215,6 +217,25 @@ StanFit <- R6Class(
     native_call = function(name, ...) {
       private$ensure_native()
       private$model_$native_function(name)(private$model_ptr_, ...)
+    },
+    # The sized-structure tree is immutable per compiled model, but building
+    # it costs a native metadata call plus an R recursion over every
+    # variable, so it is memoized per compile generation rather than rebuilt
+    # on every `constrain_variables()`/`variable_skeleton()` call.
+    sized_structure = function() {
+      private$ensure_native()
+      generation <- private$model_$compile_generation()
+      if (
+        is.null(private$sized_structure_) ||
+          !identical(private$sized_generation_, generation)
+      ) {
+        private$sized_structure_ <- .stanr_sized_structure(
+          private$model_,
+          private$native_call("model_param_metadata")
+        )
+        private$sized_generation_ <- generation
+      }
+      private$sized_structure_
     },
     check_jacobian = function(jacobian) {
       if (!is.logical(jacobian) || length(jacobian) != 1L || is.na(jacobian)) {
@@ -380,6 +401,11 @@ StanFit$set("public", "summary", fit_summary)
 NULL
 
 fit_print <- function(variables = NULL, ..., digits = 2, max_rows = 20) {
+  # Summarise only the variables that will print: ESS/R-hat over thousands
+  # of parameters just to `head()` the result is the expensive part.
+  if (is.null(variables) && !is.null(private$draws_)) {
+    variables <- utils::head(posterior::variables(private$draws_), max_rows)
+  }
   out <- self$summary(variables = variables, ...)
   print(utils::head(out, max_rows), digits = digits)
   invisible(self)
@@ -627,11 +653,9 @@ fit_constrain_variables <- function(
     as.logical(transformed_parameters),
     as.logical(generated_quantities)
   )
-  metadata <- private$native_call("model_param_metadata")
-  sized <- .stanr_sized_structure(private$model_, metadata)
   private$relist_constrained(
     flat,
-    sized,
+    private$sized_structure(),
     transformed_parameters,
     generated_quantities
   )
@@ -696,21 +720,10 @@ fit_unconstrain_draws <- function(
       call. = FALSE
     )
   }
+  # `subset_draws()` returns columns in `draw_names` order, which is
+  # load-bearing: the native call expects native constrained-parameter order.
   values <- posterior::as_draws_matrix(
     posterior::subset_draws(source, variable = draw_names)
-  )
-  # `subset_draws(..., variable = draw_names)` already returns columns in
-  # `draw_names` order (not some canonical order), but the column order here
-  # is load-bearing -- the native call expects native constrained-parameter
-  # order -- so reorder explicitly to be safe against future posterior
-  # versions. `model_unconstrain_matrix` also expects a plain numeric
-  # matrix (via Rcpp::NumericMatrix), not a classed `draws_matrix`, so strip
-  # the class/attributes defensively.
-  values <- values[, draw_names, drop = FALSE]
-  values <- matrix(
-    as.numeric(values),
-    nrow = nrow(values),
-    dimnames = dimnames(values)
   )
   result <- private$model_$native_function("model_unconstrain_matrix")(
     private$model_ptr_,
@@ -740,10 +753,8 @@ fit_variable_skeleton <- function(
     generated_quantities,
     "generated_quantities"
   )
-  metadata <- private$native_call("model_param_metadata")
-  sized <- .stanr_sized_structure(private$model_, metadata)
   private$metadata_skeleton(
-    sized,
+    private$sized_structure(),
     transformed_parameters = transformed_parameters,
     generated_quantities = generated_quantities
   )
@@ -1177,7 +1188,7 @@ fit_loo <- function(
   }
 
   if (moment_match) {
-    suppressWarnings(loo_result <- loo::loo.array(LLarray, r_eff = r_eff, ...))
+    loo_result <- suppressWarnings(loo::loo.array(LLarray, r_eff = r_eff, ...))
 
     log_lik_i <- function(x, i, parameter_name = "log_lik", ...) {
       ll_array <- x$draws(variables = parameter_name, format = "draws_array")[,,
@@ -1187,10 +1198,25 @@ fit_loo <- function(
       ll_array
     }
 
+    # One batched native call per observation instead of a per-draw
+    # `constrain_variables()` loop (which re-lists the full variable
+    # structure for every draw).
     log_lik_i_upars <- function(x, upars, i, parameter_name = "log_lik", ...) {
-      apply(upars, 1, function(up_i) {
-        x$constrain_variables(up_i)[[parameter_name]][i]
-      })
+      private$ensure_native()
+      constrained <- private$model_$native_function("model_constrain_matrix")(
+        private$model_ptr_,
+        private$rng_ptr_,
+        upars,
+        TRUE,
+        TRUE
+      )
+      colnames(constrained) <- .stanr_bracket_names(colnames(constrained))
+      target <- paste0(parameter_name, "[", i, "]")
+      # A scalar log-lik variable has no bracketed element name.
+      if (!target %in% colnames(constrained)) {
+        target <- parameter_name
+      }
+      constrained[, target]
     }
 
     loo::loo_moment_match.default(
@@ -1340,6 +1366,16 @@ mle_summary <- function(variables = NULL, ...) {
   )
 }
 StanMLE$set("public", "summary", mle_summary)
+
+# `mle_summary()` is O(n) and its variable domain excludes `lp__` (present in
+# `draws_`), so the base print's draws-derived variable subsetting neither
+# applies nor helps here.
+mle_print <- function(variables = NULL, ..., digits = 2, max_rows = 20) {
+  out <- self$summary(variables = variables, ...)
+  print(utils::head(out, max_rows), digits = digits)
+  invisible(self)
+}
+StanMLE$set("public", "print", mle_print)
 
 # StanLaplace class ------------------------------------------------------------
 

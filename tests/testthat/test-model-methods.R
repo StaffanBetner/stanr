@@ -189,6 +189,37 @@ test_that("constraining and unconstraining preserve structure and values", {
   )
 })
 
+test_that("model_constrain_matrix matches per-draw constrain_variables()", {
+  fit <- .stanr_model_method_fit()
+  upars <- rbind(c(0, 0.5, -0.5), c(1, -1, 0.25))
+
+  # include_gqs = FALSE keeps both paths deterministic (no RNG involved).
+  fit_private <- fit$.__enclos_env__$private
+  constrained <- fit_private$native_call(
+    "model_constrain_matrix",
+    fit_private$rng_ptr_,
+    upars,
+    TRUE,
+    FALSE
+  )
+  expect_equal(dim(constrained), c(2L, 4L))
+  expect_equal(
+    colnames(constrained),
+    c("theta", "beta.1", "beta.2", "beta_sum")
+  )
+
+  row2 <- fit$constrain_variables(
+    upars[2, ],
+    transformed_parameters = TRUE,
+    generated_quantities = FALSE
+  )
+  expect_equal(
+    unname(constrained[2, ]),
+    c(row2$theta, as.numeric(row2$beta), row2$beta_sum),
+    tolerance = 1e-12
+  )
+})
+
 test_that("model-method RNG is fit-local and advances across calls", {
   fit <- .stanr_model_method_fit()
   upars <- c(0, 0.5, -0.5)
@@ -540,8 +571,7 @@ test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tupl
   expect_equal(back$t[[1]], x$t[[1]], tolerance = 1e-10)
   expect_equal(as.numeric(back$t[[2]]), x$t[[2]], tolerance = 1e-10)
   expect_equal(back$z, x$z, tolerance = 1e-10)
-  # Canonical shape: a single-dim tuple-slot leaf is a bare vector, not a
-  # 1-d array (distinct from the legacy top-level-real convention).
+  # Canonical shape: a single-dim leaf is a bare vector, not a 1-d array.
   expect_null(dim(back$t[[2]]))
 })
 

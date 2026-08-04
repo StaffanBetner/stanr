@@ -96,9 +96,35 @@
 # OpenCL-specific flags on top of this when `use_opencl = TRUE`.
 .stanr_base_cppflags <- function() {
   paste(
-    paste0("-I", shQuote(system.file("include", package = "stanr", mustWork = TRUE))),
+    paste0(
+      "-I",
+      shQuote(system.file("include", package = "stanr", mustWork = TRUE))
+    ),
     "-D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS"
   )
+}
+
+# A `cpp_options` assignment to a compiler-facing Makevars variable changes
+# flags the PCH was not built with; GCC then quietly falls back to the plain
+# header while clang can reject the PCH outright (e.g. a `-std=` or `-D`
+# override), so PCH is skipped for such compiles.
+.stanr_cpp_options_block_pch <- function(assignments) {
+  compiler_vars <- c(
+    "CPPFLAGS",
+    "PKG_CPPFLAGS",
+    "CXX",
+    "CXXFLAGS",
+    "CXXPICFLAGS",
+    "CXX17",
+    "CXX17STD",
+    "CXX17FLAGS",
+    "CXX17PICFLAGS"
+  )
+  any(vapply(
+    assignments,
+    function(a) a$name %in% compiler_vars,
+    logical(1)
+  ))
 }
 
 # Stable sort by name: reordering unrelated `cpp_options` entries must not
@@ -139,7 +165,9 @@
 .stanr_loaded_dll_paths <- function() {
   vapply(
     getLoadedDLLs(),
-    function(dll) normalizePath(dll[["path"]], winslash = "/", mustWork = FALSE),
+    function(dll) {
+      normalizePath(dll[["path"]], winslash = "/", mustWork = FALSE)
+    },
     character(1),
     USE.NAMES = FALSE
   )
@@ -189,28 +217,14 @@
 
 #' Decide which translation unit a (possibly forced) compile should build.
 #'
-#' `Rcpp::sourceCpp(rebuild = TRUE)` replaces a translation unit's shared
-#' library *in place*: it `dyn.unload()`s and deletes the previous one before
-#' building. Everything built from that library dies with it -- live fits'
-#' `model_ptr_`/`rng_ptr_` external pointers, the vtable their native calls
-#' dispatch through, and the `Rcpp::XPtr` finalizers R runs over them at the
-#' next garbage collection (not at process exit), which is where the session
-#' segfaults. Because the generated C++ is cached by content hash, two
-#' unrelated `StanModel` objects over the same program share one shared
-#' library, so one model's forced recompile can invalidate another model's
-#' live fits.
-#'
-#' A shared library must therefore never be unloaded while it is mapped. When
-#' one is, the forced rebuild is redirected to an alias translation unit,
-#' `stan_<hash>_r<N>.cpp`. `sourceCpp()` keys its build cache on the source
-#' path, so the alias gets its own build directory and loads an *additional*
-#' library; the mapped one stays mapped for the rest of the session. Later
-#' compiles of a redirected hash stay on the newest alias. The redirect
-#' target is always a translation unit this session has never loaded (`alias`
-#' only moves forward), so the caller can pass `rebuild = force_recompile`
-#' through to `sourceCpp()` unchanged: on the alias it can unload nothing
-#' mapped, and it guarantees a real rebuild even when a previous session left
-#' a byte-identical alias behind.
+#' `Rcpp::sourceCpp(rebuild = TRUE)` `dyn.unload()`s and replaces the previous
+#' shared library in place; live fits' external pointers (and their XPtr
+#' finalizers, run at the next GC) then segfault. So a mapped library is never
+#' rebuilt in place: the forced rebuild is redirected to an alias translation
+#' unit `stan_<hash>_r<N>.cpp`, which gets its own sourceCpp build dir and
+#' loads an *additional* library. `alias` only moves forward, so the redirect
+#' target is never mapped in this session and `rebuild = force_recompile`
+#' passes through to `sourceCpp()` unchanged.
 #'
 #' @return `list(cpp_file =, alias =)`, where `alias` is 0 for the canonical
 #'   translation unit and the redirect counter otherwise.
@@ -279,6 +293,7 @@
   "model_unconstrain",
   "model_unconstrain_matrix",
   "model_constrain",
+  "model_constrain_matrix",
   "select_opencl_device"
 )
 
@@ -464,7 +479,11 @@
   }
   base_cppflags <- cppflags
   pch_enabled <- FALSE
-  if (precompiled_headers && length(external_cpp) == 0) {
+  if (
+    precompiled_headers &&
+      length(external_cpp) == 0 &&
+      !.stanr_cpp_options_block_pch(extra_assignments)
+  ) {
     pch_flags <- .stanr_pch_flags(base_cppflags, verbose)
     pch_enabled <- nzchar(pch_flags)
     cppflags <- paste(pch_flags, base_cppflags)
@@ -585,7 +604,9 @@
 #'   has not been modified? The default is `FALSE`, but can be set via the
 #'   `stanr_force_recompile` option.
 #' @param precompiled_headers (logical) Should precompiled headers be used to
-#'   speed up compilation? The default is `TRUE`.
+#'   speed up compilation? The default is `TRUE`. Automatically disabled when
+#'   `cpp_options` overrides compiler flags (e.g. `CXXFLAGS`), since the
+#'   precompiled header is not built with those flags.
 #' @param quiet (logical) Should verbose output from compilation be suppressed?
 #'   The default is `TRUE`.
 #' @param external_cpp (character vector) Paths to C++ files to prepend to the

@@ -393,16 +393,13 @@
 # One tree node is built per base variable name (e.g. `t`, never `t.1`/
 # `t.2`), and is one of:
 #
-#   * a *leaf* node: `list(kind = <"real"|"int"|"complex">, dims = <int>,
-#     legacy = <lgl>)`. `dims` is the leaf's own container dims -- for a
-#     top-level (non-tuple) variable this is its full declared shape
-#     (unchanged from today, with the trailing complex `2` dropped for
-#     `kind = "complex"`); for a tuple slot this is *just* the slot's own
+#   * a *leaf* node: `list(kind = <"real"|"int"|"complex">, dims = <int>)`.
+#     `dims` is the leaf's own container dims -- for a top-level (non-tuple)
+#     variable its full declared shape (with the trailing complex `2` dropped
+#     for `kind = "complex"`); for a tuple slot *just* the slot's own
 #     container shape, with every enclosing tuple-array dimension already
 #     stripped off (see `.stanr_sized_tuple_node()` below). `dims =
-#     integer(0)` means scalar. `legacy` is TRUE only for a top-level
-#     non-complex (real/int) variable -- see `.stanr_apply_leaf_dims()`
-#     for what it changes.
+#     integer(0)` means scalar.
 #
 #   * a *tuple* node: `list(kind = "tuple", array_dims = <int>, slots =
 #     <list>)`. `array_dims` is this tuple's *own* enclosing-array sizes
@@ -527,11 +524,7 @@
       if (is_complex) {
         own_dims <- own_dims[-length(own_dims)]
       }
-      slots[[s]] <- list(
-        kind = slot_type,
-        dims = as.integer(own_dims),
-        legacy = FALSE
-      )
+      slots[[s]] <- list(kind = slot_type, dims = as.integer(own_dims))
     }
   }
   list(kind = "tuple", array_dims = array_dims, slots = slots)
@@ -615,20 +608,12 @@
         )
       }
       dims <- entry$dims
-      is_complex <- identical(decl$type, "complex")
-      if (is_complex) {
+      if (identical(decl$type, "complex")) {
         # `get_dims()` includes the trailing complex storage dim `2` --
         # never part of the canonical R-facing shape.
         dims <- dims[-length(dims)]
       }
-      # `legacy = TRUE` only for a plain (non-complex) top-level variable:
-      # its shape follows the historical convention, which always sets
-      # `dim` once there is at least one declared dimension (even a single
-      # one -- see `.stanr_apply_leaf_dims()`). Top-level complex
-      # variables instead follow the canonical convention directly
-      # ("complex_vector[n] -> complex vector length n", not a 1-d array),
-      # matching every tuple-internal leaf.
-      node <- list(kind = decl$type, dims = dims, legacy = !is_complex)
+      node <- list(kind = decl$type, dims = dims)
     }
     result[[name]] <- list(stage = stage, node = node)
   }
@@ -665,39 +650,26 @@
   })
 }
 
-# Set a leaf's `dim` attribute according to its declared `dims`, under one of
-# two coexisting conventions:
-#
-#   * "legacy" (`legacy = TRUE`; only ever a top-level, non-complex real/int
-#     variable): `dim` is set as soon as `length(dims) >= 1` -- even a single
-#     declared dimension gets a `dim` attribute. This matches the historical
-#     behavior (`array(NA_real_, dim = dims)` regardless of `length(dims)`)
-#     and must stay byte-identical for these variables.
-#   * "canonical" (`legacy = FALSE`; every tuple-internal leaf, and top-level
-#     complex variables): `dim` is set only when there are >= 2 dimensions. A
-#     single dimension stays a bare vector and a scalar stays a bare
-#     scalar/value -- both the output-side shape convention ("complex vector
-#     length n", not a 1-d array) and the input-side flattening rule use the
-#     same convention, so a value's shape round-trips unchanged through both
-#     directions.
-#
-# `values` must already have length `prod(dims)` (or length 1 for a scalar,
-# handled by the caller passing `dims = integer(0)`).
-.stanr_apply_leaf_dims <- function(values, dims, legacy) {
+# Set a leaf's `dim` attribute according to its declared `dims`: only when
+# there are >= 2 dimensions. A single dimension stays a bare vector and a
+# scalar stays a bare value -- the input-side flattening rule uses the same
+# convention, so a value's shape round-trips unchanged through both
+# directions. `values` must already have length `prod(dims)` (or length 1
+# for a scalar, handled by the caller passing `dims = integer(0)`).
+.stanr_apply_leaf_dims <- function(values, dims) {
   if (!length(dims)) {
     return(values[[1]])
   }
-  if (legacy || length(dims) >= 2L) {
+  if (length(dims) >= 2L) {
     dim(values) <- dims
   }
   values
 }
 
 # Build one sized-structure node's skeleton (no values yet, just shape/fill):
-# complex -> `NA_complex_` (arrays without the trailing 2; a scalar leaf ->
-# bare `NA_complex_`); tuple/array-of-tuple -> nested unnamed lists per the
-# canonical shape; anything else (real/int) stays byte-identical to the
-# historical behavior (`dim` kept as-is, scalar -> `NA_real_`).
+# leaves filled with `NA_real_`/`NA_complex_` (complex arrays without the
+# trailing 2); tuple/array-of-tuple -> nested unnamed lists per the
+# canonical shape.
 .stanr_skeleton_node <- function(node) {
   if (identical(node$kind, "tuple")) {
     return(.stanr_nested_list_shape(
@@ -707,8 +679,7 @@
   }
   na_value <- if (identical(node$kind, "complex")) NA_complex_ else NA_real_
   n <- if (length(node$dims)) prod(node$dims) else 1L
-  values <- rep(na_value, n)
-  .stanr_apply_leaf_dims(values, node$dims, isTRUE(node$legacy))
+  .stanr_apply_leaf_dims(rep(na_value, n), node$dims)
 }
 
 # A mutable positional reader over a flat numeric vector -- `consume(n)`
@@ -736,17 +707,12 @@
   )
 }
 
-# Reshape a flat list of `prod(dims)` elements -- enumerated column-major,
-# first index fastest, exactly the order `.stanr_consume_node()` reads
-# tuple-array elements in -- into the canonical nested-list shape ("list over
-# first index of lists over second index of ... of tuples"). This is the
-# positional inverse of `.stanr_enumerate_tuple_elements()` above (that one
-# flattens nested lists to column-major order for the *input*-side contract;
-# this rebuilds nested lists from column-major order for the *output*-side
-# shape) -- kept as a separate function because the two are read in
-# different overall element orders (blocked-AoS on input vs element-major on
-# output) even though the column-major enumeration *within* one array level
-# is the same rule both directions.
+# Reshape a flat list of `prod(dims)` elements (enumerated column-major, the
+# order `.stanr_consume_node()` reads tuple-array elements in) into the
+# canonical nested-list shape. Positional inverse of
+# `.stanr_enumerate_tuple_elements()`, kept separate because the input and
+# output sides read elements in different overall orders (blocked-AoS vs
+# element-major).
 .stanr_reshape_column_major <- function(elements, dims) {
   if (length(dims) <= 1L) {
     return(elements)
@@ -785,12 +751,8 @@
       real = parts[seq.int(1L, 2L * n, by = 2L)],
       imaginary = parts[seq.int(2L, 2L * n, by = 2L)]
     )
-    return(.stanr_apply_leaf_dims(values, node$dims, isTRUE(node$legacy)))
+    return(.stanr_apply_leaf_dims(values, node$dims))
   }
-  # real/int: matches the historical behavior for top-level variables
-  # (`legacy = TRUE` there) -- plain numeric, scalar unboxed, `dim` set
-  # whenever the declared shape has >= 1 dimension.
   n <- if (length(node$dims)) prod(node$dims) else 1L
-  values <- reader$consume(n)
-  .stanr_apply_leaf_dims(values, node$dims, isTRUE(node$legacy))
+  .stanr_apply_leaf_dims(reader$consume(n), node$dims)
 }

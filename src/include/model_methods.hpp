@@ -19,6 +19,7 @@ namespace stanr {
   Rcpp::NumericVector model_unconstrain(const stan::model::model_base& model, Rcpp::List variables);
   Rcpp::NumericMatrix model_unconstrain_matrix(const stan::model::model_base& model, Rcpp::NumericMatrix values);
   Rcpp::NumericVector model_constrain(const stan::model::model_base& model, stan::rng_t& rng, Rcpp::NumericVector values, bool include_tparams, bool include_gqs);
+  Rcpp::NumericMatrix model_constrain_matrix(const stan::model::model_base& model, stan::rng_t& rng, Rcpp::NumericMatrix values, bool include_tparams, bool include_gqs);
 
   // Generated Stan models retain their constructor's ostream pointer and can
   // write through it while evaluating on a native/TBB worker.  This sink has

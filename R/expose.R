@@ -294,7 +294,11 @@
 
   base_cppflags <- .stanr_base_cppflags()
   pch_enabled <- FALSE
-  if (precompiled_headers && length(external_cpp) == 0) {
+  if (
+    precompiled_headers &&
+      length(external_cpp) == 0 &&
+      !.stanr_cpp_options_block_pch(extra_assignments)
+  ) {
     pch_flags <- .stanr_pch_flags(base_cppflags, verbose)
     pch_enabled <- nzchar(pch_flags)
     cppflags <- paste(pch_flags, base_cppflags)

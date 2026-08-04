@@ -101,6 +101,15 @@ Rcpp::NumericVector model_constrain(Rcpp::XPtr<stan::model::model_base> model,
 }
 
 // [[Rcpp::export]]
+Rcpp::NumericMatrix model_constrain_matrix(
+    Rcpp::XPtr<stan::model::model_base> model, Rcpp::XPtr<stan::rng_t> rng,
+    Rcpp::NumericMatrix upars, bool include_tparams = true,
+    bool include_gqs = true) {
+  return stanr::model_constrain_matrix(*model, *rng, upars, include_tparams,
+                                         include_gqs);
+}
+
+// [[Rcpp::export]]
 void select_opencl_device(int platform_id, int device_id) {
 #ifdef STAN_OPENCL
   stan::math::opencl_context.select_device(platform_id, device_id);

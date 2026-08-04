@@ -174,19 +174,10 @@
   identity
 }
 
-#' Return the on-disk path of the PCH currently memoized for `cppflags`.
+#' The on-disk path of the PCH memoized for `cppflags`, or `NA_character_`.
 #'
-#' Reconstructs the exact memo key `.stanr_pch_flags()` uses for a given
-#' `cppflags` (the key does not depend on `rebuild` -- the memo represents
-#' steady-state resolved flags regardless of how they were resolved) and
-#' returns the associated PCH path, if any. Used by
-#' `.compile_stan_model_environment()` (R/stan_model.R) to check whether a
-#' just-failed compile's PCH is stale (and therefore worth rebuilding) without
-#' duplicating the digest key construction there.
-#'
-#' Returns `NA_character_` when no PCH is memoized for `cppflags` (either
-#' `.stanr_pch_flags()` was never called with these flags in this session,
-#' or it was and PCH was unavailable, e.g. no `make`).
+#' Shares `.stanr_pch_flags()`'s memo key so the staleness check in
+#' `.stanr_compile_with_pch_retry()` needn't duplicate its construction.
 #'
 #' @noRd
 .stanr_pch_current <- function(cppflags) {
@@ -267,6 +258,17 @@
     return(remember(""))
   }
 
+  pch_build_cxxflags <- .stanr_opt_flags()
+  if (compiler_type == "clang") {
+    # Instantiate templates used by the header at PCH build time, so model
+    # TUs consuming the PCH skip re-instantiating them. Clang-only; benign
+    # for consumers (they don't need the flag).
+    pch_build_cxxflags <- paste(
+      pch_build_cxxflags,
+      "-fpch-instantiate-templates"
+    )
+  }
+
   fingerprint <- digest::digest(
     list(
       stanr = as.character(utils::packageVersion("stanr")),
@@ -281,13 +283,9 @@
         character(1)
       ),
       cppflags = pch_cppflags,
-      opt_flags = .stanr_opt_flags(),
-      # md5 of model_pch.hpp alone (not each header it transitively
-      # includes) is sufficient: the stanr wrapper headers it pulls in
-      # only change on package reinstall, which is already covered by the
-      # `stanr` package-version entry above, and Rcpp/Stan's own headers
-      # are covered by the `dependencies` versions below / model_header.hpp
-      # shipping inside the same stanr install.
+      opt_flags = pch_build_cxxflags,
+      # md5 of model_pch.hpp alone is sufficient: its transitive includes
+      # only change with the package or dependency versions hashed here.
       header = unname(tools::md5sum(header)),
       dependencies = vapply(
         c("Rcpp", "RcppEigen", "BH", "RcppParallel"),
@@ -304,11 +302,6 @@
     ),
     fingerprint
   )
-  # GCC's `-include` discovers a sibling `.gch` beside the literal path it is
-  # given (see the mechanism note in the roxygen block above), so a stand-in
-  # for the real header placed inside the cache dir is enough -- no need to
-  # replicate `include/stanr/...` structure the way implicit-inclusion PCH
-  # discovery via `-I` would require.
   cache_header <- file.path(cache_dir, "model_pch.hpp")
   pch <- paste0(cache_header, ".gch")
 
@@ -354,7 +347,7 @@
             if (compiler_type == "gcc") cache_header else header
           )),
           shQuote(paste0("PKG_CPPFLAGS=", pch_cppflags)),
-          shQuote(paste0("EXTRA_CXXFLAGS=", .stanr_opt_flags())),
+          shQuote(paste0("EXTRA_CXXFLAGS=", pch_build_cxxflags)),
           "pch"
         ),
         stdout = TRUE,

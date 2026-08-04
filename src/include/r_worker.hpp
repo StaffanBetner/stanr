@@ -59,14 +59,8 @@ int run_on_worker_thread(stanr::r_logger& logger, const char* what,
   std::exception_ptr worker_error;
   int return_code = stan::services::error_codes::CONFIG;
 
-  // Everything in this lambda is restricted to C++/Stan state.  In
-  // particular, it must not allocate R objects or call into Rcpp.
   std::thread worker([&] {
-    // A raw std::thread is outside TBB's scheduler, and the sampling service
-    // initializes chains before it enters parallel_for.  Its AD stack must
-    // be explicit.  Attach an observer for the lifetime of this job as
-    // well: it initializes a separate AD tape in every TBB worker that
-    // executes a chain.
+    // Rule 2 above: explicit AD stack plus tape observer for this job.
     stan::math::ChainableStack autodiff_stack;
     stan::math::ad_tape_observer autodiff_observer;
     try {
