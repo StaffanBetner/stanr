@@ -153,7 +153,7 @@ namespace stanr {
                                              metric_supplied);
     const bool multi_chain = num_chains > 1;
 
-    int return_code = stanr::run_on_worker_thread(
+    const int worker_return_code = stanr::run_on_worker_thread(
         logger, "Sampling",
         [&](stanr::r_interrupt& interrupt) -> int {
     int return_code = stan::services::error_codes::CONFIG;
@@ -345,7 +345,7 @@ namespace stanr {
         });
 
     // --- Combine results (R thread only) ---
-    Rcpp::List chain_arrays = return_code == 0
+    Rcpp::List chain_arrays = worker_return_code == 0
         ? writer_chains_to_arrays(sample_writers, diagnostic_names,
                                   warmup_rows)
         : Rcpp::List::create(
@@ -368,7 +368,7 @@ namespace stanr {
       Rcpp::_["diagnostics"] = chain_arrays["diagnostics"],
       Rcpp::_["warmup_samples"] = chain_arrays["warmup_samples"],
       Rcpp::_["warmup_diagnostics"] = chain_arrays["warmup_diagnostics"],
-      Rcpp::_["return_code"] = return_code,
+      Rcpp::_["return_code"] = worker_return_code,
       Rcpp::_["inv_metric"] = R_NilValue,
       Rcpp::_["step_size"] = R_NilValue,
       Rcpp::_["output"] = output

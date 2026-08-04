@@ -104,8 +104,7 @@ namespace stanr {
     if (mat.nrow() > 0 && mat.ncol() >= 1) {
       // Last row contains the solution; find lp__ column
       Rcpp::List dimnames = mat.attr("dimnames");
-      Rcpp::CharacterVector colnames = Rcpp::as<Rcpp::CharacterVector>(
-        Rcpp::wrap(dimnames[1]));
+      Rcpp::CharacterVector colnames = dimnames[1];
       for (int j = 0; j < mat.ncol(); ++j) {
         if (colnames[j] == "lp__") {
           lp_val = mat(mat.nrow() - 1, j);

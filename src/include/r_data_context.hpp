@@ -55,8 +55,6 @@ class r_data_context : public stan::io::var_context {
   void store_complex(const std::string& name,
                      std::vector<std::complex<double>> values,
                      std::vector<size_t> dims, size_t enclosing_dims);
-  void store_leaf(const std::string& name, SEXP value,
-                  std::vector<size_t> dims);
   void flatten_tuple(const std::string& name, SEXP value, Rcpp::List type_df,
                      int n_array_dims);
   void flatten_recurse(const std::string& name,

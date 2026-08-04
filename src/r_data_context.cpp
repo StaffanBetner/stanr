@@ -1,6 +1,8 @@
 #include "include/r_data_context.hpp"
 #include "include/tuple_declarations.hpp"
 
+#include <numeric>
+
 namespace stanr {
 
 namespace {
@@ -35,8 +37,19 @@ std::string shape_string(const std::vector<int>& shape) {
 }
 
 size_t shape_product(const std::vector<int>& shape) {
-  size_t out = 1;
-  for (int d : shape) out *= static_cast<size_t>(d);
+  return std::accumulate(
+      shape.begin(), shape.end(), size_t{1},
+      [](size_t acc, int d) { return acc * static_cast<size_t>(d); });
+}
+
+// Coerces each data.frame column to RTYPE and lays it out column-major.
+template <int RTYPE>
+SEXP columns_to_matrix(Rcpp::List columns, int n_rows, int n_columns) {
+  Rcpp::Matrix<RTYPE> out(n_rows, n_columns);
+  for (int c = 0; c < n_columns; ++c) {
+    Rcpp::Vector<RTYPE> column(Rf_coerceVector(columns[c], RTYPE));
+    for (int r = 0; r < n_rows; ++r) out(r, c) = column[r];
+  }
   return out;
 }
 
@@ -149,29 +162,11 @@ r_data_context::r_data_context(Rcpp::List list, SEXP declarations) {
                        name);
         }
       }
-      SEXP matrix;
-      if (any_complex) {
-        Rcpp::ComplexMatrix out(n_rows, n_columns);
-        for (int c = 0; c < n_columns; ++c) {
-          Rcpp::ComplexVector column(Rf_coerceVector(columns[c], CPLXSXP));
-          for (int r = 0; r < n_rows; ++r) out(r, c) = column[r];
-        }
-        matrix = out;
-      } else if (all_integer) {
-        Rcpp::IntegerMatrix out(n_rows, n_columns);
-        for (int c = 0; c < n_columns; ++c) {
-          Rcpp::IntegerVector column(columns[c]);
-          for (int r = 0; r < n_rows; ++r) out(r, c) = column[r];
-        }
-        matrix = out;
-      } else {
-        Rcpp::NumericMatrix out(n_rows, n_columns);
-        for (int c = 0; c < n_columns; ++c) {
-          Rcpp::NumericVector column(Rf_coerceVector(columns[c], REALSXP));
-          for (int r = 0; r < n_rows; ++r) out(r, c) = column[r];
-        }
-        matrix = out;
-      }
+      const SEXP matrix = any_complex
+          ? columns_to_matrix<CPLXSXP>(columns, n_rows, n_columns)
+          : all_integer ? columns_to_matrix<INTSXP>(columns, n_rows, n_columns)
+                        : columns_to_matrix<REALSXP>(columns, n_rows,
+                                                      n_columns);
       add_value(name, matrix);
     } else if (TYPEOF(value) == VECSXP) {
       SEXP decl = R_NilValue;
