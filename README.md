@@ -49,7 +49,8 @@ You can install the development version of stanr from GitHub:
 
 ``` r
 # install.packages("pak")
-pak::pak("andrjohns/stanr")
+options(pkg.git_submodules = TRUE)
+pak::pak("git::https://github.com/andrjohns/stanr")
 ```
 
 ## Compile a Model
@@ -141,9 +142,14 @@ list(
 #> [1] 0 0
 #> 
 #> $diagnostics
-#>   chain num_divergent num_max_treedepth
-#> 1     1             0                 0
-#> 2     2             0                 0
+#> $diagnostics$num_divergent
+#> [1] 0 0
+#> 
+#> $diagnostics$num_max_treedepth
+#> [1] 0 0
+#> 
+#> $diagnostics$ebfmi
+#> [1] 1.2035473 0.9794559
 ```
 
 ### Fixed Param
@@ -439,11 +445,11 @@ list(
 #> [1] 0
 #> 
 #> $lp
-#> [1] -12.776
+#> [1] -12.77597
 #> 
 #> $gradients
-#>   param_idx   value    model finite_diff      error
-#> 1         0 1.83245 -4.34465    -4.34465 2.2707e-09
+#>   param_idx    value     model finite_diff        error
+#> 1         0 1.832454 -4.344645   -4.344645 2.270696e-09
 ```
 
 ## Tuples and Complex Numbers

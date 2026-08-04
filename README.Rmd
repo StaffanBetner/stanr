@@ -60,7 +60,8 @@ You can install the development version of stanr from GitHub:
 
 ``` r
 # install.packages("pak")
-pak::pak("andrjohns/stanr")
+options(pkg.git_submodules = TRUE)
+pak::pak("git::https://github.com/andrjohns/stanr")
 ```
 
 ## Compile a Model
