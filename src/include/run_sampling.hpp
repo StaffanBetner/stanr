@@ -275,11 +275,6 @@ namespace newstan {
         msg << "Static HMC only supports a single chain. Set chains = 1.";
         logger.error(msg.str());
         return_code = stan::services::error_codes::CONFIG;
-      } else if (adapt_engaged && num_warmup == 0) {
-        std::ostringstream msg;
-        msg << "num_warmup must be > 0 when adapt_engaged is TRUE.";
-        logger.error(msg.str());
-        return_code = stan::services::error_codes::CONFIG;
 
       } else if (adapt_engaged) {
         // --- Static HMC with adaptation ---

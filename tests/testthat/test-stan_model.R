@@ -157,7 +157,7 @@ test_that(".newstan_apply_makevars overrides on '=' and appends on '+='", {
   expect_equal(unname(composed[["CXXFLAGS"]]), "-O3 -Wall")
 })
 
-# Persistent, cross-session model cache (Task A1) -----------------------------
+# Persistent, cross-session model cache ---------------------------------------
 
 test_that("stan_model writes the .cpp and a built artifact under the resolved cache dir, not tempdir", {
   cache_root <- withr::local_tempdir()
@@ -289,6 +289,34 @@ test_that("model_hash is computed before stanc() is called, so a warm cache skip
     force_recompile = TRUE
   )
   expect_true(mod3$is_compiled())
+  expect_equal(call_count, 2L)
+})
+
+test_that("the newstan_force_recompile option forces a fresh compile on a warm cache", {
+  cache_root <- withr::local_tempdir()
+  withr::local_options(newstan_cache_dir = file.path(cache_root, "models"))
+
+  call_count <- 0
+  real_stanc <- stanc
+  testthat::local_mocked_bindings(
+    stanc = function(...) {
+      call_count <<- call_count + 1
+      real_stanc(...)
+    },
+    .package = "newstan"
+  )
+
+  code <- '
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+  '
+  mod <- stan_model(code = code, precompiled_headers = FALSE)
+  expect_true(mod$is_compiled())
+  expect_lte(call_count, 1L)
+
+  withr::local_options(newstan_force_recompile = TRUE)
+  mod2 <- stan_model(code = code, precompiled_headers = FALSE)
+  expect_true(mod2$is_compiled())
   expect_equal(call_count, 2L)
 })
 
@@ -450,9 +478,12 @@ test_that("newstan_clear_cache() removes the models/pch cache dirs and a later c
       winslash = "/",
       mustWork = FALSE
     )
-    expect_true(all(survivors %in% newstan:::.newstan_loaded_dlls_under(
-      models_dir
-    )))
+    expect_true(all(
+      survivors %in%
+        newstan:::.newstan_loaded_dlls_under(
+          models_dir
+        )
+    ))
   } else {
     expect_false(dir.exists(models_dir))
   }

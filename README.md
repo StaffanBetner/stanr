@@ -9,7 +9,7 @@
 
 `newstan` is an R interface for compiling Stan programs and running Stan
 services directly from R. It uses an R6-based API similar to `cmdstanr`:
-`stan_model()` returns a \[`StanModel`\] object, and inference methods
+`stan_model()` returns a `StanModel` object, and inference methods
 (`$sample()`, `$optimize()`, `$variational()`, etc.) return R6 fit
 objects with methods for extracting draws, summaries, and diagnostics.
 Results use `posterior` draw objects where possible.
@@ -18,30 +18,30 @@ Results use `posterior` draw objects where possible.
 
 | Method | Purpose | Return type |
 |----|----|----|
-| \[`$sample()`\]\[model-method-sample\] | MCMC sampling (HMC/NUTS, static HMC, fixed param) | \[`StanMCMC`\] |
-| \[`$optimize()`\]\[model-method-optimize\] | Posterior mode or maximum likelihood estimate | \[`StanMLE`\] |
-| \[`$laplace()`\]\[model-method-laplace\] | Laplace approximation draws around a mode | \[`StanLaplace`\] |
-| \[`$variational()`\]\[model-method-variational\] | ADVI approximate posterior draws | \[`StanVB`\] |
-| \[`$pathfinder()`\]\[model-method-pathfinder\] | Pathfinder approximate posterior draws | \[`StanPathfinder`\] |
-| \[`$generate_quantities()`\]\[model-method-generate-quantities\] | Generated quantities from existing draws | \[`StanGQ`\] |
-| \[`$diagnose()`\]\[model-method-diagnose\] | Gradient checking diagnostic | \[`StanDiagnose`\] |
+| `$sample()` | MCMC sampling (HMC/NUTS, static HMC, fixed param) | `StanMCMC` |
+| `$optimize()` | Posterior mode or maximum likelihood estimate | `StanMLE` |
+| `$laplace()` | Laplace approximation draws around a mode | `StanLaplace` |
+| `$variational()` | ADVI approximate posterior draws | `StanVB` |
+| `$pathfinder()` | Pathfinder approximate posterior draws | `StanPathfinder` |
+| `$generate_quantities()` | Generated quantities from existing draws | `StanGQ` |
+| `$diagnose()` | Gradient checking diagnostic | `StanDiagnose` |
 
 ## Fit Object Methods
 
-All fit objects inherit from \[`StanFit`\] and share common methods:
+All fit objects inherit from `StanFit` and share common methods:
 
 | Method | Description |
 |----|----|
-| \[`$draws()`\]\[fit-method-draws\] | Extract draws as `posterior` objects |
-| \[`$summary()`\]\[fit-method-summary\] | Summarize draws via `posterior::summarise_draws()` |
-| \[`$print()`\]\[fit-method-print\] | Print a summary table |
-| \[`$return_codes()`\]\[fit-method-fit-info\] | Stan return codes (0 = success) |
-| \[`$metadata()`\]\[fit-method-fit-info\] | Fit metadata (seed, data, arguments) |
-| \[`$time()`\]\[fit-method-fit-info\] | Timing information |
-| \[`$log_prob()`\]\[fit-method-model-methods\] | Evaluate log probability |
-| \[`$constrain_variables()`\]\[fit-method-model-methods\] | Constrain unconstrained parameters |
-| \[`$unconstrain_variables()`\]\[fit-method-model-methods\] | Unconstrain parameters |
-| \[`$save_object()`\]\[fit-method-save\] | Save fit to file |
+| `$draws()` | Extract draws as `posterior` objects |
+| `$summary()` | Summarize draws via `posterior::summarise_draws()` |
+| `$print()` | Print a summary table |
+| `$return_codes()` | Stan return codes (0 = success) |
+| `$metadata()` | Fit metadata (seed, data, arguments) |
+| `$time()` | Timing information |
+| `$log_prob()` | Evaluate log probability |
+| `$constrain_variables()` | Constrain unconstrained parameters |
+| `$unconstrain_variables()` | Unconstrain parameters |
+| `$save_object()` | Save fit to file |
 
 ## Installation
 
@@ -55,7 +55,7 @@ pak::pak("andrjohns/newstan")
 ## Compile a Model
 
 Models are compiled from a string or from a `.stan` file. `stan_model()`
-returns a \[`StanModel`\] R6 object.
+returns a `StanModel` R6 object.
 
 ``` r
 library(newstan)
@@ -81,14 +81,13 @@ generated quantities {
 "
 
 mod <- stan_model(code = bernoulli_model, model_name = "bernoulli")
-#> [newstan] Compiling precompiled model header...
 data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 ```
 
 ## Sampling
 
-Call `$sample()` on a \[`StanModel`\] to run MCMC. The result is a
-\[`StanMCMC`\] object with methods for extracting draws and diagnostics.
+Call `$sample()` on a `StanModel` to run MCMC. The result is a
+`StanMCMC` object with methods for extracting draws and diagnostics.
 
 ``` r
 fit <- mod$sample(
@@ -336,7 +335,7 @@ opt$summary()
 ## Laplace Approximation
 
 Call `$laplace()` to draw from a Gaussian approximation around a mode.
-Pass a \[`StanMLE`\] object or let `$laplace()` run optimization first.
+Pass a `StanMLE` object or let `$laplace()` run optimization first.
 
 ``` r
 lap <- mod$laplace(
@@ -370,21 +369,21 @@ lap$summary()
 #>  2 lp_approx__ -0.586 -0.433 0.764 0.597  -1.34  -0.0106 0.985     20.5     20.4
 #>  3 theta        0.596  0.609 0.149 0.181   0.386  0.785  0.954     26.0     25.6
 #>  4 log_lik[1]  -0.552 -0.497 0.283 0.323  -0.956 -0.242  0.953     26.0     25.6
-#>  5 log_lik[2]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.965     26.0     25.6
+#>  5 log_lik[2]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.972     26.0     25.6
 #>  6 log_lik[3]  -0.552 -0.497 0.283 0.323  -0.956 -0.242  0.953     26.0     25.6
 #>  7 log_lik[4]  -0.552 -0.497 0.283 0.323  -0.956 -0.242  0.953     26.0     25.6
-#>  8 log_lik[5]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.965     26.0     25.6
+#>  8 log_lik[5]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.972     26.0     25.6
 #>  9 log_lik[6]  -0.552 -0.497 0.283 0.323  -0.956 -0.242  0.953     26.0     25.6
-#> 10 log_lik[7]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.965     26.0     25.6
-#> 11 log_lik[8]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.965     26.0     25.6
+#> 10 log_lik[7]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.972     26.0     25.6
+#> 11 log_lik[8]  -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.972     26.0     25.6
 #> 12 log_lik[9]  -0.552 -0.497 0.283 0.323  -0.956 -0.242  0.953     26.0     25.6
-#> 13 log_lik[10] -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.965     26.0     25.6
+#> 13 log_lik[10] -0.974 -0.939 0.384 0.404  -1.54  -0.488  0.972     26.0     25.6
 ```
 
 ## Generated Quantities
 
-Call `$generate_quantities()` with a \[`StanFit`\] object or draws
-matrix to evaluate the generated quantities block.
+Call `$generate_quantities()` with a `StanFit` object or draws matrix to
+evaluate the generated quantities block.
 
 ``` r
 gq <- mod$generate_quantities(
@@ -428,7 +427,7 @@ diag <- mod$diagnose(
 #>  Log probability=-12.776
 #> 
 #>  param idx           value           model     finite diff           error
-#>          0         1.83245        -4.34465        -4.34465      2.2707e-09
+#>          0         1.83245        -4.34465        -4.34465     1.38252e-09
 #> [newstan] All gradient tests passed.
 
 list(
@@ -443,8 +442,8 @@ list(
 #> [1] -12.776
 #> 
 #> $gradients
-#>   param_idx   value    model finite_diff      error
-#> 1         0 1.83245 -4.34465    -4.34465 2.2707e-09
+#>   param_idx   value    model finite_diff       error
+#> 1         0 1.83245 -4.34465    -4.34465 1.38252e-09
 ```
 
 ## Tuples and Complex Numbers
@@ -500,5 +499,5 @@ substr(cpp_code, 1, 80)
 ```
 
 `stan_model()` is the higher-level entry point: it calls `stanc()`,
-compiles the generated C++, and returns a \[`StanModel`\] object used by
-all inference methods.
+compiles the generated C++, and returns a `StanModel` object used by all
+inference methods.

@@ -11,6 +11,10 @@
 #'   | `array[n] tuple(...)` | list of `n` tuple-shaped lists |
 #'   | `array[n, m] tuple(...)` | list (over the first index) of lists (over the second index) of tuples |
 #'
+#'   A length-1 R vector is read as a scalar, so a `vector[1]`, `array[1]
+#'   ...`, or length-1 tuple-slot container value must be given an explicit
+#'   shape (`as.array(x)` or `dim(x) <- 1L`) to match its declared dimension.
+#'
 #'   Real-valued input is accepted wherever a `complex` type is declared --
 #'   it is coerced automatically, including inside tuple slots. All other
 #'   Stan types use their ordinary R representation (numeric/integer scalars,

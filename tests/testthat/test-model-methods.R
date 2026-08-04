@@ -191,6 +191,31 @@ test_that("model-method RNG is fit-local and advances across calls", {
   first <- fit$constrain_variables(upars)$stochastic_gq
   second <- fit$constrain_variables(upars)$stochastic_gq
   expect_false(isTRUE(all.equal(first, second)))
+
+  # `upars <- c(0, 0.5, -0.5)` gives beta_sum = 0 regardless of data, so a
+  # fit built with the same seed (2468) as `fit` reproduces the same
+  # normal_rng(beta_sum, 1) stream from its own first call -- unless RNG
+  # state were shared across StanFit instances, in which case a
+  # freshly-constructed fit's first draw would instead continue from
+  # wherever the shared state was left. Built fresh (not via the memoized
+  # `.newstan_model_method_fit()`) because `fit`'s RNG was already advanced
+  # by an earlier test in this file, so its own first draw is no longer
+  # observable here.
+  fresh_fit <- .newstan_model_method_model()$optimize(
+    data = .newstan_model_method_data(),
+    seed = 2468,
+    init = list(theta = 0.5, beta = c(0.5, -0.5)),
+    iter = 50,
+    refresh = 0,
+    show_messages = FALSE,
+    show_exceptions = FALSE
+  )
+  fresh_first <- fresh_fit$constrain_variables(upars)$stochastic_gq
+
+  fit_double <- .newstan_model_method_fit(double = TRUE)
+  fit_double_first <- fit_double$constrain_variables(upars)$stochastic_gq
+
+  expect_equal(fit_double_first, fresh_first)
 })
 
 test_that("model methods reject malformed or non-finite inputs", {
@@ -348,6 +373,32 @@ test_that("serialized fits lazily rebuild data-bound model methods", {
   )
 })
 
+test_that("model methods on a tuple-data fit still work after readRDS()", {
+  mod <- test_model("tuple_complex_battery")
+  data <- battery_data()
+  fit <- mod$sample(
+    data = data,
+    iter_warmup = 1,
+    iter_sampling = 1,
+    chains = 1,
+    seed = 18,
+    show_messages = FALSE
+  )
+  expect_equal(fit$return_codes(), 0L)
+
+  expected <- fit$constrain_variables(fit$unconstrain_variables(list(x = 0)))
+
+  path <- tempfile(fileext = ".rds")
+  withr::defer(unlink(path))
+  saveRDS(fit, path)
+  restored <- readRDS(path)
+
+  expect_equal(
+    restored$constrain_variables(restored$unconstrain_variables(list(x = 0))),
+    expected
+  )
+})
+
 test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on a live fit", {
   # A fresh (uncached) model/fit pair, so forcing a recompile here doesn't
   # perturb the shared `.newstan_model_method_fit()` state used elsewhere in
@@ -420,12 +471,12 @@ test_that("ensure_native()'s probe is invoked exactly once across N consecutive 
   expect_equal(call_count, 1)
 })
 
-# --- Phase 3 (complex-tuple interop plan): variable_skeleton()/               --
-# constrain_variables() over tuple- and complex-typed variables, plus         --
-# regression cover for the bracket-name paths (unconstrain_draws/optimize/    --
-# laplace/generate_quantities) that Phase 3 doesn't touch but that consume    --
-# the same fit. Reuses the two battery models already compiled for Phase 2's --
-# test-tuple-data.R (test-models/tuple_complex_battery.stan and              --
+# --- variable_skeleton()/constrain_variables() over tuple- and complex-typed --
+# variables, plus regression cover for the bracket-name paths                --
+# (unconstrain_draws/optimize/laplace/generate_quantities) that consume the  --
+# same fit but don't otherwise touch tuple/complex shapes. Reuses the two    --
+# battery models already compiled for test-tuple-data.R                     --
+# (test-models/tuple_complex_battery.stan and                               --
 # tuple_complex_unbounded.stan) via the shared `test_model()` cache.         --
 
 test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tuple/complex shapes exactly", {
@@ -452,31 +503,15 @@ test_that("constrain_variables(unconstrain_variables(x)) recovers canonical tupl
   expect_equal(back$t[[1]], x$t[[1]], tolerance = 1e-10)
   expect_equal(as.numeric(back$t[[2]]), x$t[[2]], tolerance = 1e-10)
   expect_equal(back$z, x$z, tolerance = 1e-10)
-  # Part C canonical shape: a single-dim tuple-slot leaf is a bare vector,
-  # not a 1-d array (distinct from the legacy top-level-real convention).
+  # Canonical shape: a single-dim tuple-slot leaf is a bare vector, not a
+  # 1-d array (distinct from the legacy top-level-real convention).
   expect_null(dim(back$t[[2]]))
 })
 
 test_that("variable_skeleton() has the exact golden nested-list/array shape for the tuple/complex battery model", {
   mod <- test_model("tuple_complex_battery")
   fit <- mod$sample(
-    data = list(
-      zd = 1 + 2i,
-      zv = c(1 + 1i, 2 - 2i),
-      zm = matrix(c(1 + 1i, 2 + 2i, 3 + 3i, 4 + 4i), 2, 2),
-      za = c(5 + 5i, 6 - 6i),
-      td = list(1.5, c(2.5, 3.5)),
-      tad = list(list(10L, 1 + 1i), list(20L, 2 + 2i)),
-      acv = list(
-        list(complex(real = 1:3, imaginary = 11:13), 100),
-        list(complex(real = 4:6, imaginary = 14:16), 200)
-      ),
-      t2d = list(
-        list(list(11L, 1.1), list(12L, 1.2)),
-        list(list(21L, 2.1), list(22L, 2.2))
-      ),
-      nt = list(999, list(list(1, 1 + 2i), list(2, 3 + 4i)))
-    ),
+    data = battery_data(),
     iter_warmup = 1,
     iter_sampling = 1,
     chains = 1,
@@ -522,7 +557,7 @@ test_that("variable_skeleton() has the exact golden nested-list/array shape for 
   expect_named(fit$variable_skeleton(FALSE, FALSE), "x")
 })
 
-test_that("unconstrain_draws() still works on a tuple/complex-model fit (regression: bracket-name path untouched by Phase 3)", {
+test_that("unconstrain_draws() still works on a tuple/complex-model fit (regression: bracket-name path unaffected by tuple/complex support)", {
   mod <- test_model("tuple_complex_unbounded")
   fit <- mod$sample(
     data = list(),
@@ -546,7 +581,7 @@ test_that("unconstrain_draws() still works on a tuple/complex-model fit (regress
   expect_false(anyNA(unconstrained))
 })
 
-test_that("$optimize() and $laplace() succeed on a tuple/complex model (regression: bracket-name paths untouched by Phase 3)", {
+test_that("$optimize() and $laplace() succeed on a tuple/complex model (regression: bracket-name paths unaffected by tuple/complex support)", {
   mod <- test_model("tuple_complex_unbounded")
   init <- list(t = list(0, c(0, 0)), z = 0 + 0i)
 
@@ -564,7 +599,8 @@ test_that("$optimize() and $laplace() succeed on a tuple/complex model (regressi
   # constrained) dimension.
   expect_equal(unname(fit_opt$mle()), rep(0, 5), tolerance = 1e-4)
   # Bracket names derived from the native call, never hand-typed (house
-  # rule: `.newstan_bracket_names` is load-bearing and untouched by Phase 3).
+  # rule: `.newstan_bracket_names` is load-bearing and unaffected by
+  # tuple/complex support).
   expected_names <- .newstan_bracket_names(
     fit_opt$.__enclos_env__$private$native_call(
       "model_constrained_names",
@@ -591,23 +627,7 @@ test_that("$optimize() and $laplace() succeed on a tuple/complex model (regressi
 
 test_that("generate_quantities() runs on draws from a tuple/complex-model $sample() fit", {
   mod <- test_model("tuple_complex_battery")
-  data <- list(
-    zd = 1 + 2i,
-    zv = c(1 + 1i, 2 - 2i),
-    zm = matrix(c(1 + 1i, 2 + 2i, 3 + 3i, 4 + 4i), 2, 2),
-    za = c(5 + 5i, 6 - 6i),
-    td = list(1.5, c(2.5, 3.5)),
-    tad = list(list(10L, 1 + 1i), list(20L, 2 + 2i)),
-    acv = list(
-      list(complex(real = 1:3, imaginary = 11:13), 100),
-      list(complex(real = 4:6, imaginary = 14:16), 200)
-    ),
-    t2d = list(
-      list(list(11L, 1.1), list(12L, 1.2)),
-      list(list(21L, 2.1), list(22L, 2.2))
-    ),
-    nt = list(999, list(list(1, 1 + 2i), list(2, 3 + 4i)))
-  )
+  data <- battery_data()
   fit <- mod$sample(
     data = data,
     iter_warmup = 1,
@@ -630,7 +650,8 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
   fit_draws <- as.data.frame(fit$draws(format = "draws_df"))
   # Derive the "*_out" column names from the actual draws (never hand-typed
   # bracket strings, per house rule -- `.newstan_bracket_names` is
-  # load-bearing and untouched by Phase 3). The echoed "*_out" quantities
+  # load-bearing and unaffected by tuple/complex support). The echoed
+  # "*_out" quantities
   # are pure functions of `data` (not of the sampled parameter `x`), so
   # re-running generated quantities from the fit's own draws must reproduce
   # the fit's own values exactly, for every echoed column.
@@ -639,44 +660,40 @@ test_that("generate_quantities() runs on draws from a tuple/complex-model $sampl
     grepl("^(zd|zv|zm|za|td|tad|acv|t2d|nt)_out", out_names)
   ]
   expect_true(length(out_names) > 0)
-  expect_setequal(out_names, colnames(fit_draws)[
-    grepl("^(zd|zv|zm|za|td|tad|acv|t2d|nt)_out", colnames(fit_draws))
-  ])
+  expect_setequal(
+    out_names,
+    colnames(fit_draws)[
+      grepl("^(zd|zv|zm|za|td|tad|acv|t2d|nt)_out", colnames(fit_draws))
+    ]
+  )
   expect_equal(
-    unname(vapply(out_names, function(nm) as.numeric(gq_draws[1, nm]), numeric(1))),
-    unname(vapply(out_names, function(nm) as.numeric(fit_draws[1, nm]), numeric(1)))
+    unname(vapply(
+      out_names,
+      function(nm) as.numeric(gq_draws[1, nm]),
+      numeric(1)
+    )),
+    unname(vapply(
+      out_names,
+      function(nm) as.numeric(fit_draws[1, nm]),
+      numeric(1)
+    ))
   )
 })
 
 test_that("constrain_variables() reconstructs array-of-tuple/2D-tuple-array/complex-in-tuple-array values exactly (not just shape)", {
   # The golden-shape test above exercises `.newstan_skeleton_node()` (no
   # values), and the generate_quantities()/draws test above exercises the
-  # pre-existing, Phase-3-untouched `$draws()` bracket-name path -- neither
-  # calls `.newstan_consume_node()`, the new element-major reconstruction
-  # `constrain_variables()` actually uses. This test does, on every
+  # pre-existing `$draws()` bracket-name path, unaffected by tuple/complex
+  # support -- neither calls `.newstan_consume_node()`, the element-major
+  # reconstruction `constrain_variables()` actually uses. This test does, on
+  # every
   # array-of-tuple shape the battery model declares (`acv_out`: complex
   # inside a 1-D tuple array; `t2d_out`: a 2-D tuple array; `tad_out`: a
   # simple 1-D tuple array; `nt_out`: a tuple nesting a 1-D tuple array),
   # checking reconstructed *values* land at the exact right position, not
   # just that the shape matches.
   mod <- test_model("tuple_complex_battery")
-  data <- list(
-    zd = 1 + 2i,
-    zv = c(1 + 1i, 2 - 2i),
-    zm = matrix(c(1 + 1i, 2 + 2i, 3 + 3i, 4 + 4i), 2, 2),
-    za = c(5 + 5i, 6 - 6i),
-    td = list(1.5, c(2.5, 3.5)),
-    tad = list(list(10L, 1 + 1i), list(20L, 2 + 2i)),
-    acv = list(
-      list(complex(real = 1:3, imaginary = 11:13), 100),
-      list(complex(real = 4:6, imaginary = 14:16), 200)
-    ),
-    t2d = list(
-      list(list(11L, 1.1), list(12L, 1.2)),
-      list(list(21L, 2.1), list(22L, 2.2))
-    ),
-    nt = list(999, list(list(1, 1 + 2i), list(2, 3 + 4i)))
-  )
+  data <- battery_data()
   fit <- mod$sample(
     data = data,
     iter_warmup = 1,

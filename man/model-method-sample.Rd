@@ -18,6 +18,9 @@ variable and shaped as follows:\tabular{ll}{
 }
 
 
+A length-1 R vector is read as a scalar, so a \code{vector[1]}, \verb{array[1] ...}, or length-1 tuple-slot container value must be given an explicit
+shape (\code{as.array(x)} or \code{dim(x) <- 1L}) to match its declared dimension.
+
 Real-valued input is accepted wherever a \code{complex} type is declared --
 it is coerced automatically, including inside tuple slots. All other
 Stan types use their ordinary R representation (numeric/integer scalars,
@@ -61,7 +64,9 @@ further.}
 
 \item{iter_sampling}{(integer) The number of sampling iterations.}
 
-\item{save_warmup}{(logical) Should warmup samples be saved?}
+\item{save_warmup}{(logical) Should warmup samples be saved? Ignored when
+\code{fixed_param = TRUE}, since that mode runs no warmup and so has nothing
+to save.}
 
 \item{thin}{(integer) Thin interval.}
 

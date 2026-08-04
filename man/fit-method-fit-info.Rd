@@ -5,10 +5,13 @@
 \title{Access fit information}
 \value{
 \itemize{
-\item \verb{$return_codes()} returns an integer vector of Stan return codes (one per
-chain or path). A return code of \code{0} indicates success.
+\item \verb{$return_codes()} returns an integer vector with the Stan service's
+return code replicated once per chain (the in-process services report a
+single code for the whole run). A return code of \code{0} indicates success.
 \item \verb{$metadata()} returns a named list of fit metadata including the seed,
-data, arguments, and model name.
+data, arguments, and model name. For adaptive MCMC fits,
+\code{step_size_adaptation} is a numeric vector of one adapted step size per
+chain; it is absent when sampling ran without adaptation.
 \item \verb{$output()} returns a character vector of Stan output messages from the
 run. Messages from all chains or paths are interleaved in one vector;
 per-chain attribution is not available.

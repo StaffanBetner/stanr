@@ -3,13 +3,19 @@
 # captured once rather than regenerated per test run (still compiler-free:
 # stanc only needs the bundled JS engine).
 read_fixture <- function(name) {
-  paste(readLines(test_path("test-models", name), warn = FALSE), collapse = "\n")
+  paste(
+    readLines(test_path("test-models", name), warn = FALSE),
+    collapse = "\n"
+  )
 }
 
 test_that("scalar/rng/void functions: stripping, name extraction, registry", {
   cpp_code <- read_fixture("expose-fixture-scalar.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
+  result <- newstan:::.newstan_process_standalone_cpp(
+    cpp_code,
+    reserved_names = character()
+  )
 
   expect_equal(result$functions$name, c("my_add", "my_add_rng", "say_hello"))
   expect_equal(result$functions$is_rng, c(FALSE, TRUE, FALSE))
@@ -56,13 +62,20 @@ test_that("scalar/rng/void functions: stripping, name extraction, registry", {
     fixed = TRUE
   )
   expect_match(result$wrapper_section, "newstan_rng_set_seed", fixed = TRUE)
-  expect_match(result$wrapper_section, "newstan_exposed_functions", fixed = TRUE)
+  expect_match(
+    result$wrapper_section,
+    "newstan_exposed_functions",
+    fixed = TRUE
+  )
 })
 
 test_that("multi-line signatures wrapped mid-parameter are collapsed correctly", {
   cpp_code <- read_fixture("expose-fixture-vecmat.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
+  result <- newstan:::.newstan_process_standalone_cpp(
+    cpp_code,
+    reserved_names = character()
+  )
 
   expect_equal(result$functions$name, c("vec_add", "mat_mult"))
   expect_equal(result$functions$is_rng, c(FALSE, FALSE))
@@ -82,7 +95,10 @@ test_that("multi-line signatures wrapped mid-parameter are collapsed correctly",
 test_that("array/nested-vector/int argument and return types", {
   cpp_code <- read_fixture("expose-fixture-array.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
+  result <- newstan:::.newstan_process_standalone_cpp(
+    cpp_code,
+    reserved_names = character()
+  )
 
   expect_equal(result$functions$name, c("arr_fun", "rv_fun", "int_arr_fun"))
   expect_equal(result$functions$is_rng, c(FALSE, FALSE, FALSE))
@@ -105,9 +121,12 @@ test_that("array/nested-vector/int argument and return types", {
 })
 
 test_that("tuple-returning functions are exposed with intact signatures", {
-  cpp_code <- read_fixture("expose-fixture-tuple-skip.cpp")
+  cpp_code <- read_fixture("expose-fixture-tuple.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
+  result <- newstan:::.newstan_process_standalone_cpp(
+    cpp_code,
+    reserved_names = character()
+  )
 
   expect_equal(result$functions$name, c("two_things", "keep_me"))
   expect_true("two_things" %in% result$functions$name)
@@ -127,7 +146,10 @@ test_that("overloaded Stan functions keep only the first, with a warning", {
   cpp_code <- read_fixture("expose-fixture-overload.cpp")
 
   expect_warning(
-    result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character()),
+    result <- newstan:::.newstan_process_standalone_cpp(
+      cpp_code,
+      reserved_names = character()
+    ),
     "duplicate"
   )
 
@@ -150,7 +172,10 @@ test_that("a name colliding with reserved_names is a hard error", {
   cpp_code <- read_fixture("expose-fixture-scalar.cpp")
 
   expect_error(
-    newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = c("my_add", "run_model")),
+    newstan:::.newstan_process_standalone_cpp(
+      cpp_code,
+      reserved_names = c("my_add", "run_model")
+    ),
     "my_add.*reserved"
   )
 })
@@ -168,7 +193,10 @@ test_that("a program with no [[stan::function]] markers errors", {
 test_that("a program whose only function returns a tuple is exposed successfully", {
   cpp_code <- read_fixture("expose-fixture-tuple-only.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
+  result <- newstan:::.newstan_process_standalone_cpp(
+    cpp_code,
+    reserved_names = character()
+  )
 
   expect_equal(result$functions$name, "two_things")
   expect_match(
@@ -181,9 +209,16 @@ test_that("a program whose only function returns a tuple is exposed successfully
 test_that("wrapper_section excludes model_namespace; full_code includes it", {
   cpp_code <- read_fixture("expose-fixture-scalar.cpp")
 
-  result <- newstan:::.newstan_process_standalone_cpp(cpp_code, reserved_names = character())
+  result <- newstan:::.newstan_process_standalone_cpp(
+    cpp_code,
+    reserved_names = character()
+  )
 
-  expect_no_match(result$wrapper_section, "namespace model_namespace", fixed = TRUE)
+  expect_no_match(
+    result$wrapper_section,
+    "namespace model_namespace",
+    fixed = TRUE
+  )
   expect_no_match(
     result$wrapper_section,
     "#include <stan/model/model_header.hpp>",
@@ -196,7 +231,10 @@ test_that("wrapper_section excludes model_namespace; full_code includes it", {
     fixed = TRUE
   )
   expect_equal(
-    lengths(regmatches(result$full_code, gregexpr("namespace model_namespace", result$full_code))),
+    lengths(regmatches(
+      result$full_code,
+      gregexpr("namespace model_namespace", result$full_code)
+    )),
     1L
   )
   expect_match(result$full_code, "// [[Rcpp::export]]", fixed = TRUE)
@@ -338,7 +376,11 @@ functions {
   compiled_env <- newstan:::.compile_standalone_functions_environment(code)
   target_env <- new.env()
 
-  newstan:::.newstan_build_functions_env(compiled_env, target_env, global = FALSE)
+  newstan:::.newstan_build_functions_env(
+    compiled_env,
+    target_env,
+    global = FALSE
+  )
 
   expect_true(is.function(target_env$build_env_add))
   expect_equal(target_env$build_env_add(2, 3), 5)
@@ -388,11 +430,19 @@ functions {
   compiled_env <- newstan:::.compile_standalone_functions_environment(code)
   target_env <- new.env()
 
-  newstan:::.newstan_build_functions_env(compiled_env, target_env, global = FALSE)
+  newstan:::.newstan_build_functions_env(
+    compiled_env,
+    target_env,
+    global = FALSE
+  )
   assign("stale_binding", 123, envir = target_env)
   expect_true(exists("stale_binding", envir = target_env, inherits = FALSE))
 
-  newstan:::.newstan_build_functions_env(compiled_env, target_env, global = FALSE)
+  newstan:::.newstan_build_functions_env(
+    compiled_env,
+    target_env,
+    global = FALSE
+  )
 
   expect_false(exists("stale_binding", envir = target_env, inherits = FALSE))
   expect_true(is.function(target_env$rebuild_add))
@@ -736,7 +786,9 @@ model {
   )
 
   on.exit(
-    if (exists("standalone_global_add", envir = globalenv(), inherits = FALSE)) {
+    if (
+      exists("standalone_global_add", envir = globalenv(), inherits = FALSE)
+    ) {
       rm("standalone_global_add", envir = globalenv())
     },
     add = TRUE
@@ -747,7 +799,9 @@ model {
   # fast path and never call the separate-TU compile helper.
   testthat::local_mocked_bindings(
     .compile_standalone_functions_environment = function(...) {
-      stop("must not recompile: compile_standalone model already has newstan_exposed_functions")
+      stop(
+        "must not recompile: compile_standalone model already has newstan_exposed_functions"
+      )
     },
     .package = "newstan"
   )
@@ -755,7 +809,11 @@ model {
   expect_no_error(mod$expose_stan_functions(global = TRUE))
   expect_true(is.function(mod$functions$standalone_global_add))
   expect_equal(mod$functions$standalone_global_add(2, 3), 5)
-  expect_true(exists("standalone_global_add", envir = globalenv(), inherits = FALSE))
+  expect_true(exists(
+    "standalone_global_add",
+    envir = globalenv(),
+    inherits = FALSE
+  ))
   expect_equal(get("standalone_global_add", envir = globalenv())(2, 3), 5)
 })
 

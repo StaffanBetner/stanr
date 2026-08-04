@@ -4,7 +4,7 @@
       newstan:::.newstan_validate_chains(chains = 0, chain_ids = integer())
     Condition
       Error:
-      ! `chains` must be a positive integer.
+      ! `chains` must be a single integer >= 1.
 
 # chain validation rejects non-consecutive chain_ids
 

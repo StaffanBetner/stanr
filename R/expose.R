@@ -50,7 +50,11 @@
     block <- lines[start:end]
 
     right_trimmed <- sub("\\s+$", "", block)
-    last_char <- substr(right_trimmed, nchar(right_trimmed), nchar(right_trimmed))
+    last_char <- substr(
+      right_trimmed,
+      nchar(right_trimmed),
+      nchar(right_trimmed)
+    )
     sig_end <- which(last_char == "{")
     if (!length(sig_end)) {
       stop(
@@ -61,7 +65,11 @@
     }
     sig_end <- sig_end[[1]]
 
-    signature <- gsub("\\s+", " ", paste(trimws(block[seq_len(sig_end)]), collapse = " "))
+    signature <- gsub(
+      "\\s+",
+      " ",
+      paste(trimws(block[seq_len(sig_end)]), collapse = " ")
+    )
 
     depth <- 1L
     body_end <- NA_integer_
@@ -136,7 +144,9 @@
 
   wrapper_blocks <- vapply(
     wrappers,
-    function(w) paste(c("// [[Rcpp::export]]", w$signature, w$body), collapse = "\n"),
+    function(w) {
+      paste(c("// [[Rcpp::export]]", w$signature, w$body), collapse = "\n")
+    },
     character(1)
   )
 
@@ -149,7 +159,7 @@
   # newstan/rcpp_tuple_interop.hpp adds the Rcpp::wrap()/Exporter overloads
   # for std::tuple (and std::vector<tuple> nestings) that Stan's tuple
   # wrappers need; it must come after RcppEigen.h/Rcpp.h (both TU modes
-  # satisfy this -- see Part A7 of the interop plan).
+  # satisfy this).
   # The `Rcpp::depends` attributes (matching inst/stan_model.cpp's own) are
   # what let `Rcpp::sourceCpp()` resolve RcppEigen/BH/RcppParallel include
   # paths itself; harmless if this ends up appended after inst/stan_model.cpp
@@ -192,8 +202,15 @@
     collapse = "\n"
   )
 
-  wrapper_section <- paste(c(prelude, wrapper_blocks, registry), collapse = "\n")
-  full_code <- paste(paste(preamble, collapse = "\n"), wrapper_section, sep = "\n")
+  wrapper_section <- paste(
+    c(prelude, wrapper_blocks, registry),
+    collapse = "\n"
+  )
+  full_code <- paste(
+    paste(preamble, collapse = "\n"),
+    wrapper_section,
+    sep = "\n"
+  )
 
   list(
     full_code = full_code,
@@ -215,7 +232,6 @@
 #' @param cpp_options C++ compilation options; see `stan_model()`.
 #' @param verbose Print compiler/cache progress messages.
 #' @param precompiled_headers Reuse the model-PCH `.gch` when flags match.
-#' @param force_recompile Recompile even if a cache entry already exists.
 #'
 #' @return An environment populated by `Rcpp::sourceCpp()`, with
 #'   `newstan_exposed_functions`, `newstan_rng_set_seed`, and one R function
@@ -226,17 +242,20 @@
   external_cpp = NULL,
   cpp_options = list(),
   verbose = FALSE,
-  precompiled_headers = TRUE,
-  force_recompile = FALSE
+  precompiled_headers = TRUE
 ) {
   .newstan_require_compile_packages()
 
-  # Only ever used for this separate-TU path; the combined-TU call site
-  # (added in a later phase) reuses .newstan_process_standalone_cpp()
-  # directly with a larger reserved_names set.
+  # Only ever used for this separate-TU path; the combined-TU call site in
+  # `.compile_stan_model_environment()` builds its own larger
+  # reserved_names set.
   reserved_names <- c("newstan_exposed_functions", "newstan_rng_set_seed")
 
-  stanc_out <- stanc(code, standalone_functions = TRUE, external_cpp = external_cpp)
+  stanc_out <- stanc(
+    code,
+    standalone_functions = TRUE,
+    external_cpp = external_cpp
+  )
   processed <- .newstan_process_standalone_cpp(stanc_out, reserved_names)
 
   # OPENCL_LIBS is meaningless here -- this TU never uses OpenCL.
@@ -266,7 +285,7 @@
   # dir, distinguished only by filename prefix.
   cache_dir <- .newstan_models_cache_dir()
   cpp_file <- file.path(cache_dir, paste0("functions_", functions_hash, ".cpp"))
-  if (force_recompile || !file.exists(cpp_file)) {
+  if (!file.exists(cpp_file)) {
     if (verbose) {
       message("[newstan] Compiling Stan functions...")
     }
@@ -286,25 +305,15 @@
   env <- new.env()
 
   compile_functions <- function(compilation_cppflags) {
-    withr::with_makevars(
-      .newstan_apply_makevars(
-        c(
-          USE_CXX17 = "1",
-          PKG_CPPFLAGS = compilation_cppflags,
-          PKG_LIBS = .newstan_tbb_libs(),
-          CXXFLAGS = .newstan_opt_flags,
-          CXX17FLAGS = .newstan_opt_flags
-        ),
-        extra_assignments
-      ),
-      assignment = "+=",
-      Rcpp::sourceCpp(
-        file = cpp_file,
-        env = env,
-        rebuild = force_recompile,
-        cacheDir = cache_dir,
-        verbose = verbose
-      )
+    .newstan_sourcecpp(
+      cpp_file = cpp_file,
+      env = env,
+      cppflags = compilation_cppflags,
+      libs = .newstan_tbb_libs(),
+      extra_assignments = extra_assignments,
+      rebuild = FALSE,
+      cache_dir = cache_dir,
+      verbose = verbose
     )
   }
 
@@ -347,8 +356,8 @@
 
 #' Populate a target environment from a compiled functions environment
 #'
-#' Shared by both expose paths (separate-TU and, in a later phase,
-#' combined-TU): reads the function registry off `compiled_env`, wraps
+#' Shared by both expose paths (separate-TU and combined-TU): reads the
+#' function registry off `compiled_env`, wraps
 #' `_rng` exports with `.newstan_rng_wrapper()`, and assigns everything into
 #' `target_env` (and, if `global`, also into `global_env`).
 #'

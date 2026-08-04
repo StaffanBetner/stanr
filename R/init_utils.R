@@ -14,7 +14,21 @@ resolve_init <- function(init) {
   if (is_radius) {
     return(list(radius = as.double(init), values = list()))
   }
+  if (is.numeric(init) && length(init) == 1L && is.null(names(init))) {
+    stop(
+      "`init` as a radius must be a single non-negative number.",
+      call. = FALSE
+    )
+  }
   if (is.list(init)) {
+    if (length(init) && (is.null(names(init)) || any(!nzchar(names(init))))) {
+      stop(
+        "`init` must be a named list of constrained parameter values; ",
+        "per-chain init lists are not supported (supplied values are ",
+        "shared by all chains).",
+        call. = FALSE
+      )
+    }
     return(list(radius = 2, values = init))
   }
   if (is.numeric(init) || is.complex(init)) {

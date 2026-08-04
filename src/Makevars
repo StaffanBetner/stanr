@@ -35,11 +35,14 @@ SUNDIALS_NVECSERIAL := \
 
 SUNDIALS_SOURCES = $(SUNDIALS_CVODES) $(SUNDIALS_IDAS) $(SUNDIALS_KINSOL) $(SUNDIALS_NVECSERIAL)
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
-OBJECTS = runner.o init.o model_methods.o r_data_context.o xptr.o
+NEWSTAN_HEADERS = $(wildcard include/*.hpp)
+
+RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o
+OBJECTS = init.o xptr.o
 
 $(SHLIB): static
-$(OBJECTS): $(SUNDIALS_OBJECTS)
-$(SUNDIALS_OBJECTS): package
+$(OBJECTS) $(RUNNER_OBJECTS): $(NEWSTAN_HEADERS) | package
+$(SUNDIALS_OBJECTS): | package
 
 package:
 	@../cleanup
@@ -52,12 +55,12 @@ package:
 	@rm -rf ../inst/include/newstan
 	@cp -Rf include/. ../inst/include/newstan
 
-static: $(OBJECTS) $(SUNDIALS_OBJECTS)
+static: $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 	@mkdir -p ../inst/lib/$(R_ARCH)
-	$(AR) -rs ../inst/lib/$(R_ARCH)/libnewstan_runner.a $(SUNDIALS_OBJECTS) runner.o model_methods.o r_data_context.o
+	$(AR) -rs ../inst/lib/$(R_ARCH)/libnewstan_runner.a $(SUNDIALS_OBJECTS) $(RUNNER_OBJECTS)
 
 clean:
 	rm -rf ../inst/lib
-	rm -f $(OBJECTS)
+	rm -f $(OBJECTS) $(RUNNER_OBJECTS)
 	rm -rf ../inst/include/
 	rm -rf sundials

@@ -63,6 +63,25 @@ test_that("diagnose() passes gradient check for bernoulli model", {
   expect_equal(result$num_failed(), 0L)
 })
 
+test_that("diagnose() fails the gradient check for a model with cubic log density", {
+  # The central finite difference deviates from autodiff by ~epsilon^2
+  # independent of the evaluation point for a cubic target, so a large
+  # epsilon and small error tolerance make the check fail deterministically.
+  mod <- stan_model(code = "parameters { real x; } model { target += x^3; }")
+  expect_message(
+    result <- mod$diagnose(
+      data = list(),
+      seed = 42,
+      epsilon = 0.1,
+      error = 1e-8
+    ),
+    "1 parameter\\(s\\) failed"
+  )
+  expect_equal(result$num_failed(), 1L)
+  expect_equal(result$return_codes(), 1L)
+  expect_equal(nrow(result$gradients()), 1L)
+})
+
 # ---------------------------------------------------------------------------
 # $gradients() method
 # ---------------------------------------------------------------------------

@@ -177,6 +177,9 @@ StanFit <- R6Class(
         ),
         metadata
       )
+      if (!is.null(payload$step_size)) {
+        private$metadata_$step_size_adaptation <- as.numeric(payload$step_size)
+      }
       private$output_ <- payload$output %||% character()
       invisible(self)
     }
@@ -205,10 +208,20 @@ StanFit <- R6Class(
         return(invisible(NULL))
       }
       if (force || is.null(private$model_ptr_)) {
-        private$model_ptr_ <- private$model_$new_model(
-          private$data_,
-          private$seed_
-        )
+        # `r_data_context` only accepts atomic data values, so tuple-typed
+        # entries (stored on `private$data_` as bare R lists, unflattened,
+        # so `$metadata()$data` keeps returning what the user supplied) must
+        # be flattened to their dotted per-leaf form here, the same
+        # conversion `.newstan_run_service()` applies when a fit is built
+        # fresh instead of restored.
+        data <- private$data_
+        if (any(vapply(data, is.list, logical(1)))) {
+          data <- .newstan_flatten_tuple_values(
+            data,
+            private$model_$variables()$data
+          )
+        }
+        private$model_ptr_ <- private$model_$new_model(data, private$seed_)
       }
       if (force || is.null(private$rng_ptr_)) {
         rng <- private$model_$native_function("new_base_rng", required = FALSE)
@@ -273,11 +286,10 @@ StanFit <- R6Class(
       generated_quantities
     ) {
       # Positional reader over the flat native vector `model_constrain`
-      # returns (full native order -- A5's flat constrained-draws order,
-      # distinct from Part B's input-side blocked-AoS order); no name
-      # matching (A6: dotted metadata names vs colon-separated flat names
-      # never line up, which is exactly why the old name-matching
-      # implementation broke on tuples).
+      # returns (full native order -- the flat constrained-draws order,
+      # distinct from the input side's blocked-AoS order); no name matching,
+      # because dotted metadata names and colon-separated flat names do not
+      # align, so name matching cannot work for tuples.
       keep <- vapply(
         sized,
         .newstan_sized_stage_kept,
@@ -293,8 +305,11 @@ StanFit <- R6Class(
       if (reader$position() != length(flat)) {
         stop(
           "newstan internal error: the constrained output length (",
-          length(flat), ") did not match the expected variable structure ",
-          "(consumed ", reader$position(), ").",
+          length(flat),
+          ") did not match the expected variable structure ",
+          "(consumed ",
+          reader$position(),
+          ").",
           call. = FALSE
         )
       }
@@ -447,10 +462,13 @@ StanFit$set("public", "print", fit_print)
 #'   ```
 #'
 #' @return
-#' * `$return_codes()` returns an integer vector of Stan return codes (one per
-#'   chain or path). A return code of `0` indicates success.
+#' * `$return_codes()` returns an integer vector with the Stan service's
+#'   return code replicated once per chain (the in-process services report a
+#'   single code for the whole run). A return code of `0` indicates success.
 #' * `$metadata()` returns a named list of fit metadata including the seed,
-#'   data, arguments, and model name.
+#'   data, arguments, and model name. For adaptive MCMC fits,
+#'   `step_size_adaptation` is a numeric vector of one adapted step size per
+#'   chain; it is absent when sampling ran without adaptation.
 #' * `$output()` returns a character vector of Stan output messages from the
 #'   run. Messages from all chains or paths are interleaved in one vector;
 #'   per-chain attribution is not available.
@@ -677,9 +695,12 @@ fit_unconstrain_variables <- function(variables) {
       call. = FALSE
     )
   }
-  # Tuple-typed entries arrive as bare R lists (Part C); flatten them into
-  # the dotted per-leaf entries `r_data_context` expects (Part B) before the
-  # native call. Gate the stanc-info cost behind a cheap list check.
+  if (!inherits(private$model_, "StanModel")) {
+    stop("This fit does not retain a model binding.", call. = FALSE)
+  }
+  # Tuple-typed entries arrive as bare unnamed R lists; flatten them into
+  # the dotted per-leaf entries `r_data_context` expects before the native
+  # call. Gate the stanc-info cost behind a cheap list check.
   if (any(vapply(variables, is.list, logical(1)))) {
     declared <- private$model_$variables()
     variables <- .newstan_flatten_tuple_values(variables, declared$parameters)
@@ -970,7 +991,14 @@ mcmc_sampler_diagnostics <- function(
   if (is.null(diagnostics)) {
     stop("This fit does not contain sampler diagnostics.", call. = FALSE)
   }
-  if (inc_warmup && !is.null(private$warmup_diagnostics_)) {
+  if (inc_warmup) {
+    if (is.null(private$warmup_diagnostics_)) {
+      stop(
+        "warmup draws were not saved; only `$sample()` runs with ",
+        "`save_warmup = TRUE` store them.",
+        call. = FALSE
+      )
+    }
     diagnostics <- posterior::bind_draws(
       private$warmup_diagnostics_,
       diagnostics,

@@ -20,7 +20,7 @@ knitr::opts_chunk$set(
 
 `newstan` is an R interface for compiling Stan programs and running Stan
 services directly from R. It uses an R6-based API similar to `cmdstanr`:
-`stan_model()` returns a [`StanModel`] object, and inference methods
+`stan_model()` returns a `StanModel` object, and inference methods
 (`$sample()`, `$optimize()`, `$variational()`, etc.) return R6 fit objects
 with methods for extracting draws, summaries, and diagnostics. Results use
 `posterior` draw objects where possible.
@@ -29,30 +29,30 @@ with methods for extracting draws, summaries, and diagnostics. Results use
 
 | Method | Purpose | Return type |
 | --- | --- | --- |
-| [`$sample()`][model-method-sample] | MCMC sampling (HMC/NUTS, static HMC, fixed param) | [`StanMCMC`] |
-| [`$optimize()`][model-method-optimize] | Posterior mode or maximum likelihood estimate | [`StanMLE`] |
-| [`$laplace()`][model-method-laplace] | Laplace approximation draws around a mode | [`StanLaplace`] |
-| [`$variational()`][model-method-variational] | ADVI approximate posterior draws | [`StanVB`] |
-| [`$pathfinder()`][model-method-pathfinder] | Pathfinder approximate posterior draws | [`StanPathfinder`] |
-| [`$generate_quantities()`][model-method-generate-quantities] | Generated quantities from existing draws | [`StanGQ`] |
-| [`$diagnose()`][model-method-diagnose] | Gradient checking diagnostic | [`StanDiagnose`] |
+| `$sample()` | MCMC sampling (HMC/NUTS, static HMC, fixed param) | `StanMCMC` |
+| `$optimize()` | Posterior mode or maximum likelihood estimate | `StanMLE` |
+| `$laplace()` | Laplace approximation draws around a mode | `StanLaplace` |
+| `$variational()` | ADVI approximate posterior draws | `StanVB` |
+| `$pathfinder()` | Pathfinder approximate posterior draws | `StanPathfinder` |
+| `$generate_quantities()` | Generated quantities from existing draws | `StanGQ` |
+| `$diagnose()` | Gradient checking diagnostic | `StanDiagnose` |
 
 ## Fit Object Methods
 
-All fit objects inherit from [`StanFit`] and share common methods:
+All fit objects inherit from `StanFit` and share common methods:
 
 | Method | Description |
 | --- | --- |
-| [`$draws()`][fit-method-draws] | Extract draws as `posterior` objects |
-| [`$summary()`][fit-method-summary] | Summarize draws via `posterior::summarise_draws()` |
-| [`$print()`][fit-method-print] | Print a summary table |
-| [`$return_codes()`][fit-method-fit-info] | Stan return codes (0 = success) |
-| [`$metadata()`][fit-method-fit-info] | Fit metadata (seed, data, arguments) |
-| [`$time()`][fit-method-fit-info] | Timing information |
-| [`$log_prob()`][fit-method-model-methods] | Evaluate log probability |
-| [`$constrain_variables()`][fit-method-model-methods] | Constrain unconstrained parameters |
-| [`$unconstrain_variables()`][fit-method-model-methods] | Unconstrain parameters |
-| [`$save_object()`][fit-method-save] | Save fit to file |
+| `$draws()` | Extract draws as `posterior` objects |
+| `$summary()` | Summarize draws via `posterior::summarise_draws()` |
+| `$print()` | Print a summary table |
+| `$return_codes()` | Stan return codes (0 = success) |
+| `$metadata()` | Fit metadata (seed, data, arguments) |
+| `$time()` | Timing information |
+| `$log_prob()` | Evaluate log probability |
+| `$constrain_variables()` | Constrain unconstrained parameters |
+| `$unconstrain_variables()` | Unconstrain parameters |
+| `$save_object()` | Save fit to file |
 
 ## Installation
 
@@ -66,7 +66,7 @@ pak::pak("andrjohns/newstan")
 ## Compile a Model
 
 Models are compiled from a string or from a `.stan` file. `stan_model()`
-returns a [`StanModel`] R6 object.
+returns a `StanModel` R6 object.
 
 ```{r compile-model}
 library(newstan)
@@ -97,8 +97,8 @@ data <- list(N = 10, y = c(1, 0, 1, 1, 0, 1, 0, 0, 1, 0))
 
 ## Sampling
 
-Call `$sample()` on a [`StanModel`] to run MCMC. The result is a
-[`StanMCMC`] object with methods for extracting draws and diagnostics.
+Call `$sample()` on a `StanModel` to run MCMC. The result is a
+`StanMCMC` object with methods for extracting draws and diagnostics.
 
 ```{r sampling}
 fit <- mod$sample(
@@ -255,7 +255,7 @@ opt$summary()
 ## Laplace Approximation
 
 Call `$laplace()` to draw from a Gaussian approximation around a mode. Pass a
-[`StanMLE`] object or let `$laplace()` run optimization first.
+`StanMLE` object or let `$laplace()` run optimization first.
 
 ```{r laplace}
 lap <- mod$laplace(
@@ -272,7 +272,7 @@ lap$summary()
 
 ## Generated Quantities
 
-Call `$generate_quantities()` with a [`StanFit`] object or draws matrix to
+Call `$generate_quantities()` with a `StanFit` object or draws matrix to
 evaluate the generated quantities block.
 
 ```{r generated-quantities}
@@ -351,5 +351,5 @@ substr(cpp_code, 1, 80)
 ```
 
 `stan_model()` is the higher-level entry point: it calls `stanc()`, compiles
-the generated C++, and returns a [`StanModel`] object used by all inference
+the generated C++, and returns a `StanModel` object used by all inference
 methods.

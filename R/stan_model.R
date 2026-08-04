@@ -20,6 +20,44 @@
   base
 }
 
+# Shared by both compile paths (model TU and functions TU). `+=` appends
+# these after Makeconf's own CXXFLAGS/CXX17FLAGS (which are brought in ahead
+# of the package Makevars file R writes for this call), so our -O3 -g0 wins
+# the last-flag-wins compiler precedence instead of being silently
+# overridden by Makeconf's -g -O2. USE_CXX17/PKG_CPPFLAGS/PKG_LIBS are not
+# set by Makeconf, so `+=` on them is equivalent to `=`.
+.newstan_sourcecpp <- function(
+  cpp_file,
+  env,
+  cppflags,
+  libs,
+  extra_assignments,
+  rebuild,
+  cache_dir,
+  verbose
+) {
+  withr::with_makevars(
+    .newstan_apply_makevars(
+      c(
+        USE_CXX17 = "1",
+        PKG_CPPFLAGS = cppflags,
+        PKG_LIBS = libs,
+        CXXFLAGS = .newstan_opt_flags,
+        CXX17FLAGS = .newstan_opt_flags
+      ),
+      extra_assignments
+    ),
+    assignment = "+=",
+    Rcpp::sourceCpp(
+      file = cpp_file,
+      env = env,
+      rebuild = rebuild,
+      cacheDir = cache_dir,
+      verbose = verbose
+    )
+  )
+}
+
 .newstan_tbb_libs <- function() {
   tbb_libs <- utils::tail(
     utils::capture.output(RcppParallel::RcppParallelLibs()),
@@ -97,17 +135,26 @@
 # inst/stan_model.cpp -- reserved so a combined-TU expose can't silently
 # shadow one of them.
 .newstan_model_support_exports <- c(
-  "new_model", "run_model", "constrained_param_names", "new_base_rng",
-  "model_num_upars", "model_param_metadata", "model_constrained_names",
-  "model_unconstrained_names", "model_log_prob", "model_grad_log_prob",
-  "model_hessian", "model_unconstrain", "model_unconstrain_matrix",
-  "model_constrain", "select_opencl_device"
+  "new_model",
+  "run_model",
+  "constrained_param_names",
+  "new_base_rng",
+  "model_num_upars",
+  "model_param_metadata",
+  "model_constrained_names",
+  "model_unconstrained_names",
+  "model_log_prob",
+  "model_grad_log_prob",
+  "model_hessian",
+  "model_unconstrain",
+  "model_unconstrain_matrix",
+  "model_constrain",
+  "select_opencl_device"
 )
 
 .compile_stan_model_environment <- function(
   code,
   model_name,
-  include_directories = character(),
   external_cpp = NULL,
   verbose = FALSE,
   precompiled_headers = TRUE,
@@ -182,7 +229,6 @@
     }
     cpp_code <- stanc(
       code,
-      include_directories = include_directories,
       external_cpp = external_cpp,
       use_opencl = use_opencl
     )
@@ -291,30 +337,15 @@
   }
 
   compile_model <- function(compilation_cppflags) {
-    # `+=` appends these after Makeconf's own CXXFLAGS/CXX17FLAGS (which are
-    # brought in ahead of the package Makevars file R writes for this call),
-    # so our -O3 -g0 wins the last-flag-wins compiler precedence instead of
-    # being silently overridden by Makeconf's -g -O2. USE_CXX17/PKG_CPPFLAGS/
-    # PKG_LIBS are not set by Makeconf, so `+=` on them is equivalent to `=`.
-    withr::with_makevars(
-      .newstan_apply_makevars(
-        c(
-          USE_CXX17 = "1",
-          PKG_CPPFLAGS = compilation_cppflags,
-          PKG_LIBS = libs,
-          CXXFLAGS = .newstan_opt_flags,
-          CXX17FLAGS = .newstan_opt_flags
-        ),
-        extra_assignments
-      ),
-      assignment = "+=",
-      Rcpp::sourceCpp(
-        file = cpp_file,
-        env = env,
-        rebuild = force_recompile,
-        cacheDir = cache_dir,
-        verbose = verbose
-      )
+    .newstan_sourcecpp(
+      cpp_file = cpp_file,
+      env = env,
+      cppflags = compilation_cppflags,
+      libs = libs,
+      extra_assignments = extra_assignments,
+      rebuild = force_recompile,
+      cache_dir = cache_dir,
+      verbose = verbose
     )
   }
 

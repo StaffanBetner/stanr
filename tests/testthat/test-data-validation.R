@@ -41,6 +41,36 @@ test_that("NA integer data is rejected before Stan services run", {
   )
 })
 
+test_that("NA/NaN real data is rejected before Stan services run", {
+  mod <- test_model("model_methods")
+  data <- list(N = 4L, y = c(1L, 0L, 1L, 0L), mu = NA_real_)
+
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      chains = 1,
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "Real variable 'mu' contains NA or NaN"
+  )
+
+  data$mu <- NaN
+  expect_error(
+    mod$sample(
+      data = data,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      chains = 1,
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "Real variable 'mu' contains NA or NaN"
+  )
+})
+
 test_that("invalid sampling counts throw a configuration error", {
   mod <- test_model("bernoulli")
   data <- list(N = 4L, y = c(1L, 0L, 1L, 0L))
@@ -54,7 +84,7 @@ test_that("invalid sampling counts throw a configuration error", {
       seed = 42,
       show_messages = FALSE
     ),
-    "`chains` must be a positive integer"
+    "`chains` must be a single integer"
   )
   expect_error(
     mod$sample(

@@ -9,18 +9,22 @@
 #'
 #' @noRd
 .newstan_validate_chains <- function(chains, chain_ids) {
-  chains <- as.integer(chains)
-  if (chains < 1L) {
-    stop("`chains` must be a positive integer.", call. = FALSE)
-  }
-
-  chain_ids <- as.integer(chain_ids)
+  chains <- .newstan_int(chains, "chains", min = 1L)
   if (
-    length(chain_ids) != chains ||
+    !is.numeric(chain_ids) ||
+      length(chain_ids) != chains ||
       anyNA(chain_ids) ||
-      anyDuplicated(chain_ids) ||
-      any(diff(chain_ids) != 1L)
+      any(chain_ids != floor(chain_ids))
   ) {
+    stop(
+      "`chain_ids` must be ",
+      chains,
+      " integer value(s).",
+      call. = FALSE
+    )
+  }
+  chain_ids <- as.integer(chain_ids)
+  if (anyDuplicated(chain_ids) || any(diff(chain_ids) != 1L)) {
     stop(
       "The current backend requires `chain_ids` to be unique consecutive integers.",
       call. = FALSE

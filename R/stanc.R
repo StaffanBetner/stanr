@@ -282,10 +282,6 @@ model_variables <- function(
   variables[["transformed parameters"]] <- NULL
   variables$generated_quantities <- variables[["generated quantities"]]
   variables[["generated quantities"]] <- NULL
-  variables$functions <- NULL
-  variables$distributions <- NULL
-  variables$included_files <- NULL
-  # Reorder to match expected output
   variables[c(
     "data",
     "parameters",

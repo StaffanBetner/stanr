@@ -275,6 +275,41 @@ test_that("StanModel caches resolved #include code between $compile() and $varia
   expect_equal(work_call_count, 2)
 })
 
+test_that("stanc(warn_pedantic = TRUE) surfaces a pedantic warning", {
+  code <- paste(
+    "parameters { real theta; }",
+    "model { theta ~ uniform(0, 1); }",
+    sep = "\n"
+  )
+
+  expect_warning(stanc(code, warn_pedantic = TRUE))
+})
+
+test_that("stanc(optim_level = 1) compiles and names the model", {
+  code <- "parameters { real x; } model { x ~ normal(0, 1); }"
+
+  cpp_code <- stanc(code, optim_level = 1)
+
+  expect_type(cpp_code, "character")
+  expect_match(cpp_code, "model_namespace")
+})
+
+test_that("stanc(warn_uninitialized = TRUE) compiles without error", {
+  code <- paste(
+    "parameters { real x; }",
+    "transformed parameters {",
+    "  real y;",
+    "  if (x > 0) {",
+    "    y = x;",
+    "  }",
+    "}",
+    "model { x ~ normal(0, 1); }",
+    sep = "\n"
+  )
+
+  expect_no_error(stanc(code, warn_uninitialized = TRUE))
+})
+
 test_that("StanModel$variables() works with external_cpp", {
   code <- paste(
     "functions { real external_mean(real x); }",

@@ -15,10 +15,10 @@ bernoulli_log_lik_mod <- newstan::stan_model(
   compile = TRUE
 )
 
-bernoulli_data <- list(N = 10, y = c(0, 1, 1, 0, 1, 0, 1, 1, 1, 0))
+loo_bernoulli_data <- list(N = 10, y = c(0, 1, 1, 0, 1, 0, 1, 1, 1, 0))
 
 bernoulli_fit <- bernoulli_log_lik_mod$sample(
-  data = bernoulli_data,
+  data = loo_bernoulli_data,
   chains = 1,
   num_threads = 1,
   iter_sampling = 100,
@@ -35,6 +35,16 @@ test_that("$loo() returns a loo object", {
 
 test_that("$loo() accepts r_eff = FALSE (default)", {
   loo_result <- suppressWarnings(bernoulli_fit$loo(r_eff = FALSE))
+  expect_s3_class(loo_result, "loo")
+})
+
+test_that("$loo() accepts r_eff = TRUE", {
+  loo_result <- suppressWarnings(bernoulli_fit$loo(r_eff = TRUE))
+  expect_s3_class(loo_result, "loo")
+})
+
+test_that("$loo() accepts moment_match = TRUE", {
+  loo_result <- suppressWarnings(bernoulli_fit$loo(moment_match = TRUE))
   expect_s3_class(loo_result, "loo")
 })
 
@@ -69,7 +79,7 @@ test_that("$loo() errors when log_lik is not in draws", {
     compile = TRUE
   )
   bernoulli_no_ll_fit <- bernoulli_no_ll_mod$sample(
-    data = bernoulli_data,
+    data = loo_bernoulli_data,
     chains = 1,
     num_threads = 1,
     iter_sampling = 50,

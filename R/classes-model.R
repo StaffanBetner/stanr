@@ -148,17 +148,21 @@
   started <- proc.time()[["elapsed"]]
   seed <- .newstan_seed(seed)
   resolved_init <- if (!is.null(init)) resolve_init(init)
-  # Tuple-typed data/init values arrive as bare R lists (Part C); flatten them
-  # into the dotted per-leaf entries `r_data_context` expects (Part B) before
+  # Tuple-typed data/init values arrive as bare unnamed R lists; flatten
+  # them into the dotted per-leaf entries `r_data_context` expects before
   # they reach any native call. `self$variables()` pays the stanc-info cost,
   # so gate it behind a cheap check for any list-valued entry.
   has_list <- function(x) any(vapply(x, is.list, logical(1)))
-  if (has_list(data) || (!is.null(resolved_init) && has_list(resolved_init$values))) {
+  if (
+    has_list(data) ||
+      (!is.null(resolved_init) && has_list(resolved_init$values))
+  ) {
     declared <- self$variables()
     data <- .newstan_flatten_tuple_values(data, declared$data)
     if (!is.null(resolved_init)) {
       resolved_init$values <- .newstan_flatten_tuple_values(
-        resolved_init$values, declared$parameters
+        resolved_init$values,
+        declared$parameters
       )
     }
   }
@@ -633,7 +637,6 @@ stan_model_compile <- function(
   private$compiled_env_ <- .compile_stan_model_environment(
     code = private$resolved_code(),
     model_name = private$model_name_,
-    include_directories = character(),
     external_cpp = private$external_cpp_,
     verbose = !quiet,
     precompiled_headers = private$precompiled_headers_,
@@ -768,10 +771,18 @@ stan_model_expose_stan_functions <- function(global = FALSE, verbose = FALSE) {
     }
   }
 
-  .newstan_build_functions_env(private$functions_compiled_env_, self$functions, global)
+  .newstan_build_functions_env(
+    private$functions_compiled_env_,
+    self$functions,
+    global
+  )
   invisible(self$functions)
 }
-StanModel$set("public", "expose_stan_functions", stan_model_expose_stan_functions)
+StanModel$set(
+  "public",
+  "expose_stan_functions",
+  stan_model_expose_stan_functions
+)
 StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 
 # StanModel fitting methods ----------------------------------------------------
@@ -800,7 +811,9 @@ StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
 #'   further.
 #' @param iter_warmup (integer) The number of warmup iterations.
 #' @param iter_sampling (integer) The number of sampling iterations.
-#' @param save_warmup (logical) Should warmup samples be saved?
+#' @param save_warmup (logical) Should warmup samples be saved? Ignored when
+#'   `fixed_param = TRUE`, since that mode runs no warmup and so has nothing
+#'   to save.
 #' @param thin (integer) Thin interval.
 #' @param max_treedepth (integer) Maximum tree depth for NUTS.
 #' @param adapt_engaged (logical) Should step size adaptation be used?
@@ -890,6 +903,13 @@ stan_model_sample <- function(
   fixed_param <- .newstan_flag(fixed_param, "fixed_param")
   show_messages <- .newstan_flag(show_messages, "show_messages")
   show_exceptions <- .newstan_flag(show_exceptions, "show_exceptions")
+  if (fixed_param && save_warmup) {
+    warning(
+      "`save_warmup` is ignored when `fixed_param = TRUE`.",
+      call. = FALSE
+    )
+    save_warmup <- FALSE
+  }
   if (!is.null(opencl_ids)) {
     private$select_opencl(opencl_ids)
   }
@@ -1003,16 +1023,20 @@ stan_model_sample <- function(
       par_vars <- draw_names[!(draw_names %in% diagnostic_vars)]
 
       if (fixed_param) {
-        diagnostics <- posterior::draws_df(
-          "stepsize__" = NA,
-          "treedepth__" = NA,
-          "n_leapfrog__" = NA,
-          "divergent__" = NA,
-          "energy__" = NA
-        )
-        draws <- posterior::as_draws_array(
-          result$samples[,, par_vars, drop = FALSE]
-        )
+        present <- intersect(diagnostic_vars, draw_names)
+        all_draws <- posterior::as_draws_array(result$samples)
+        diagnostics <- if (length(present)) {
+          posterior::subset_draws(all_draws, variable = present)
+        } else {
+          posterior::draws_df(
+            "stepsize__" = NA,
+            "treedepth__" = NA,
+            "n_leapfrog__" = NA,
+            "divergent__" = NA,
+            "energy__" = NA
+          )
+        }
+        draws <- posterior::subset_draws(all_draws, par_vars)
       } else {
         all_draws <- posterior::as_draws_array(result$samples)
         diagnostics <- posterior::subset_draws(
@@ -1089,6 +1113,11 @@ StanModel$set("public", "sample", stan_model_sample)
 #'   including the initial point) instead of a single row for the final
 #'   estimate. [`$mle()`][fit-method-mle] is unaffected either way and always
 #'   reflects the final iteration.
+#' @param num_threads (integer) The total number of threads to use. The
+#'   request is capped at the machine's hardware concurrency, and any other
+#'   active TBB `global_control` in the process (e.g. from
+#'   `RcppParallel::setThreadOptions()`) can lower the effective count
+#'   further.
 #' @template param-opencl_ids
 #'
 #' @return A [`StanMLE`] object containing the point estimate.
@@ -1106,7 +1135,7 @@ stan_model_optimize <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  threads = NULL,
+  num_threads = NULL,
   opencl_ids = NULL,
   algorithm = "lbfgs",
   jacobian = FALSE,
@@ -1143,7 +1172,7 @@ stan_model_optimize <- function(
     )
   }
 
-  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  num_threads <- .newstan_int(num_threads %||% 1L, "num_threads", min = 1L)
   refresh <- .newstan_int(refresh, "refresh")
   iter <- .newstan_int(iter, "iter")
   history_size <- .newstan_int(history_size, "history_size")
@@ -1168,7 +1197,7 @@ stan_model_optimize <- function(
       refresh = refresh,
       verbose = show_messages,
       show_exceptions = show_exceptions,
-      num_threads = threads,
+      num_threads = num_threads,
       init = resolved_init$values
     )
   }
@@ -1206,7 +1235,7 @@ stan_model_optimize <- function(
     metadata = list(
       method = "optimize",
       jacobian = jacobian,
-      threads = threads,
+      num_threads = num_threads,
       show_exceptions = show_exceptions
     )
   )
@@ -1235,6 +1264,11 @@ StanModel$set("public", "optimize", stan_model_optimize)
 #' @param draws (integer) The number of draws from the Laplace approximation.
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
+#' @param num_threads (integer) The total number of threads to use. The
+#'   request is capped at the machine's hardware concurrency, and any other
+#'   active TBB `global_control` in the process (e.g. from
+#'   `RcppParallel::setThreadOptions()`) can lower the effective count
+#'   further.
 #' @template param-opencl_ids
 #'
 #' @return A [`StanLaplace`] object containing approximate posterior draws.
@@ -1252,7 +1286,7 @@ stan_model_laplace <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  threads = NULL,
+  num_threads = NULL,
   opencl_ids = NULL,
   mode = NULL,
   opt_args = NULL,
@@ -1291,11 +1325,9 @@ stan_model_laplace <- function(
   if (!is.null(opencl_ids)) {
     private$select_opencl(opencl_ids)
   }
-  # Resolved once so the internal mode-finding optimize() run (if any) and
-  # the laplace run itself agree on data/seed/init.
-  resolved_data <- data
+  # Seed is resolved once so the internal mode-finding optimize() run (if
+  # any) and the laplace run itself share it.
   resolved_seed <- .newstan_seed(seed)
-  resolved_init <- init
 
   mode_fit <- NULL
   if (is.null(mode)) {
@@ -1303,9 +1335,9 @@ stan_model_laplace <- function(
       self$optimize,
       c(
         list(
-          data = resolved_data,
+          data = data,
           seed = resolved_seed,
-          init = resolved_init,
+          init = init,
           jacobian = jacobian,
           show_messages = show_messages,
           show_exceptions = show_exceptions
@@ -1322,7 +1354,7 @@ stan_model_laplace <- function(
     mode_val <- mode
   }
 
-  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  num_threads <- .newstan_int(num_threads %||% 1L, "num_threads", min = 1L)
   refresh <- .newstan_int(refresh, "refresh")
   draws <- .newstan_int(draws, "draws")
 
@@ -1352,7 +1384,7 @@ stan_model_laplace <- function(
       refresh = refresh,
       verbose = show_messages,
       show_exceptions = show_exceptions,
-      num_threads = threads
+      num_threads = num_threads
     )
   }
 
@@ -1365,7 +1397,7 @@ stan_model_laplace <- function(
   # made here -- pass init = NULL to the shared runner to preserve that.
   res <- .newstan_run_service(
     self = self,
-    data = resolved_data,
+    data = data,
     seed = resolved_seed,
     init = NULL,
     native_args_fn = native_args_fn,
@@ -1375,15 +1407,15 @@ stan_model_laplace <- function(
   StanLaplace$new(
     payload = res$payload,
     model = self,
-    data = resolved_data,
+    data = data,
     seed = resolved_seed,
-    init = resolved_init,
+    init = init,
     elapsed = res$elapsed,
     mode = mode_fit %||% mode,
     metadata = list(
       method = "laplace",
       jacobian = jacobian,
-      threads = threads,
+      num_threads = num_threads,
       show_exceptions = show_exceptions
     )
   )
@@ -1414,6 +1446,11 @@ StanModel$set("public", "laplace", stan_model_laplace)
 #' @param tol_rel_obj (number) Relative tolerance for ELBO convergence.
 #' @param eval_elbo (integer) How often to evaluate the ELBO.
 #' @param draws (integer) The number of draws from the variational approximation.
+#' @param num_threads (integer) The total number of threads to use. The
+#'   request is capped at the machine's hardware concurrency, and any other
+#'   active TBB `global_control` in the process (e.g. from
+#'   `RcppParallel::setThreadOptions()`) can lower the effective count
+#'   further.
 #' @template param-opencl_ids
 #'
 #' @return A [`StanVB`] object containing approximate posterior draws.
@@ -1432,7 +1469,7 @@ stan_model_variational <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  threads = NULL,
+  num_threads = NULL,
   opencl_ids = NULL,
   algorithm = "meanfield",
   iter = 10000L,
@@ -1474,7 +1511,7 @@ stan_model_variational <- function(
     )
   }
 
-  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  num_threads <- .newstan_int(num_threads %||% 1L, "num_threads", min = 1L)
   refresh <- .newstan_int(refresh, "refresh")
   iter <- .newstan_int(iter, "iter")
   grad_samples <- .newstan_int(grad_samples, "grad_samples")
@@ -1501,7 +1538,7 @@ stan_model_variational <- function(
       output_samples = draws,
       verbose = show_messages,
       show_exceptions = show_exceptions,
-      num_threads = threads,
+      num_threads = num_threads,
       init = resolved_init$values
     )
   }
@@ -1532,7 +1569,7 @@ stan_model_variational <- function(
     elapsed = res$elapsed,
     metadata = list(
       method = "variational",
-      threads = threads,
+      num_threads = num_threads,
       show_exceptions = show_exceptions
     )
   )
@@ -1561,6 +1598,11 @@ StanModel$set("public", "variational", stan_model_variational)
 #' @param psis_resample (logical) Should Pareto smoothed importance sampling
 #'   resampling be used?
 #' @param calculate_lp (logical) Should the log density be calculated?
+#' @param num_threads (integer) The total number of threads to use. The
+#'   request is capped at the machine's hardware concurrency, and any other
+#'   active TBB `global_control` in the process (e.g. from
+#'   `RcppParallel::setThreadOptions()`) can lower the effective count
+#'   further.
 #' @template param-opencl_ids
 #'
 #' @return A [`StanPathfinder`] object containing approximate posterior draws.
@@ -1578,7 +1620,7 @@ stan_model_pathfinder <- function(
   output_dir = NULL,
   output_basename = NULL,
   sig_figs = NULL,
-  threads = NULL,
+  num_threads = NULL,
   opencl_ids = NULL,
   init_alpha = 0.001,
   tol_obj = 1e-12,
@@ -1614,7 +1656,7 @@ stan_model_pathfinder <- function(
     private$select_opencl(opencl_ids)
   }
 
-  threads <- .newstan_int(threads %||% 1L, "threads", min = 1L)
+  num_threads <- .newstan_int(num_threads %||% 1L, "num_threads", min = 1L)
   refresh <- .newstan_int(refresh, "refresh")
   num_paths <- .newstan_int(num_paths, "num_paths", min = 1L)
   single_path_draws <- .newstan_int(single_path_draws, "single_path_draws")
@@ -1647,7 +1689,7 @@ stan_model_pathfinder <- function(
       refresh = refresh,
       verbose = show_messages,
       show_exceptions = show_exceptions,
-      num_threads = threads,
+      num_threads = num_threads,
       init = resolved_init$values
     )
   }
@@ -1684,7 +1726,7 @@ stan_model_pathfinder <- function(
     metadata = list(
       method = "pathfinder",
       num_paths = num_paths,
-      threads = threads,
+      num_threads = num_threads,
       show_exceptions = show_exceptions
     )
   )

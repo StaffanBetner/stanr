@@ -84,6 +84,10 @@ test_that("a fit without a model binding errors with the exact 'no model binding
     fit$functions,
     "^This fit does not retain a model binding\\.$"
   )
+  expect_error(
+    fit$unconstrain_variables(list(t = list(1))),
+    "does not retain a model binding"
+  )
 })
 
 test_that("delegation reaches the model: a second model-level expose is a cheap no-op", {

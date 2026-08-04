@@ -177,9 +177,9 @@
 #' Return the on-disk path of the PCH currently memoized for `cppflags`.
 #'
 #' Reconstructs the exact memo key `.newstan_pch_flags()` uses for a given
-#' `cppflags` (always with `rebuild = FALSE`, matching that function's own
-#' key -- the memo represents steady-state resolved flags regardless of how
-#' they were resolved) and returns the associated PCH path, if any. Used by
+#' `cppflags` (the key does not depend on `rebuild` -- the memo represents
+#' steady-state resolved flags regardless of how they were resolved) and
+#' returns the associated PCH path, if any. Used by
 #' `.compile_stan_model_environment()` (R/stan_model.R) to check whether a
 #' just-failed compile's PCH is stale (and therefore worth rebuilding) without
 #' duplicating the digest key construction there.
@@ -190,10 +190,7 @@
 #'
 #' @noRd
 .newstan_pch_current <- function(cppflags) {
-  memo_key <- paste0(
-    "pch_flags:",
-    digest::digest(list(cppflags, rebuild = FALSE))
-  )
+  memo_key <- paste0("pch_flags:", digest::digest(cppflags))
   .newstan_memo[[memo_key]]$pch %||% NA_character_
 }
 
@@ -204,9 +201,9 @@
 #' transitively covers `stan/model/model_header.hpp`, `Rcpp.h`, and the
 #' newstan wrapper headers -- the full cold-compiled preamble of an assembled
 #' model translation unit (`inst/stan_model.cpp`).
-#' The resolved flags are memoized per-session, keyed on `cppflags` with the
-#' memo key always using `rebuild = FALSE`. A memo hit still revalidates the
-#' cached PCH via `file.exists()`; a miss falls through to recomputation.
+#' The resolved flags are memoized per-session, keyed on `cppflags` alone (not
+#' `rebuild`). A memo hit still revalidates the cached PCH via
+#' `file.exists()`; a miss falls through to recomputation.
 #'
 #' The two compiler families use different discovery mechanisms:
 #' * clang: `-include-pch <pch>` names the compiled `.gch` file directly, so
@@ -219,10 +216,7 @@
 #'
 #' @noRd
 .newstan_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
-  memo_key <- paste0(
-    "pch_flags:",
-    digest::digest(list(cppflags, rebuild = FALSE))
-  )
+  memo_key <- paste0("pch_flags:", digest::digest(cppflags))
   if (!rebuild) {
     cached <- .newstan_memo[[memo_key]]
     if (!is.null(cached) && (is.na(cached$pch) || file.exists(cached$pch))) {
@@ -345,7 +339,9 @@
         return(remember(""))
       }
     }
-    message("[newstan] Compiling precompiled model header...")
+    if (verbose) {
+      message("[newstan] Compiling precompiled model header...")
+    }
     output <- tryCatch(
       .newstan_system2(
         make,
@@ -396,8 +392,9 @@
 
 #' Compile with a PCH, retrying once with a rebuilt PCH on staleness.
 #'
-#' Shared by more than one compile path (`.compile_stan_model_environment()`
-#' in R/stan_model.R now, another compile path in a follow-up phase), so it
+#' Shared by both compile paths (model TU and functions TU:
+#' `.compile_stan_model_environment()` in R/stan_model.R and
+#' `.compile_standalone_functions_environment()` in R/expose.R), so it
 #' lives here alongside the other PCH helpers it calls
 #' (`.newstan_pch_current()`, `.newstan_pch_flags()`) rather than in either
 #' caller. `compile_fn` is a one-argument function `function(compilation_cppflags)`

@@ -33,6 +33,22 @@ test_that("advi with meanfield algorithm works", {
   expect_equal(result$return_codes(), 0L)
 })
 
+test_that("advi requested draw count is respected and lp__ is not included", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$variational(
+    data = data,
+    iter = 1000,
+    draws = 100,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_equal(posterior::ndraws(result$draws()), 100L)
+  expect_false("lp__" %in% posterior::variables(result$draws()))
+})
+
 test_that("advi with an invalid algorithm errors before reaching C++", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data

@@ -65,6 +65,11 @@ r_data_context::r_data_context(Rcpp::List list) {
         values_.emplace(name, value_entry{{}, {}, std::move(ints),
                                           std::move(dims)});
       } else {
+        for (R_xlen_t j = 0; j < input.size(); ++j) {
+          if (std::isnan(input[j])) {
+            Rcpp::stop("Real variable '" + name + "' contains NA or NaN.");
+          }
+        }
         std::vector<double> reals(input.begin(), input.end());
         values_.emplace(name, value_entry{std::move(reals), {}, std::nullopt,
                                           std::move(dims)});
@@ -75,9 +80,9 @@ r_data_context::r_data_context(Rcpp::List list) {
       complexes.reserve(input.size());
       for (R_xlen_t j = 0; j < input.size(); ++j) {
         const Rcomplex element = input[j];
-        if (!std::isfinite(element.r) || !std::isfinite(element.i)) {
+        if (std::isnan(element.r) || std::isnan(element.i)) {
           Rcpp::stop("Complex variable '" + name
-                     + "' contains a non-finite value.");
+                     + "' contains NA or NaN.");
         }
         complexes.emplace_back(element.r, element.i);
       }
@@ -94,13 +99,12 @@ r_data_context::r_data_context(Rcpp::List list) {
         values_.emplace(name, value_entry{{}, std::move(complexes),
                                           std::nullopt, std::move(dims)});
       } else {
-        // Tuple-slot complex leaf (dotted name; Part B/A4 of the
-        // complex-tuple interop plan): stanc 2.39's generated reader
-        // consumes vals_c() for a tuple-slot complex leaf in per-enclosing-
-        // array-element windows that are only half used. Build that
-        // windowed layout here so the dotted flat vector produced by the R
-        // flattener (Part B) lines up with what the generated reader
-        // actually indexes.
+        // Tuple-slot complex leaf (dotted name): stanc 2.39's generated
+        // reader consumes vals_c() for a tuple-slot complex leaf in
+        // per-enclosing-array-element windows that are only half used.
+        // Build that windowed layout here so the dotted flat vector
+        // produced by the R flattener lines up with what the generated
+        // reader actually indexes.
         //
         // k = count of enclosing array dims (read from the
         // `newstan_array_dims` attribute the R flattener attaches; default

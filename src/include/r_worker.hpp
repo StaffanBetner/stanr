@@ -51,7 +51,7 @@ template <class F>
 int run_on_worker_thread(newstan::r_logger& logger, const char* what,
                           F&& fn) {
   std::atomic<bool> cancel_requested{false};
-  newstan::r_interrupt interrupt(&cancel_requested);
+  newstan::r_interrupt interrupt(&cancel_requested, what);
 
   std::atomic<bool> finished{false};
   std::mutex completion_mutex;

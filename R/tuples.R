@@ -1,8 +1,6 @@
 # R-side flattening of tuple-typed `data =` / `init =` / `unconstrain_variables()`
 # values into the dotted-name, per-leaf entries that `r_data_context` (and the
-# generated Stan reader) actually expect. See the "complex-number and tuple
-# interop" plan, Part B, for the full normative var_context contract this file
-# implements; the short version:
+# generated Stan reader) actually expect:
 #
 #   * Every tuple-typed variable `x` is read by generated code slot-by-slot,
 #     never as a whole -- dotted names `x.1`, `x.2.1`, ... one per leaf
@@ -17,8 +15,8 @@
 #     windowed `vals_c` layout stanc 2.39 requires for tuple-slot complex data
 #     (see src/r_data_context.cpp).
 
-# TRUE if `x` has any non-empty name -- used to reject the JSON-style named
-# lists Part C does not support (tuple values are always *unnamed* lists).
+# TRUE if `x` has any non-empty name -- used to reject named lists, since
+# tuple values are represented as unnamed R lists, never named ones.
 .newstan_has_names <- function(x) {
   nm <- names(x)
   !is.null(nm) && any(nzchar(nm))
@@ -27,7 +25,7 @@
 # The "own shape" of one leaf payload: its `dim` attribute if present,
 # otherwise its length if > 1, otherwise nothing (a bare scalar). Used both
 # to validate that every enclosing-array element supplies the same shape and
-# to build the leaf's stored `dim` (Part B rule 1).
+# to build the leaf's stored `dim`.
 .newstan_payload_shape <- function(x) {
   d <- dim(x)
   if (!is.null(d)) {
@@ -41,13 +39,16 @@
 
 # Validate that `value` is an unnamed list nested `k` levels deep (one level
 # per enclosing array dimension, outermost first, matching the canonical R
-# shape in Part C) and return the array's size at each level, in Stan
-# declaration order. Errors on non-list/named values and on non-rectangular
-# arrays (sibling elements whose nested shape disagrees).
+# shape for array-of-tuple values) and return the array's size at each level,
+# in Stan declaration order. Errors on non-list/named values and on
+# non-rectangular arrays (sibling elements whose nested shape disagrees).
 .newstan_tuple_array_shape <- function(name, value, k) {
   if (!is.list(value) || .newstan_has_names(value)) {
     stop(
-      "`", name, "` must be an unnamed list (", k,
+      "`",
+      name,
+      "` must be an unnamed list (",
+      k,
       if (k == 1L) " level" else " levels",
       " deep, matching its declared array dimensions); see the tuple data ",
       "shape documentation.",
@@ -61,15 +62,22 @@
   sizes <- NULL
   for (i in seq_len(d1)) {
     shape_i <- .newstan_tuple_array_shape(
-      paste0(name, "[[", i, "]]"), value[[i]], k - 1L
+      paste0(name, "[[", i, "]]"),
+      value[[i]],
+      k - 1L
     )
     if (is.null(sizes)) {
       sizes <- shape_i
     } else if (!identical(sizes, shape_i)) {
       stop(
-        "`", name, "` is not a rectangular tuple array: element ", i,
-        " has shape ", paste(shape_i, collapse = "x"),
-        " but a previous element has shape ", paste(sizes, collapse = "x"),
+        "`",
+        name,
+        "` is not a rectangular tuple array: element ",
+        i,
+        " has shape ",
+        paste(shape_i, collapse = "x"),
+        " but a previous element has shape ",
+        paste(sizes, collapse = "x"),
         ".",
         call. = FALSE
       )
@@ -81,7 +89,8 @@
 # Flatten a nested list (already validated by `.newstan_tuple_array_shape`,
 # with per-level sizes `sizes`) into a single flat list of elements enumerated
 # column-major -- first (outermost) index fastest, later indices slower. This
-# is the enumeration order A3 requires for tuple-slot flat storage.
+# is the enumeration order the blocked flat-storage layout described in the
+# file header requires for tuple-slot leaves.
 .newstan_enumerate_tuple_elements <- function(value, sizes) {
   k <- length(sizes)
   if (k == 0L) {
@@ -110,10 +119,17 @@
 # already-enumerated enclosing-array element). `array_sizes` is the
 # accumulated enclosing-array dim sizes (outermost first) up to and including
 # this leaf's own tuple-array nesting.
-.newstan_flatten_tuple_leaf <- function(slot_name, slot_vals, slot_type, array_sizes) {
+.newstan_flatten_tuple_leaf <- function(
+  slot_name,
+  slot_vals,
+  slot_type,
+  array_sizes
+) {
   if (!length(slot_vals)) {
     stop(
-      "`", slot_name, "` has no enclosing array elements to flatten.",
+      "`",
+      slot_name,
+      "` has no enclosing array elements to flatten.",
       call. = FALSE
     )
   }
@@ -123,8 +139,12 @@
       shape_i <- .newstan_payload_shape(slot_vals[[i]])
       if (!identical(shape_i, ref_shape)) {
         stop(
-          "`", slot_name, "` has inconsistent value shapes across enclosing ",
-          "array elements: element ", i, " has shape ",
+          "`",
+          slot_name,
+          "` has inconsistent value shapes across enclosing ",
+          "array elements: element ",
+          i,
+          " has shape ",
           if (length(shape_i)) paste(shape_i, collapse = "x") else "scalar",
           " but element 1 has shape ",
           if (length(ref_shape)) paste(ref_shape, collapse = "x") else "scalar",
@@ -139,12 +159,13 @@
   flat <- do.call(c, payloads)
   total_dims <- c(array_sizes, ref_shape)
   if (length(total_dims) >= 2L) {
-    # Part B rule 1: >= 2 dims must be set explicitly; a single dim may stay
-    # a bare vector, and a true scalar (no dims at all) stays a bare scalar.
+    # A leaf's `dim` is only set once there are >= 2 dims; a single dim
+    # stays a bare vector, and a true scalar (no dims at all) stays a bare
+    # scalar.
     dim(flat) <- as.integer(total_dims)
   }
   if (is_complex_slot) {
-    # Part B rule 4: count of enclosing array dims only -- never includes
+    # `newstan_array_dims` counts only the enclosing array dims -- never
     # this leaf's own container dims (e.g. a complex_vector's own length).
     attr(flat, "newstan_array_dims") <- as.integer(length(array_sizes))
   }
@@ -155,15 +176,24 @@
 # already-enumerated tuple instances at this level (each an unnamed list of
 # length `nrow(type_df)`); `array_sizes` is the accumulated enclosing-array
 # dim sizes up to and including this level's own array (if any); `type_df`
-# is this level's slot data.frame (A8: columns `type`, `dimensions`, one row
-# per slot -- `type` is a data.frame for a nested-tuple slot, else a string).
+# is this level's slot data.frame (columns `type`, `dimensions`, one row per
+# slot -- `type` is a data.frame for a nested-tuple slot, else a string).
 # Leaf entries are written into `out` (an environment) keyed by dotted name.
-.newstan_flatten_tuple_recurse <- function(name, elements, array_sizes, type_df, out) {
+.newstan_flatten_tuple_recurse <- function(
+  name,
+  elements,
+  array_sizes,
+  type_df,
+  out
+) {
   n_slots <- nrow(type_df)
   for (el in elements) {
     if (!is.list(el) || .newstan_has_names(el) || length(el) != n_slots) {
       stop(
-        "`", name, "` must be an unnamed list of length ", n_slots,
+        "`",
+        name,
+        "` must be an unnamed list of length ",
+        n_slots,
         " (one entry per tuple slot); see the tuple data shape documentation.",
         call. = FALSE
       )
@@ -185,34 +215,51 @@
         inner_lists <- vector("list", length(slot_vals))
         for (i in seq_along(slot_vals)) {
           shape_i <- .newstan_tuple_array_shape(
-            paste0(slot_name, "[", i, "]"), slot_vals[[i]], slot_dims
+            paste0(slot_name, "[", i, "]"),
+            slot_vals[[i]],
+            slot_dims
           )
           if (is.null(inner_sizes)) {
             inner_sizes <- shape_i
           } else if (!identical(inner_sizes, shape_i)) {
             stop(
-              "`", slot_name, "` is not a rectangular tuple array across ",
-              "enclosing elements: element ", i, " has shape ",
-              paste(shape_i, collapse = "x"), " but a previous element has ",
-              "shape ", paste(inner_sizes, collapse = "x"), ".",
+              "`",
+              slot_name,
+              "` is not a rectangular tuple array across ",
+              "enclosing elements: element ",
+              i,
+              " has shape ",
+              paste(shape_i, collapse = "x"),
+              " but a previous element has ",
+              "shape ",
+              paste(inner_sizes, collapse = "x"),
+              ".",
               call. = FALSE
             )
           }
           inner_lists[[i]] <- .newstan_enumerate_tuple_elements(
-            slot_vals[[i]], inner_sizes
+            slot_vals[[i]],
+            inner_sizes
           )
         }
-        # Concatenating in outer-element order preserves the A3 blocking:
+        # Concatenating in outer-element order preserves blocked storage:
         # each outer element's inner elements stay contiguous.
         new_elements <- unlist(inner_lists, recursive = FALSE)
         new_array_sizes <- c(array_sizes, inner_sizes)
       }
       .newstan_flatten_tuple_recurse(
-        slot_name, new_elements, new_array_sizes, slot_type, out
+        slot_name,
+        new_elements,
+        new_array_sizes,
+        slot_type,
+        out
       )
     } else {
       out[[slot_name]] <- .newstan_flatten_tuple_leaf(
-        slot_name, slot_vals, slot_type, array_sizes
+        slot_name,
+        slot_vals,
+        slot_type,
+        array_sizes
       )
     }
   }
@@ -220,10 +267,10 @@
 }
 
 # Flatten one tuple-typed variable's value into its dotted leaf entries.
-# `value`: the canonical Part C shape for this variable (an unnamed list, or
+# `value`: the canonical R shape for this variable (an unnamed list, or
 # nested unnamed lists of depth `n_array_dims` for an array-of-tuple).
 # `type_df` / `n_array_dims`: this variable's own `declared[[name]]$type` /
-# `$dimensions` (A8).
+# `$dimensions`.
 .newstan_flatten_one_tuple <- function(name, value, type_df, n_array_dims) {
   if (n_array_dims == 0L) {
     elements <- list(value)
@@ -241,14 +288,14 @@
 #'
 #' Replaces every list-valued entry of `values` that is declared as a tuple
 #' (per `declared`, one block of `mod$variables()`) with the dotted per-leaf
-#' entries `r_data_context` expects (see Part B of the tuple-interop plan).
-#' Entries that are not lists pass through unchanged, including any
-#' user-supplied dotted entries (the manual escape hatch).
+#' entries `r_data_context` expects. Entries that are not lists pass through
+#' unchanged, including any user-supplied dotted entries (the manual escape
+#' hatch).
 #'
 #' @param values A named list of data or init values.
 #' @param declared One block of `mod$variables()` (e.g. `$data` or
 #'   `$parameters`): a named list where each element is
-#'   `list(type = <t>, dimensions = <int>)` (A8).
+#'   `list(type = <t>, dimensions = <int>)`.
 #'
 #' @return `values` with every declared-tuple list entry replaced by its
 #'   flattened dotted leaves.
@@ -267,20 +314,27 @@
     decl <- declared[[name]]
     if (is.null(decl) || !is.data.frame(decl$type)) {
       stop(
-        "`", name, "` is not declared as a tuple; lists are only accepted ",
+        "`",
+        name,
+        "` is not declared as a tuple; lists are only accepted ",
         "for tuple variables.",
         call. = FALSE
       )
     }
     leaves <- .newstan_flatten_one_tuple(
-      name, values[[name]], decl$type, decl$dimensions
+      name,
+      values[[name]],
+      decl$type,
+      decl$dimensions
     )
     result[[name]] <- NULL
     leaf_names <- names(leaves)
     collision <- leaf_names %in% names(result)
     if (any(collision)) {
       stop(
-        "Flattening `", name, "` would create entries that already exist: ",
+        "Flattening `",
+        name,
+        "` would create entries that already exist: ",
         paste0("`", leaf_names[collision], "`", collapse = ", "),
         ". Remove the manually-supplied dotted entry or the list value.",
         call. = FALSE
@@ -291,26 +345,26 @@
   result
 }
 
-# --- Phase 3: native output -> canonical Part C shapes ----------------------
+# --- Native output -> canonical R shapes -------------------------------------
 #
 # The functions below implement the *other* direction: turning the model's
 # native flat constrained-parameter output (or, for `variable_skeleton()`, an
-# empty shape with no values yet) back into Part C nested-list shapes. This
-# is deliberately NOT the inverse of the flattener above: per A5, the native
+# empty shape with no values yet) back into canonical nested-list R shapes.
+# This is deliberately NOT the inverse of the flattener above: the native
 # flat-draws order for array-of-tuples is *element-major* ("ta.1:1,
 # ta.1:2.real, ta.1:2.imag, ta.2:1, ...") -- elements enumerated column-major,
 # each element's slots read in full (recursing for nested tuples) before
-# moving to the next element. This is simpler than (and distinct from) Part
-# B's blocked-AoS input order, where a single slot's values across every
+# moving to the next element. This is simpler than (and distinct from) the
+# input side's blocked-AoS order, where a single slot's values across every
 # enclosing-array element are contiguous instead.
 #
 # Both directions share one "sized structure" tree (built by
 # `.newstan_sized_structure()`), computed once per `constrain_variables()` /
-# `variable_skeleton()` call from `model$variables()` (A8: type structure --
+# `variable_skeleton()` call from `model$variables()` (type structure --
 # which base variables/slots are tuple/complex, and nested tuple shape) and
-# `model_param_metadata()` (native dotted-name-keyed sizes: A6's per-slot
-# declared dims, including enclosing tuple-array sizes, a leaf's own
-# container dims, and the trailing complex storage `2`).
+# `model_param_metadata()` (native dotted-name-keyed sizes: per-slot declared
+# dims, including enclosing tuple-array sizes, a leaf's own container dims,
+# and the trailing complex storage `2`).
 #
 # One tree node is built per base variable name (e.g. `t`, never `t.1`/
 # `t.2`), and is one of:
@@ -350,10 +404,10 @@
 # always descending via slot 1 (recursing through nested-tuple slots). Used
 # only to read that leaf's full declared dims off `model_param_metadata()`
 # in order to locate *this* level's own enclosing-array sizes by position --
-# A2's dims order is strictly hierarchical (enclosing array dims outermost
-# first, then the leaf's own container dims, then complex's trailing `2`),
-# so any leaf beneath the subtree carries the same prefix at the same
-# position, regardless of which slot it descends through.
+# `model_param_metadata()`'s dims order is strictly hierarchical (enclosing
+# array dims outermost first, then the leaf's own container dims, then
+# complex's trailing `2`), so any leaf beneath the subtree carries the same
+# prefix at the same position, regardless of which slot it descends through.
 .newstan_first_leaf_metadata_name <- function(dotted_name, type_df) {
   slot_type <- type_df$type[[1]]
   slot_name <- paste0(dotted_name, ".1")
@@ -366,7 +420,7 @@
 
 # Build one tuple node (recursing for nested-tuple slots). `dotted_name`:
 # this level's dotted metadata-name prefix (matches `model_param_metadata()`
-# naming, A6). `type_df`: this level's slot data.frame (A8: columns `type`,
+# naming). `type_df`: this level's slot data.frame (columns `type`,
 # `dimensions`). `own_array_count`: this level's own enclosing-array
 # dimension *count* (a plain integer -- e.g. `1` for `array[2] tuple(...)`,
 # `0` for a plain tuple); comes from the parent's declared dims (the
@@ -391,7 +445,9 @@
     if (is.null(probe_entry)) {
       stop(
         "newstan internal error: `model_param_metadata()` is missing an ",
-        "entry for `", probe_name, "`.",
+        "entry for `",
+        probe_name,
+        "`.",
         call. = FALSE
       )
     }
@@ -409,7 +465,10 @@
     slot_own_count <- type_df$dimensions[[s]]
     if (is.data.frame(slot_type)) {
       slots[[s]] <- .newstan_sized_tuple_node(
-        slot_name, slot_type, slot_own_count, new_outer_array_dims,
+        slot_name,
+        slot_type,
+        slot_own_count,
+        new_outer_array_dims,
         metadata_index
       )
     } else {
@@ -417,7 +476,9 @@
       if (is.null(entry)) {
         stop(
           "newstan internal error: `model_param_metadata()` is missing an ",
-          "entry for `", slot_name, "`.",
+          "entry for `",
+          slot_name,
+          "`.",
           call. = FALSE
         )
       }
@@ -425,10 +486,15 @@
       prefix <- if (n_new_outer) dims[seq_len(n_new_outer)] else integer(0)
       if (!identical(prefix, as.integer(new_outer_array_dims))) {
         stop(
-          "newstan internal error: `", slot_name, "`'s declared dimensions ",
-          "(", paste(dims, collapse = ","), ") are inconsistent with the ",
+          "newstan internal error: `",
+          slot_name,
+          "`'s declared dimensions ",
+          "(",
+          paste(dims, collapse = ","),
+          ") are inconsistent with the ",
           "enclosing tuple-array sizes (",
-          paste(new_outer_array_dims, collapse = ","), ").",
+          paste(new_outer_array_dims, collapse = ","),
+          ").",
           call. = FALSE
         )
       }
@@ -453,9 +519,9 @@
 #' See the file-level comment above for the tree shape. `ptr_metadata` is the
 #' raw list returned by the native `model_param_metadata` call (`names`,
 #' `dimensions`, `stages` -- one entry per dotted tuple-slot name or plain
-#' variable name, A6).
+#' variable name).
 #'
-#' @param model A `StanModel` (used for `$variables()`, A8).
+#' @param model A `StanModel` (used for `$variables()`).
 #' @param ptr_metadata The list returned by the native `model_param_metadata`
 #'   call.
 #'
@@ -492,7 +558,9 @@
     decl <- declared_all[[name]]
     if (is.null(decl)) {
       stop(
-        "newstan internal error: `", name, "` from `model_param_metadata()` ",
+        "newstan internal error: `",
+        name,
+        "` from `model_param_metadata()` ",
         "is not declared in `model$variables()`.",
         call. = FALSE
       )
@@ -505,31 +573,37 @@
     stage <- ptr_metadata$stages[[which(base_names == name)[[1]]]]
     if (is.data.frame(decl$type)) {
       node <- .newstan_sized_tuple_node(
-        name, decl$type, decl$dimensions, integer(0), metadata_index
+        name,
+        decl$type,
+        decl$dimensions,
+        integer(0),
+        metadata_index
       )
     } else {
       entry <- metadata_index[[name]]
       if (is.null(entry)) {
         stop(
           "newstan internal error: `model_param_metadata()` is missing an ",
-          "entry for `", name, "`.",
+          "entry for `",
+          name,
+          "`.",
           call. = FALSE
         )
       }
       dims <- entry$dims
       is_complex <- identical(decl$type, "complex")
       if (is_complex) {
-        # A6: `get_dims()` includes the trailing complex storage dim `2` --
-        # never part of the canonical (Part C) shape.
+        # `get_dims()` includes the trailing complex storage dim `2` --
+        # never part of the canonical R-facing shape.
         dims <- dims[-length(dims)]
       }
       # `legacy = TRUE` only for a plain (non-complex) top-level variable:
-      # its shape must stay byte-identical to pre-Phase-3 behavior, which
-      # always sets `dim` once there is at least one declared dimension
-      # (even a single one -- see `.newstan_apply_leaf_dims()`). Top-level
-      # complex variables are new in Phase 3 and instead follow Part C's
-      # convention directly ("complex_vector[n] -> complex vector length
-      # n", not a 1-d array), matching every tuple-internal leaf.
+      # its shape follows the historical convention, which always sets
+      # `dim` once there is at least one declared dimension (even a single
+      # one -- see `.newstan_apply_leaf_dims()`). Top-level complex
+      # variables instead follow the canonical convention directly
+      # ("complex_vector[n] -> complex vector length n", not a 1-d array),
+      # matching every tuple-internal leaf.
       node <- list(kind = decl$type, dims = dims, legacy = !is_complex)
     }
     result[[name]] <- list(stage = stage, node = node)
@@ -553,10 +627,10 @@
 }
 
 # Recursively build nested unnamed lists of the given `sizes` (outermost
-# first), calling `build_leaf()` at every position -- Part C's array-of-tuple
-# shape ("list (over first index) of lists (over second index) of ...
-# tuples"). `sizes = integer(0)` (no enclosing array) just returns one
-# `build_leaf()` directly.
+# first), calling `build_leaf()` at every position -- the canonical
+# array-of-tuple shape ("list (over first index) of lists (over second
+# index) of ... tuples"). `sizes = integer(0)` (no enclosing array) just
+# returns one `build_leaf()` directly.
 .newstan_nested_list_shape <- function(sizes, build_leaf) {
   if (!length(sizes)) {
     return(build_leaf())
@@ -572,17 +646,16 @@
 #
 #   * "legacy" (`legacy = TRUE`; only ever a top-level, non-complex real/int
 #     variable): `dim` is set as soon as `length(dims) >= 1` -- even a single
-#     declared dimension gets a `dim` attribute. This is the pre-Phase-3
+#     declared dimension gets a `dim` attribute. This matches the historical
 #     behavior (`array(NA_real_, dim = dims)` regardless of `length(dims)`)
-#     and is a hard regression constraint for these variables (Part D 3.2/
-#     3.3): it must stay byte-identical.
+#     and must stay byte-identical for these variables.
 #   * "canonical" (`legacy = FALSE`; every tuple-internal leaf, and top-level
-#     complex variables, which are new in Phase 3): `dim` is set only when
-#     there are >= 2 dimensions. A single dimension stays a bare vector and a
-#     scalar stays a bare scalar/value -- Part C's shape table ("complex
-#     vector length n", not a 1-d array) and Part B's input-side rule use
-#     the same convention, so a value's shape round-trips unchanged through
-#     both directions.
+#     complex variables): `dim` is set only when there are >= 2 dimensions. A
+#     single dimension stays a bare vector and a scalar stays a bare
+#     scalar/value -- both the output-side shape convention ("complex vector
+#     length n", not a 1-d array) and the input-side flattening rule use the
+#     same convention, so a value's shape round-trips unchanged through both
+#     directions.
 #
 # `values` must already have length `prod(dims)` (or length 1 for a scalar,
 # handled by the caller passing `dims = integer(0)`).
@@ -598,9 +671,9 @@
 
 # Build one sized-structure node's skeleton (no values yet, just shape/fill):
 # complex -> `NA_complex_` (arrays without the trailing 2; a scalar leaf ->
-# bare `NA_complex_`); tuple/array-of-tuple -> nested unnamed lists per Part
-# C; anything else (real/int) stays byte-identical to the pre-Phase-3
-# behavior (`dim` kept as-is, scalar -> `NA_real_`).
+# bare `NA_complex_`); tuple/array-of-tuple -> nested unnamed lists per the
+# canonical shape; anything else (real/int) stays byte-identical to the
+# historical behavior (`dim` kept as-is, scalar -> `NA_real_`).
 .newstan_skeleton_node <- function(node) {
   if (identical(node$kind, "tuple")) {
     return(.newstan_nested_list_shape(
@@ -641,15 +714,15 @@
 
 # Reshape a flat list of `prod(dims)` elements -- enumerated column-major,
 # first index fastest, exactly the order `.newstan_consume_node()` reads
-# tuple-array elements in (A5) -- into Part C's nested-list shape ("list over
+# tuple-array elements in -- into the canonical nested-list shape ("list over
 # first index of lists over second index of ... of tuples"). This is the
 # positional inverse of `.newstan_enumerate_tuple_elements()` above (that one
-# flattens nested lists to column-major order for Part B's *input* contract;
-# this rebuilds nested lists from column-major order for Part C's *output*
+# flattens nested lists to column-major order for the *input*-side contract;
+# this rebuilds nested lists from column-major order for the *output*-side
 # shape) -- kept as a separate function because the two are read in
-# different overall element orders (Part B's blocked-AoS vs this file's
-# element-major) even though the column-major enumeration *within* one array
-# level is the same rule both directions.
+# different overall element orders (blocked-AoS on input vs element-major on
+# output) even though the column-major enumeration *within* one array level
+# is the same rule both directions.
 .newstan_reshape_column_major <- function(elements, dims) {
   if (length(dims) <= 1L) {
     return(elements)
@@ -664,12 +737,12 @@
 }
 
 # Consume one sized-structure node's worth of scalars from `reader` (a
-# `.newstan_flat_reader()`), in the native flat constrained-draws order (A5,
-# distinct from Part B's blocked-AoS *input* order): plain containers
+# `.newstan_flat_reader()`), in the native flat constrained-draws order
+# (distinct from the input side's blocked-AoS order): plain containers
 # column-major; complex containers column-major with adjacent (real, imag)
 # pairs; plain tuples slot-by-slot; tuple arrays *element-major* -- elements
 # enumerated column-major, each element's slots consumed in full (recursing
-# for nested tuples) before the next element. Returns the Part C shape.
+# for nested tuples) before the next element. Returns the canonical R shape.
 .newstan_consume_node <- function(node, reader) {
   if (identical(node$kind, "tuple")) {
     n_elements <- if (length(node$array_dims)) prod(node$array_dims) else 1L
@@ -683,14 +756,14 @@
   }
   if (identical(node$kind, "complex")) {
     n <- if (length(node$dims)) prod(node$dims) else 1L
-    values <- vector("complex", n)
-    for (i in seq_len(n)) {
-      parts <- reader$consume(2L)
-      values[i] <- complex(real = parts[[1]], imaginary = parts[[2]])
-    }
+    parts <- reader$consume(2L * n)
+    values <- complex(
+      real = parts[seq.int(1L, 2L * n, by = 2L)],
+      imaginary = parts[seq.int(2L, 2L * n, by = 2L)]
+    )
     return(.newstan_apply_leaf_dims(values, node$dims, isTRUE(node$legacy)))
   }
-  # real/int: unchanged from pre-Phase-3 behavior for top-level variables
+  # real/int: matches the historical behavior for top-level variables
   # (`legacy = TRUE` there) -- plain numeric, scalar unboxed, `dim` set
   # whenever the declared shape has >= 1 dimension.
   n <- if (length(node$dims)) prod(node$dims) else 1L

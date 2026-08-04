@@ -76,7 +76,7 @@ test_that("show_messages = FALSE silences the console but output() still works",
   expect_true(length(result$output()) > 0)
 })
 
-test_that("sampling respects explicit tuning values instead of defaults", {
+test_that("explicit tuning values are plumbed into the native args", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
@@ -132,6 +132,70 @@ test_that("sampling with fixed_param algorithm works", {
   expect_equal(result$return_codes(), 0L)
 })
 
+test_that("fixed_param sampler diagnostics keep whatever columns the service emits", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 5,
+    iter_sampling = 5,
+    chains = 2,
+    fixed_param = TRUE,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  diagnostics <- result$sampler_diagnostics()
+  expect_true("accept_stat__" %in% posterior::variables(diagnostics))
+  expect_equal(posterior::nchains(diagnostics), 2L)
+})
+
+test_that("sampling with fixed_param and save_warmup warns and drops warmup draws", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_warning(
+    result <- mod$sample(
+      data = data,
+      iter_warmup = 10,
+      iter_sampling = 20,
+      chains = 1,
+      fixed_param = TRUE,
+      save_warmup = TRUE,
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "save_warmup.*ignored.*fixed_param"
+  )
+
+  expect_equal(result$return_codes(), 0L)
+  expect_equal(posterior::niterations(result$draws()), 20L)
+  expect_error(result$draws(inc_warmup = TRUE), "warmup draws were not saved")
+})
+
+test_that("sampling with fixed_param and save_warmup warns when iter_sampling is small", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  expect_warning(
+    result <- mod$sample(
+      data = data,
+      iter_warmup = 10,
+      iter_sampling = 5,
+      chains = 1,
+      fixed_param = TRUE,
+      save_warmup = TRUE,
+      seed = 42,
+      show_messages = FALSE
+    ),
+    "save_warmup.*ignored.*fixed_param"
+  )
+
+  expect_equal(result$return_codes(), 0L)
+  expect_equal(posterior::niterations(result$draws()), 5L)
+})
+
 test_that("sampling with adapt_engaged = FALSE works", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -184,6 +248,10 @@ test_that("sampling with adapt_engaged = TRUE and iter_warmup = 0 fails with a c
   )
 
   expect_true(all(result$return_codes() != 0L))
+  expect_match(
+    paste(result$output(), collapse = "\n"),
+    "num_warmup must be > 0"
+  )
 })
 
 test_that("sampling with inv_metric (diag_e) works", {
@@ -206,6 +274,25 @@ test_that("sampling with inv_metric (diag_e) works", {
 
   expect_equal(result$return_codes(), 0L)
   expect_true(posterior::ndraws(result$draws()) > 0)
+})
+
+test_that("sampling with a per-chain inv_metric list works", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 2,
+    engine = "nuts",
+    metric = "diag_e",
+    inv_metric = list(c(1), c(1)),
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_true(all(result$return_codes() == 0L))
 })
 
 test_that("sampling with inv_metric (diag_e, too short) fails with a clear message", {
@@ -349,6 +436,43 @@ test_that("fit$inv_metric() errors when sampling ran without adaptation", {
   expect_error(result$inv_metric(), "no adapted metric is available")
 })
 
+test_that("fit$metadata()$step_size_adaptation reports one adapted step size per chain", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    chains = 2,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  step_size_adaptation <- result$metadata()$step_size_adaptation
+  expect_true(is.numeric(step_size_adaptation))
+  expect_length(step_size_adaptation, 2)
+  expect_true(all(step_size_adaptation > 0))
+})
+
+test_that("fit$metadata() omits step_size_adaptation when sampling ran without adaptation", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 0,
+    iter_sampling = 50,
+    chains = 1,
+    adapt_engaged = FALSE,
+    step_size = 1,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_false("step_size_adaptation" %in% names(result$metadata()))
+})
+
 test_that("sampling with save_warmup increases draws", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
@@ -380,6 +504,46 @@ test_that("sampling with save_warmup increases draws", {
   expect_gt(
     posterior::ndraws(result_warmup$draws(inc_warmup = TRUE)),
     posterior::ndraws(result_warmup$draws())
+  )
+})
+
+test_that("sampler_diagnostics(inc_warmup = TRUE) errors like draws() when warmup was not saved", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    save_warmup = FALSE,
+    chains = 1,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_error(
+    result$sampler_diagnostics(inc_warmup = TRUE),
+    "warmup draws were not saved"
+  )
+})
+
+test_that("sampler_diagnostics(inc_warmup = TRUE) includes warmup iterations when saved", {
+  mod <- test_model("bernoulli")
+  data <- bernoulli_data
+
+  result <- mod$sample(
+    data = data,
+    iter_warmup = 50,
+    iter_sampling = 50,
+    save_warmup = TRUE,
+    chains = 1,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_equal(
+    posterior::niterations(result$sampler_diagnostics(inc_warmup = TRUE)),
+    100L
   )
 })
 
@@ -599,7 +763,7 @@ test_that("sampling with an invalid metric errors before reaching C++", {
   )
 })
 
-test_that("num_threads takes effect on every fit", {
+test_that("num_threads is accepted and plumbed to the native args", {
   mod <- test_model("bernoulli")
   data <- bernoulli_data
 
@@ -613,6 +777,7 @@ test_that("num_threads takes effect on every fit", {
     show_messages = FALSE
   )
   expect_true(all(result_one$return_codes() == 0L))
+  expect_equal(result_one$metadata()$arguments$num_threads, 1L)
 
   result_two <- mod$sample(
     data = data,
@@ -624,6 +789,7 @@ test_that("num_threads takes effect on every fit", {
     show_messages = FALSE
   )
   expect_true(all(result_two$return_codes() == 0L))
+  expect_equal(result_two$metadata()$arguments$num_threads, 2L)
 })
 
 test_that("sampling with num_threads = 0 errors", {
