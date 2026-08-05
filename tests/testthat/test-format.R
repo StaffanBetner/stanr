@@ -96,7 +96,7 @@ test_that("format(overwrite_file = TRUE) requires a stan_file", {
 
 test_that("format(overwrite_file = TRUE) refuses programs with #include directives", {
   mod <- stan_model(
-    stan_file = test_path("test-models/include_model.stan"),
+    stan_file = test_stan_file("include_model.stan"),
     include_paths = test_path("test-models/includes"),
     compile = FALSE
   )

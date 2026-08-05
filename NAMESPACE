@@ -2,7 +2,6 @@
 
 export(stan_model)
 export(stanc)
-export(stanr_clear_cache)
 importFrom(R6,R6Class)
 importFrom(Rcpp,sourceCpp)
 importFrom(RcppParallel,RcppParallelLibs)

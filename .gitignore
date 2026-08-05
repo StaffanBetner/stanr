@@ -12,3 +12,4 @@ libs
 lib
 inst/include
 src/sundials
+**.stanrc

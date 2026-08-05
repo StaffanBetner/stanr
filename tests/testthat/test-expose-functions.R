@@ -347,25 +347,22 @@ functions {
   expect_equal(v1, v2)
 })
 
-test_that("compiling the same code twice without force_recompile reuses the cached .cpp file", {
+test_that("compiling the same code twice without force_recompile reuses the cached build", {
   code <- "
 functions {
   real cache_reuse_add(real a, real b) { return a + b; }
 }
 "
-  cache_dir <- getOption("stanr_cache_dir")
+  before <- list.files(tempdir(), pattern = "[.]stanrc$")
 
   env1 <- stanr:::.compile_standalone_functions_environment(code)
-  n_after_first <- length(
-    list.files(cache_dir, pattern = "^functions_.*\\.cpp$")
-  )
+  after_first <- list.files(tempdir(), pattern = "[.]stanrc$")
+  expect_length(setdiff(after_first, before), 1L)
 
   env2 <- stanr:::.compile_standalone_functions_environment(code)
-  n_after_second <- length(
-    list.files(cache_dir, pattern = "^functions_.*\\.cpp$")
-  )
+  after_second <- list.files(tempdir(), pattern = "[.]stanrc$")
+  expect_identical(after_second, after_first)
 
-  expect_equal(n_after_first, n_after_second)
   expect_equal(env1$cache_reuse_add(2, 3), 5)
   expect_equal(env2$cache_reuse_add(2, 3), 5)
 })
@@ -651,10 +648,6 @@ model {
   theta ~ normal(0, 1);
 }
 "
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("stanr_cache_dir")
-
   call_count <- 0
   real_stanc <- stanc
   testthat::local_mocked_bindings(
@@ -675,9 +668,6 @@ model {
   calls_after_first <- call_count
   expect_gt(calls_after_first, 0L)
 
-  cpp_files_after_first <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_length(cpp_files_after_first, 1L)
-
   # Fresh R6 object, identical code: resolves to a cache hit under the
   # hood (stanc() is not invoked again), but the post-compile hook that
   # populates $functions must still run.
@@ -690,9 +680,6 @@ model {
   expect_equal(call_count, calls_after_first)
   expect_true(is.function(mod2$functions$cache_hit_add))
   expect_equal(mod2$functions$cache_hit_add(4, 5), 9)
-
-  cpp_files_after_second <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_equal(cpp_files_after_second, cpp_files_after_first)
 })
 
 test_that("compile_standalone participates in the model cache key (distinct .cpp files)", {
@@ -707,26 +694,32 @@ model {
   theta ~ normal(0, 1);
 }
 "
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("stanr_cache_dir")
+  call_count <- 0
+  real_stanc <- stanc
+  testthat::local_mocked_bindings(
+    stanc = function(...) {
+      call_count <<- call_count + 1
+      real_stanc(...)
+    },
+    .package = "stanr"
+  )
 
   mod_plain <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod_plain$is_compiled())
-  cpp_files_after_plain <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_length(cpp_files_after_plain, 1L)
+  calls_after_plain <- call_count
+  expect_gt(calls_after_plain, 0L)
 
   # Same Stan code, `compile_standalone = TRUE`: the generated .cpp content
   # differs (it has the appended wrapper section), so this must be a
-  # distinct cache entry, not a reuse of the plain model's.
+  # distinct cache entry, not a reuse of the plain model's -- fresh stanc()
+  # call(s), not a hit off `mod_plain`'s cache/memo entry.
   mod_standalone <- stan_model(
     code = code,
     compile_standalone = TRUE,
     precompiled_headers = FALSE
   )
   expect_true(mod_standalone$is_compiled())
-  cpp_files_after_standalone <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_length(cpp_files_after_standalone, 2L)
+  expect_gt(call_count, calls_after_plain)
 })
 
 test_that("compile_standalone errors on a Stan function named run_model (reserved-name collision)", {

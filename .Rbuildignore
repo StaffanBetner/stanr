@@ -27,3 +27,4 @@ inst/lib
 .*\.dll$
 ^man-roxygen$
 ^\.([^\/]*)$
+**.stanrc

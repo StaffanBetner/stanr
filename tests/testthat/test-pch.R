@@ -121,10 +121,7 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
   on.exit(reset_pch_memo(), add = TRUE)
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
-  withr::local_options(
-    stanr_cache_dir = file.path(cache_home, "models"),
-    stanr_pch_dir = file.path(cache_home, "pch")
-  )
+  withr::local_options(stanr_pch_dir = file.path(cache_home, "pch"))
 
   pch_build_calls <- new.env()
   pch_build_calls$n <- 0L
@@ -142,7 +139,12 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
     .package = "Rcpp"
   )
 
-  code <- "parameters { real theta; } model { theta ~ normal(0, 1); }"
+  # unique_stan_code() (helpers.R): this always errors before reaching the
+  # compile memo/cache write, but must still be unique so an *earlier* test
+  # elsewhere in the suite that happened to memoize this exact code (with a
+  # real, non-mocked compile) can't short-circuit this call before it ever
+  # reaches the mocked sourceCpp() below.
+  code <- unique_stan_code()
   expect_error(
     stanr:::.compile_stan_model_environment(
       code = code,
@@ -162,10 +164,7 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   on.exit(reset_pch_memo(), add = TRUE)
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
-  withr::local_options(
-    stanr_cache_dir = file.path(cache_home, "models"),
-    stanr_pch_dir = file.path(cache_home, "pch")
-  )
+  withr::local_options(stanr_pch_dir = file.path(cache_home, "pch"))
 
   header <- system.file(
     "include",
@@ -199,11 +198,9 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
     .package = "Rcpp"
   )
 
-  code <- "parameters { real theta; } model { theta ~ normal(0, 1); }"
-
   # Call A: establishes a fresh, on-disk PCH via a successful compile.
   stanr:::.compile_stan_model_environment(
-    code = code,
+    code = unique_stan_code(),
     model_name = "pch_stale_test"
   )
   expect_equal(pch_build_calls$n, 1L)
@@ -214,12 +211,15 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   # (cppflags, stanr version, ...) changing.
   Sys.setFileTime(header, Sys.time() + 10)
 
-  # Call B: identical code -> same model_hash (cpp_file cache hit, stanc()
-  # not re-run) and the same memoized PCH flags as call A -- but the PCH on
-  # disk is now stale relative to model_pch.hpp's bumped mtime, so the
-  # compile-failure handler should rebuild it once and retry once.
+  # Call B: deliberately *different* code from call A (so it can't be served
+  # by call A's in-session compile memo, which is keyed on model_hash i.e.
+  # code content -- see `.stanr_env_memo()`, R/stan_model.R) but the *same*
+  # memoized PCH flags, since PCH staleness is tracked independently of any
+  # particular model (keyed only on cppflags -- see `.stanr_pch_current()`).
+  # The PCH on disk is now stale relative to model_pch.hpp's bumped mtime, so
+  # the compile-failure handler should rebuild it once and retry once.
   stanr:::.compile_stan_model_environment(
-    code = code,
+    code = unique_stan_code(),
     model_name = "pch_stale_test"
   )
   expect_equal(sourceCpp_calls, 3L)

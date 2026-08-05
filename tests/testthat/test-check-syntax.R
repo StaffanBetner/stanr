@@ -47,7 +47,7 @@ test_that("check_syntax(pedantic = TRUE) surfaces a pedantic warning", {
 
 test_that("check_syntax() resolves #include directives", {
   mod <- stan_model(
-    stan_file = test_path("test-models/include_model.stan"),
+    stan_file = test_stan_file("include_model.stan"),
     include_paths = test_path("test-models/includes"),
     compile = FALSE
   )

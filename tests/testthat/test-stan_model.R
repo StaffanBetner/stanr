@@ -3,7 +3,7 @@ local_test_context()
 init_test_cache("stan_model")
 
 test_that("stan_model compiles from file", {
-  path <- test_path("test-models/bernoulli.stan")
+  path <- test_stan_file("bernoulli.stan")
   mod <- stan_model(stan_file = path)
   expect_s3_class(mod, "StanModel")
   expect_s3_class(mod, "R6")
@@ -25,7 +25,7 @@ test_that("stan_model errors when neither file nor code given", {
 })
 
 test_that("stan_model errors when both file and code given", {
-  path <- test_path("test-models/bernoulli.stan")
+  path <- test_stan_file("bernoulli.stan")
   expect_snapshot(
     stan_model(stan_file = path, code = "parameters { real x; }"),
     error = TRUE
@@ -162,93 +162,49 @@ test_that(".stanr_apply_makevars overrides on '=' and appends on '+='", {
 })
 
 # Persistent, cross-session model cache ---------------------------------------
+#
+# The compiled model is now cached as a single file next to `stan_file` (or
+# under `tempdir()` for a `code`-string model), keyed by a hash embedded
+# inside the file rather than a shared central cache_dir -- see
+# `.stanr_build_cache_file()` / `.stanr_write_build_cache()` /
+# `.stanr_restore_build_cache()` (R/stan_model.R). A forced recompile always
+# builds into a brand-new scratch directory (never a shared/reused one), so
+# there is nothing to redirect/alias the way the old central-cache registry
+# had to: a live fit's mapped library is never touched by a later recompile.
+#
+# `model_hash` is keyed on Stan code content alone (not on `stan_file`'s
+# path), and both the on-disk cache and the in-session memo (`.stanr_memo`)
+# persist for the whole test run -- so any two tests using textually
+# identical Stan code would otherwise share a cache entry. Each test below
+# therefore uses `unique_stan_code()` (helpers.R) to keep its code, and
+# hence its hash, unique to that test.
 
-test_that("stan_model writes the .cpp and a built artifact under the resolved cache dir, not tempdir", {
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
+test_that("stan_model writes exactly one cache file next to stan_file", {
+  src_dir <- withr::local_tempdir()
+  stan_file <- file.path(src_dir, "model.stan")
+  writeLines(unique_stan_code(), stan_file)
 
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
+  mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
+  expect_true(mod$is_compiled())
+
+  cache_file <- file.path(src_dir, ".model.stanrc")
+  expect_true(file.exists(cache_file))
+  contents <- setdiff(list.files(src_dir, all.files = TRUE), c(".", ".."))
+  expect_setequal(contents, c("model.stan", ".model.stanrc"))
+})
+
+test_that("stan_model caches to tempdir, not the working directory, for a code string", {
+  code <- unique_stan_code()
+  before <- list.files(tempdir(), pattern = "[.]stanrc$")
+
   mod <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
 
-  cache_dir <- getOption("stanr_cache_dir")
-  expect_true(dir.exists(cache_dir))
-
-  cpp_files <- list.files(cache_dir, pattern = "[.]cpp$", full.names = TRUE)
-  built_artifacts <- list.files(
-    cache_dir,
-    pattern = "[.](so|dylib|dll)$",
-    recursive = TRUE,
-    full.names = TRUE
-  )
-  expect_gte(length(cpp_files), 1L)
-  expect_gte(length(built_artifacts), 1L)
-
-  # A second compile of identical code in the same session is a cache hit:
-  # no new .cpp is written (the pre-existing file.exists() guard).
-  n_cpp_before <- length(cpp_files)
-  mod2 <- stan_model(code = code, precompiled_headers = FALSE)
-  expect_true(mod2$is_compiled())
-  cpp_files_after <- list.files(
-    cache_dir,
-    pattern = "[.]cpp$",
-    full.names = TRUE
-  )
-  expect_equal(length(cpp_files_after), n_cpp_before)
+  after <- list.files(tempdir(), pattern = "[.]stanrc$")
+  expect_gt(length(setdiff(after, before)), 0L)
 })
 
-test_that("force_recompile builds a fresh artifact under cache_dir without retiring the mapped one", {
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("stanr_cache_dir")
-
-  artifacts <- function() {
-    list.files(
-      cache_dir,
-      pattern = "[.](so|dylib|dll)$",
-      recursive = TRUE,
-      full.names = TRUE
-    )
-  }
-
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
-  mod <- stan_model(code = code, precompiled_headers = FALSE)
-  expect_true(mod$is_compiled())
-
-  artifact_before <- artifacts()
-  expect_gte(length(artifact_before), 1L)
-  rebuild_started <- Sys.time()
-  Sys.sleep(1)
-
-  mod2 <- stan_model(
-    code = code,
-    precompiled_headers = FALSE,
-    force_recompile = TRUE
-  )
-  expect_true(mod2$is_compiled())
-
-  # The rebuild lands under cache_dir (not tempdir), and produces exactly one
-  # fresh artifact.
-  artifact_after <- artifacts()
-  fresh <- artifact_after[file.info(artifact_after)$mtime > rebuild_started]
-  expect_length(fresh, 1L)
-
-  # `mod` still holds the superseded build mapped into this session, so the
-  # rebuild must not replace it (see `.stanr_forced_rebuild_target()`): it
-  # survives alongside the fresh artifact, on every platform.
-  expect_identical(setdiff(artifact_before, artifact_after), character())
-})
-
-test_that("model_hash is computed before stanc() is called, so a warm cache skips stanc entirely", {
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
-
+test_that("a second compile of identical code in the same session skips stanc() via the in-memory memo", {
   call_count <- 0
   real_stanc <- stanc
   testthat::local_mocked_bindings(
@@ -259,35 +215,72 @@ test_that("model_hash is computed before stanc() is called, so a warm cache skip
     .package = "stanr"
   )
 
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
+  code <- unique_stan_code()
   mod <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
-  expect_lte(call_count, 1L)
+  expect_equal(call_count, 1L)
 
-  # A second compile of identical code in the same session is a cache hit:
-  # stanc() must not be invoked again.
   mod2 <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod2$is_compiled())
-  expect_lte(call_count, 1L)
+  expect_equal(call_count, 1L)
+})
 
-  # force_recompile = TRUE forces regeneration of the cached .cpp (and thus
-  # a fresh stanc() call) even though the hash is unchanged.
-  mod3 <- stan_model(
-    code = code,
-    precompiled_headers = FALSE,
-    force_recompile = TRUE
+test_that("restoring a warm on-disk cache skips stanc() even without an in-memory hit", {
+  src_dir <- withr::local_tempdir()
+  stan_file <- file.path(src_dir, "model.stan")
+  writeLines(unique_stan_code(), stan_file)
+  mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
+  expect_true(mod$is_compiled())
+
+  # Forget the in-session memo, so the next compile must go through the
+  # on-disk cache file rather than the in-memory shortcut.
+  memo <- stanr:::.stanr_env_memo()
+  rm(list = ls(memo, all.names = TRUE), envir = memo)
+
+  call_count <- 0
+  real_stanc <- stanc
+  testthat::local_mocked_bindings(
+    stanc = function(...) {
+      call_count <<- call_count + 1
+      real_stanc(...)
+    },
+    .package = "stanr"
   )
-  expect_true(mod3$is_compiled())
-  expect_equal(call_count, 2L)
+  mod2 <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
+  expect_true(mod2$is_compiled())
+  expect_equal(call_count, 0L)
+})
+
+test_that("force_recompile forces a fresh compile and overwrites the single cache file in place", {
+  src_dir <- withr::local_tempdir()
+  stan_file <- file.path(src_dir, "model.stan")
+  writeLines(unique_stan_code(), stan_file)
+  mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
+  cache_file <- file.path(src_dir, ".model.stanrc")
+  expect_true(file.exists(cache_file))
+  mtime_before <- file.mtime(cache_file)
+  Sys.sleep(1)
+
+  call_count <- 0
+  real_stanc <- stanc
+  testthat::local_mocked_bindings(
+    stanc = function(...) {
+      call_count <<- call_count + 1
+      real_stanc(...)
+    },
+    .package = "stanr"
+  )
+  mod$compile(force_recompile = TRUE, quiet = TRUE)
+  expect_equal(call_count, 1L)
+  expect_gt(file.mtime(cache_file), mtime_before)
+  # Overwritten in place, not accumulated.
+  expect_length(
+    list.files(src_dir, pattern = "[.]stanrc$", all.files = TRUE),
+    1L
+  )
 })
 
 test_that("the stanr_force_recompile option forces a fresh compile on a warm cache", {
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
-
   call_count <- 0
   real_stanc <- stanc
   testthat::local_mocked_bindings(
@@ -298,13 +291,10 @@ test_that("the stanr_force_recompile option forces a fresh compile on a warm cac
     .package = "stanr"
   )
 
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
+  code <- unique_stan_code()
   mod <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
-  expect_lte(call_count, 1L)
+  expect_equal(call_count, 1L)
 
   withr::local_options(stanr_force_recompile = TRUE)
   mod2 <- stan_model(code = code, precompiled_headers = FALSE)
@@ -312,107 +302,29 @@ test_that("the stanr_force_recompile option forces a fresh compile on a warm cac
   expect_equal(call_count, 2L)
 })
 
-test_that("a forced recompile loads an additional shared library and unloads none", {
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
+test_that("force_recompile does not unload the library a live fit still points into", {
+  src_dir <- withr::local_tempdir()
+  stan_file <- file.path(src_dir, "model.stan")
+  writeLines(unique_stan_code(), stan_file)
+  mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
+  fit <- mod$sample(
+    data = list(),
+    chains = 1,
+    iter_warmup = 20,
+    iter_sampling = 20,
+    seed = 1,
+    show_messages = FALSE
+  )
 
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
-  mod <- stan_model(code = code, precompiled_headers = FALSE)
-  loaded_before <- stanr:::.stanr_loaded_dll_paths()
-
-  # Unloading the mapped library would leave `mod` (and any fit over the same
-  # program) holding pointers into unmapped memory -- see
-  # `.stanr_forced_rebuild_target()`.
   mod$compile(force_recompile = TRUE, quiet = TRUE)
-  loaded_after <- stanr:::.stanr_loaded_dll_paths()
 
-  expect_identical(setdiff(loaded_before, loaded_after), character())
-  expect_gt(length(setdiff(loaded_after, loaded_before)), 0L)
-  expect_true(mod$is_compiled())
-
-  # The redirected rebuild leaves the canonical cache entry superseded; the
-  # stale marker is what stops the next session from loading it.
-  expect_length(
-    list.files(getOption("stanr_cache_dir"), pattern = "[.]stale$"),
-    1L
-  )
-})
-
-test_that(".stanr_forced_rebuild_target() redirects only while an artifact is mapped", {
-  # The decision itself, without paying for a compile. Cannot be covered
-  # end-to-end for the not-mapped branch: reaching it in-process would mean
-  # letting `sourceCpp()` unload a library this session is still using, which
-  # is the very crash under test.
-  registry <- stanr:::.stanr_dynlib_registry()
-  hash <- "0123456789abcdef"
-  cache <- withr::local_tempdir()
-  key <- stanr:::.stanr_registry_key(hash, cache)
-  withr::defer(suppressWarnings(rm(list = key, envir = registry)))
-
-  canonical <- file.path(cache, paste0("stan_", hash, ".cpp"))
-
-  # Nothing built yet, so there is nothing to pull out from under: stay on
-  # the canonical translation unit.
-  expect_equal(
-    stanr:::.stanr_forced_rebuild_target(hash, cache, TRUE),
-    list(cpp_file = canonical, alias = 0L)
-  )
-
-  # A recorded but unmapped artifact is still safe to rebuild in place.
-  stanr:::.stanr_register_dynlibs(
-    hash,
-    cache,
-    canonical,
-    0L,
-    "/no/such/lib.so"
-  )
-  expect_equal(
-    stanr:::.stanr_forced_rebuild_target(hash, cache, TRUE),
-    list(cpp_file = canonical, alias = 0L)
-  )
-
-  # A mapped one is not: redirect to an alias translation unit.
-  stanr:::.stanr_register_dynlibs(
-    hash,
-    cache,
-    canonical,
-    0L,
-    stanr:::.stanr_loaded_dll_paths()[[1L]]
-  )
-  redirected <- stanr:::.stanr_forced_rebuild_target(hash, cache, TRUE)
-  expect_identical(redirected$alias, 1L)
-  expect_false(identical(redirected$cpp_file, canonical))
-
-  # Once redirected, every later compile of this hash in this session stays on
-  # the redirected translation unit, so models over the same program share the
-  # newest artifact instead of splitting across old and new.
-  stanr:::.stanr_register_dynlibs(
-    hash,
-    cache,
-    redirected$cpp_file,
-    redirected$alias,
-    character()
-  )
-
-  # A different cache directory is a different set of artifacts on disk, with
-  # nothing of its own mapped, so it must not inherit this one's redirect.
-  other_cache <- withr::local_tempdir()
-  expect_identical(
-    stanr:::.stanr_forced_rebuild_target(hash, other_cache, TRUE)$alias,
-    0L
-  )
-  reused <- stanr:::.stanr_forced_rebuild_target(hash, cache, FALSE)
-  expect_identical(reused$cpp_file, redirected$cpp_file)
+  # The old fit's pointers came from the superseded build, which stays
+  # mapped (a forced recompile always builds into a fresh scratch dir, never
+  # overwriting one in place), so it must still be usable.
+  expect_true(is.finite(fit$summary()$mean[[1L]]))
 })
 
 test_that("changing external_cpp file contents (same path) changes model_hash and triggers a fresh compile", {
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("stanr_cache_dir")
-
   call_count <- 0
   real_stanc <- stanc
   testthat::local_mocked_bindings(
@@ -453,9 +365,6 @@ test_that("changing external_cpp file contents (same path) changes model_hash an
   expect_true(mod$is_compiled())
   expect_equal(call_count, 1L)
 
-  cpp_files_before <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_length(cpp_files_before, 1L)
-
   # Same path, different contents: the returned value doubles rather than
   # passing `x` straight through, so the hash (keyed on file contents) must
   # differ even though `external_cpp_path` is unchanged.
@@ -478,20 +387,20 @@ test_that("changing external_cpp file contents (same path) changes model_hash an
   )
   expect_true(mod2$is_compiled())
   expect_equal(call_count, 2L)
-
-  cpp_files_after <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_length(cpp_files_after, 2L)
 })
 
 test_that("changing cpp_options changes model_hash and triggers a fresh compile", {
-  cache_root <- withr::local_tempdir()
-  withr::local_options(stanr_cache_dir = file.path(cache_root, "models"))
-  cache_dir <- getOption("stanr_cache_dir")
+  call_count <- 0
+  real_stanc <- stanc
+  testthat::local_mocked_bindings(
+    stanc = function(...) {
+      call_count <<- call_count + 1
+      real_stanc(...)
+    },
+    .package = "stanr"
+  )
 
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
+  code <- unique_stan_code()
 
   # `+=` (not a named override) so the internally computed `PKG_CPPFLAGS`
   # (which carries the `-I` include path stanr's own headers need) is
@@ -502,8 +411,7 @@ test_that("changing cpp_options changes model_hash and triggers a fresh compile"
     cpp_options = list("PKG_CPPFLAGS += -DSTANR_TEST_FLAG=1")
   )
   expect_true(mod$is_compiled())
-  cpp_files_before <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_length(cpp_files_before, 1L)
+  expect_equal(call_count, 1L)
 
   # Same Stan code, different `cpp_options`: must be treated as a distinct
   # compiled artifact, not reused from the first model's cache entry.
@@ -513,100 +421,33 @@ test_that("changing cpp_options changes model_hash and triggers a fresh compile"
     cpp_options = list("PKG_CPPFLAGS += -DSTANR_TEST_FLAG=2")
   )
   expect_true(mod2$is_compiled())
-  cpp_files_after <- list.files(cache_dir, pattern = "[.]cpp$")
-  expect_length(cpp_files_after, 2L)
+  expect_equal(call_count, 2L)
 })
 
-test_that("stanr_clear_cache() removes the models/pch cache dirs and a later compile recreates them", {
-  cache_home <- withr::local_tempdir()
-  withr::local_envvar(R_USER_CACHE_DIR = cache_home)
-  cache_root <- tools::R_user_dir("stanr", "cache")
-  # stanr_clear_cache() always targets tools::R_user_dir()'s default root
-  # (see its docs), never the getOption() overrides -- so these must resolve
-  # to that same default root, or compilation below (which does consult the
-  # options) would land somewhere stanr_clear_cache() never looks.
-  withr::local_options(
-    stanr_cache_dir = file.path(cache_root, "models"),
-    stanr_pch_dir = file.path(cache_root, "pch")
-  )
-
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
-  mod <- stan_model(code = code, precompiled_headers = FALSE)
-  expect_true(mod$is_compiled())
-
-  models_dir <- file.path(cache_root, "models")
-  expect_true(dir.exists(models_dir))
-
-  # `mod` is still loaded in this session. Windows will not unlink a mapped
-  # DLL, so there stanr_clear_cache() removes all it can and warns about
-  # the remainder; POSIX unlinks the mapped file and the tree goes entirely.
-  on_windows <- .Platform$OS.type == "windows"
-  if (on_windows) {
-    expect_warning(
-      freed <- stanr_clear_cache(),
-      "Could not fully clear the stanr cache"
-    )
-  } else {
-    freed <- stanr_clear_cache()
-  }
-  expect_setequal(names(freed), c("models", "pch"))
-  expect_equal(unname(freed["models"]), models_dir)
-
-  # The pch dir only ever holds .gch/.hpp files, never anything loadable, so
-  # it comes out completely on both platforms.
-  expect_false(dir.exists(file.path(cache_root, "pch")))
-
-  if (on_windows) {
-    # Everything that is not a still-mapped DLL must be gone.
-    survivors <- normalizePath(
-      list.files(models_dir, recursive = TRUE, full.names = TRUE),
-      winslash = "/",
-      mustWork = FALSE
-    )
-    expect_true(all(
-      survivors %in%
-        stanr:::.stanr_loaded_dlls_under(
-          models_dir
-        )
-    ))
-  } else {
-    expect_false(dir.exists(models_dir))
-  }
-
-  # Calling it again with nothing left to release is a harmless no-op.
-  expect_no_error(suppressWarnings(stanr_clear_cache()))
-
-  mod2 <- stan_model(code = code, precompiled_headers = FALSE)
-  expect_true(mod2$is_compiled())
-  expect_true(dir.exists(models_dir))
-})
-
-test_that("stan_model falls back to tempdir when the cache dir is unwritable", {
-  cache_root <- withr::local_tempdir()
-  unwritable <- file.path(cache_root, "readonly")
-  dir.create(unwritable)
-  old_mode <- file.mode(unwritable)
-  Sys.chmod(unwritable, mode = "0500")
-  on.exit(Sys.chmod(unwritable, mode = old_mode), add = TRUE)
+test_that("stan_model falls back to tempdir when stan_file's directory is unwritable", {
+  src_dir <- withr::local_tempdir()
+  stan_file <- file.path(src_dir, "model.stan")
+  writeLines(unique_stan_code(), stan_file)
+  old_mode <- file.mode(src_dir)
+  Sys.chmod(src_dir, mode = "0500")
+  on.exit(Sys.chmod(src_dir, mode = old_mode), add = TRUE)
   skip_if_not(
-    file.access(unwritable, 2) != 0,
+    file.access(src_dir, 2) != 0,
     "cannot make a directory unwritable in this environment (e.g. running as root)"
   )
-  withr::local_options(stanr_cache_dir = unwritable)
 
-  code <- '
-    parameters { real theta; }
-    model { theta ~ normal(0, 1); }
-  '
+  before <- list.files(tempdir(), pattern = "[.]stanrc$")
   expect_no_warning(
-    mod <- stan_model(code = code, precompiled_headers = FALSE)
+    mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
   )
   expect_true(mod$is_compiled())
-  # Nothing should have been written into the unwritable dir itself.
-  expect_equal(length(list.files(unwritable)), 0L)
+  # Nothing written into the unwritable source dir itself.
+  expect_equal(
+    setdiff(list.files(src_dir, all.files = TRUE), c(".", "..", "model.stan")),
+    character()
+  )
+  after <- list.files(tempdir(), pattern = "[.]stanrc$")
+  expect_gt(length(setdiff(after, before)), 0L)
 })
 
 withr::deferred_run()

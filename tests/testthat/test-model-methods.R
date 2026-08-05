@@ -15,7 +15,7 @@ init_test_cache("model-methods")
 .stanr_model_method_model <- function() {
   if (!exists("model", envir = .stanr_model_method_state, inherits = FALSE)) {
     model <- stan_model(
-      stan_file = test_path("test-models/model_methods.stan"),
+      stan_file = test_stan_file("model_methods.stan"),
       quiet = TRUE
     )
     assign("model", model, envir = .stanr_model_method_state)
@@ -444,7 +444,7 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
   # `mod` shares its shared library with the memoized fits used throughout
   # this file, and forcing a recompile here reaches every live fit.
   mod <- stan_model(
-    stan_file = test_path("test-models/model_methods.stan"),
+    stan_file = test_stan_file("model_methods.stan"),
     quiet = TRUE
   )
   fit <- mod$optimize(
@@ -471,8 +471,9 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
   # above.
   mod$compile(force_recompile = TRUE, quiet = TRUE)
 
-  # The invariant (see `.stanr_forced_rebuild_target()`): a forced recompile
-  # may load an additional shared library, but never unloads one.
+  # The invariant (a forced recompile always builds into a fresh scratch
+  # dir -- see `.stanr_build_scratch_dir()`, R/stan_model.R): it may load an
+  # additional shared library, but never unloads one.
   expect_identical(
     setdiff(loaded_before, stanr:::.stanr_loaded_dll_paths()),
     character()
@@ -495,7 +496,7 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
 
 test_that("ensure_native()'s probe is invoked exactly once across N consecutive native calls", {
   mod <- stan_model(
-    stan_file = test_path("test-models/model_methods.stan"),
+    stan_file = test_stan_file("model_methods.stan"),
     quiet = TRUE
   )
   fit <- mod$optimize(

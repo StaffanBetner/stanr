@@ -143,22 +143,6 @@
   }
 }
 
-# sourceCpp's own default cacheDir is a per-session temp directory, so
-# without an explicit on-disk cache_dir every session would recompile every
-# model from scratch instead of reusing the .so across sessions.
-.stanr_models_cache_dir <- function() {
-  cache_dir <- getOption(
-    "stanr_cache_dir",
-    file.path(tools::R_user_dir("stanr", "cache"), "models")
-  )
-  dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-  if (file.access(cache_dir, 2) != 0) {
-    # Soft degrade: unwritable cache dir falls back to the session temp dir.
-    cache_dir <- tempdir()
-  }
-  cache_dir
-}
-
 #' Normalized paths of every shared library currently mapped into this session.
 #'
 #' @noRd
@@ -173,106 +157,173 @@
   )
 }
 
-#' Per-session record of the artifacts each cached translation unit produced.
+# A completed `sourceCpp()` build is always compiled into a fresh, unique
+# scratch directory (`tempfile()`), never a shared/reused one -- so a forced
+# recompile can never overwrite a `.so` a live fit still holds pointers into,
+# and there is nothing to redirect/alias the way the old central-cache
+# registry had to.
+.stanr_build_scratch_dir <- function() {
+  dir <- tempfile("stanr_build_")
+  dir.create(dir)
+  dir
+}
+
+#' Persistent single-file cache path for a translation unit's compiled build.
 #'
-#' Entries are `list(cpp_file =, dynlibs =, alias =)`: the translation unit
-#' this session compiles that entry from, the shared libraries it has loaded
-#' for it, and how many forced rebuilds it has been redirected through.
-#' Consumed by `.stanr_forced_rebuild_target()`.
+#' Lives next to `stan_file` when the model has one -- named only from its own
+#' basename plus `suffix` (never the hash), so there is exactly one cache file
+#' per source file and an edit invalidates it by content hash rather than by
+#' filename -- or under `tempdir()` (named by `key_hash`, since there is no
+#' source path to derive a stable name from and several models may coexist in
+#' one session) when the model was created from a `code` string, or when
+#' `stan_file`'s directory turns out not to be writable.
 #'
 #' @noRd
-.stanr_dynlib_registry <- function() {
-  if (is.null(.stanr_memo$dynlibs)) {
-    .stanr_memo$dynlibs <- new.env(parent = emptyenv())
+.stanr_build_cache_file <- function(stan_file, key_hash, suffix = "") {
+  if (length(stan_file)) {
+    dir <- dirname(stan_file)
+    if (file.access(dir, 2) == 0) {
+      stem <- tools::file_path_sans_ext(basename(stan_file))
+      return(file.path(dir, paste0(".", stem, suffix, ".stanrc")))
+    }
   }
-  .stanr_memo$dynlibs
+  file.path(tempdir(), paste0("stanr_", key_hash, suffix, ".stanrc"))
 }
 
-#' Registry key: the canonical translation unit's path on disk.
+#' Archive a completed `sourceCpp()` build into a single relocatable file.
 #'
-#' `model_hash` alone is not enough: it does not cover `cache_dir`, and the
-#' same program under a different `stanr_cache_dir` is a different set of
-#' artifacts with nothing of its own mapped, so it must not inherit another
-#' cache's redirects.
+#' `Rcpp::sourceCpp()`'s generated R wrapper hardcodes the absolute path it
+#' `dyn.load()`s the shared library from (verified by inspecting a build:
+#' `` `.sourceCpp_1_DLLInfo` <- dyn.load('/abs/path/.../sourceCpp_2.so')
+#' ``), so that literal is replaced with a `{{STANR_SO}}` placeholder before
+#' archiving -- filled back in with wherever the archive gets extracted to at
+#' `.stanr_restore_build_cache()` time, which is never the same path twice.
+#' The `.so` path is read out of that same `dyn.load()` literal rather than
+#' globbed from `build_dir` -- by the time `Rcpp::sourceCpp()` has returned,
+#' it has already `dyn.load()`ed the library from that exact path itself (how
+#' `env` got populated), so parsing its own text is both sufficient and, on
+#' filesystems where a directory listing can briefly lag a `stat()` of a file
+#' that was just written, more reliable than re-discovering it via
+#' `list.files()`.
 #'
+#' @param build_dir The `buildDirectory` a `Rcpp::sourceCpp()` call returned.
+#' @return Nothing useful; failures are swallowed (this only means the build
+#'   can't be cached to disk, not that the compile itself failed).
 #' @noRd
-.stanr_registry_key <- function(model_hash, cache_dir) {
-  normalizePath(
-    file.path(cache_dir, paste0("stan_", model_hash, ".cpp")),
-    winslash = "/",
-    mustWork = FALSE
-  )
-}
-
-#' Marker recording that a `model_hash`'s canonical cache entry is superseded.
-#'
-#' Written when a forced rebuild is redirected to an alias translation unit.
-#' Without it, the *next* session would load the superseded artifact from the
-#' canonical entry and silently undo the forced rebuild.
-#'
-#' @noRd
-.stanr_stale_marker <- function(model_hash, cache_dir) {
-  file.path(cache_dir, paste0("stan_", model_hash, ".stale"))
-}
-
-#' Decide which translation unit a (possibly forced) compile should build.
-#'
-#' `Rcpp::sourceCpp(rebuild = TRUE)` `dyn.unload()`s and replaces the previous
-#' shared library in place; live fits' external pointers (and their XPtr
-#' finalizers, run at the next GC) then segfault. So a mapped library is never
-#' rebuilt in place: the forced rebuild is redirected to an alias translation
-#' unit `stan_<hash>_r<N>.cpp`, which gets its own sourceCpp build dir and
-#' loads an *additional* library. `alias` only moves forward, so the redirect
-#' target is never mapped in this session and `rebuild = force_recompile`
-#' passes through to `sourceCpp()` unchanged.
-#'
-#' @return `list(cpp_file =, alias =)`, where `alias` is 0 for the canonical
-#'   translation unit and the redirect counter otherwise.
-#' @noRd
-.stanr_forced_rebuild_target <- function(
-  model_hash,
-  cache_dir,
-  force_recompile
+.stanr_write_build_cache <- function(
+  cache_file,
+  key_hash,
+  build_dir,
+  cpp_file
 ) {
-  canonical <- .stanr_registry_key(model_hash, cache_dir)
-  entry <- .stanr_dynlib_registry()[[canonical]]
-  cpp_file <- entry$cpp_file %||%
-    file.path(cache_dir, paste0("stan_", model_hash, ".cpp"))
-  alias <- entry$alias %||% 0L
-  mapped <- any(
-    (entry$dynlibs %||% character()) %in% .stanr_loaded_dll_paths()
+  tryCatch(
+    {
+      wrapper_file <- file.path(build_dir, paste0(basename(cpp_file), ".R"))
+      if (!file.exists(wrapper_file)) {
+        return(invisible(NULL))
+      }
+      wrapper_text <- paste(
+        readLines(wrapper_file, warn = FALSE),
+        collapse = "\n"
+      )
+      so_match <- regmatches(
+        wrapper_text,
+        regexpr("dyn\\.load\\('[^']+'\\)", wrapper_text)
+      )
+      if (!length(so_match)) {
+        return(invisible(NULL))
+      }
+      so_file <- sub("^dyn\\.load\\('([^']+)'\\)$", "\\1", so_match)
+      if (!file.exists(so_file)) {
+        return(invisible(NULL))
+      }
+      templated <- gsub(so_file, "{{STANR_SO}}", wrapper_text, fixed = TRUE)
+      if (identical(templated, wrapper_text)) {
+        # The wrapper's dyn.load() path didn't look as expected -- skip
+        # caching rather than archive something that can't be restored.
+        return(invisible(NULL))
+      }
+
+      stage_dir <- tempfile("stanr_pack_")
+      dir.create(stage_dir)
+      on.exit(unlink(stage_dir, recursive = TRUE))
+      writeLines(key_hash, file.path(stage_dir, "HASH"))
+      writeLines(templated, file.path(stage_dir, "wrapper.R"))
+      file.copy(
+        so_file,
+        file.path(stage_dir, paste0("lib.", .Platform$dynlib.ext))
+      )
+
+      dir.create(dirname(cache_file), recursive = TRUE, showWarnings = FALSE)
+      tmp_out <- paste0(cache_file, ".tmp", Sys.getpid())
+      withr::with_dir(
+        stage_dir,
+        utils::tar(
+          tmp_out,
+          files = list.files("."),
+          compression = "gzip",
+          tar = "internal"
+        )
+      )
+      file.rename(tmp_out, cache_file)
+      invisible(NULL)
+    },
+    error = function(e) invisible(NULL)
   )
-  if (!force_recompile || !mapped) {
-    return(list(cpp_file = cpp_file, alias = alias))
+}
+
+#' Restore a previously archived build into a fresh location and bind its
+#' exports into `env`.
+#'
+#' @return `TRUE` on a hash-matching, structurally valid restore (`env` is
+#'   now populated and the library is loaded), `FALSE` otherwise (no cache
+#'   file, a stale hash, or a malformed archive) -- always a cache miss to
+#'   fall through to, never an error.
+#' @noRd
+.stanr_restore_build_cache <- function(cache_file, key_hash, env) {
+  if (!file.exists(cache_file)) {
+    return(FALSE)
   }
-  alias <- alias + 1L
-  list(
-    cpp_file = file.path(
-      cache_dir,
-      sprintf("stan_%s_r%d.cpp", model_hash, alias)
-    ),
-    alias = alias
+  extract_dir <- tempfile("stanr_load_")
+  dir.create(extract_dir)
+  ok <- tryCatch(
+    {
+      utils::untar(cache_file, exdir = extract_dir, tar = "internal")
+      TRUE
+    },
+    error = function(e) FALSE,
+    warning = function(w) FALSE
   )
+  hash_file <- file.path(extract_dir, "HASH")
+  wrapper_file <- file.path(extract_dir, "wrapper.R")
+  so_file <- file.path(extract_dir, paste0("lib.", .Platform$dynlib.ext))
+  if (
+    !ok ||
+      !file.exists(hash_file) ||
+      !file.exists(wrapper_file) ||
+      !file.exists(so_file) ||
+      !identical(readLines(hash_file, warn = FALSE), key_hash)
+  ) {
+    unlink(extract_dir, recursive = TRUE)
+    return(FALSE)
+  }
+  wrapper_text <- paste(readLines(wrapper_file, warn = FALSE), collapse = "\n")
+  wrapper_text <- gsub("{{STANR_SO}}", so_file, wrapper_text, fixed = TRUE)
+  source(textConnection(wrapper_text), local = env)
+  TRUE
 }
 
-#' Record what a completed compile built and loaded.
+#' Per-session memo of the `env` already compiled/restored for a given hash,
+#' so repeat compiles of an unchanged model within one session reuse the same
+#' loaded library instead of `dyn.load()`ing a fresh copy from the on-disk
+#' archive every time.
 #'
 #' @noRd
-.stanr_register_dynlibs <- function(
-  model_hash,
-  cache_dir,
-  cpp_file,
-  alias,
-  dynlibs
-) {
-  registry <- .stanr_dynlib_registry()
-  key <- .stanr_registry_key(model_hash, cache_dir)
-  entry <- registry[[key]] %||% list(dynlibs = character())
-  entry$cpp_file <- cpp_file
-  entry$alias <- alias
-  entry$dynlibs <- union(entry$dynlibs, dynlibs)
-  registry[[key]] <- entry
-  invisible(entry)
+.stanr_env_memo <- function() {
+  if (is.null(.stanr_memo$compiled_envs)) {
+    .stanr_memo$compiled_envs <- new.env(parent = emptyenv())
+  }
+  .stanr_memo$compiled_envs
 }
 
 # Kept in sync by hand with the `// [[Rcpp::export]]` function names in
@@ -302,6 +353,7 @@
 .compile_stan_model_environment <- function(
   code,
   model_name,
+  stan_file = NULL,
   external_cpp = NULL,
   verbose = FALSE,
   precompiled_headers = TRUE,
@@ -364,106 +416,91 @@
     algo = "xxhash64"
   )
 
-  cache_dir <- .stanr_models_cache_dir()
-
-  stale_marker <- .stanr_stale_marker(model_hash, cache_dir)
-  # A forced rebuild redirected to an alias translation unit leaves the
-  # canonical cache entry holding the superseded artifact, so it is marked
-  # stale on disk. Honour that marker once per session, on the first compile
-  # of this hash -- the only point at which nothing has been built from the
-  # canonical entry yet, so rebuilding it in place is safe.
-  if (
-    !force_recompile &&
-      is.null(
-        .stanr_dynlib_registry()[[
-          .stanr_registry_key(model_hash, cache_dir)
-        ]]
-      ) &&
-      file.exists(stale_marker)
-  ) {
-    force_recompile <- TRUE
+  memo <- .stanr_env_memo()
+  if (!force_recompile && !is.null(memo[[model_hash]])) {
+    return(memo[[model_hash]])
   }
 
-  target <- .stanr_forced_rebuild_target(
-    model_hash,
-    cache_dir,
-    force_recompile
-  )
-  cpp_file <- target$cpp_file
-  # Only invoked on a cache miss (nothing on disk matches `model_hash`).
-  # `force_recompile` also forces regeneration here, since `sourceCpp(rebuild
-  # = force_recompile)` below would otherwise silently reuse a stale `.cpp`.
-  if (force_recompile || !file.exists(cpp_file)) {
-    if (verbose) {
-      message("[stanr] Compiling '", model_name, "'...")
+  cache_file <- .stanr_build_cache_file(stan_file, model_hash)
+  if (!force_recompile) {
+    env <- new.env()
+    if (.stanr_restore_build_cache(cache_file, model_hash, env)) {
+      memo[[model_hash]] <- env
+      return(env)
     }
-    cpp_code <- stanc(
+  }
+
+  build_dir <- .stanr_build_scratch_dir()
+  cpp_file <- file.path(build_dir, paste0("stan_", model_hash, ".cpp"))
+  if (verbose) {
+    message("[stanr] Compiling '", model_name, "'...")
+  }
+  cpp_code <- stanc(
+    code,
+    external_cpp = external_cpp,
+    use_opencl = use_opencl
+  )
+  if (standalone_functions) {
+    # external_cpp = NULL: its content is already in `cpp_code` above (the
+    # model stanc call already prepended it) -- prepending it a second
+    # time would duplicate it verbatim in the file. allow_undefined is
+    # therefore set explicitly rather than left to stanc()'s own
+    # external_cpp-implies-allow-undefined inference, which only fires
+    # when `external_cpp` is actually passed.
+    functions_out <- stanc(
       code,
-      external_cpp = external_cpp,
-      use_opencl = use_opencl
+      standalone_functions = TRUE,
+      use_opencl = use_opencl,
+      allow_undefined = length(external_cpp) > 0
     )
-    if (standalone_functions) {
-      # external_cpp = NULL: its content is already in `cpp_code` above (the
-      # model stanc call already prepended it) -- prepending it a second
-      # time would duplicate it verbatim in the file. allow_undefined is
-      # therefore set explicitly rather than left to stanc()'s own
-      # external_cpp-implies-allow-undefined inference, which only fires
-      # when `external_cpp` is actually passed.
-      functions_out <- stanc(
-        code,
-        standalone_functions = TRUE,
-        use_opencl = use_opencl,
-        allow_undefined = length(external_cpp) > 0
+    processed <- .stanr_process_standalone_cpp(
+      functions_out,
+      c(
+        .stanr_model_support_exports,
+        "stanr_exposed_functions",
+        "stanr_rng_set_seed"
       )
-      processed <- .stanr_process_standalone_cpp(
-        functions_out,
-        c(
-          .stanr_model_support_exports,
-          "stanr_exposed_functions",
-          "stanr_rng_set_seed"
-        )
-      )
-      wrapper_section <- processed$wrapper_section
-      if (length(external_cpp) > 0) {
-        # stanc's standalone-functions codegen always has a wrapper call
-        # `model_namespace::<fn>(...)`, assuming <fn> is defined inside
-        # model_namespace -- true for ordinary Stan functions, but not for
-        # one implemented via `external_cpp`: that implementation is
-        # prepended by the *first* stanc() call above *before*
-        # `namespace model_namespace {` opens (i.e. at file/global scope),
-        # so `model_namespace::<fn>` doesn't exist there and would fail to
-        # link. Detected by comparing each exposed function's first
-        # occurrence in `cpp_code` against where model_namespace opens: an
-        # external_cpp implementation's first (and only) occurrence is the
-        # prepended definition, strictly before that point, while an
-        # ordinary Stan function's every occurrence is inside
-        # model_namespace. Unqualifying the call is safe either way: from
-        # within `model_namespace`, the model's own generated code already
-        # calls these external functions unqualified (relying on ordinary
-        # scope fallback to file/global scope) -- see `cpp_code` itself --
-        # and this wrapper lives at file scope too, so the same unqualified
-        # call resolves identically.
-        namespace_pos <- regexpr(
-          "namespace model_namespace",
-          cpp_code,
-          fixed = TRUE
-        )[[1]]
-        for (fn_name in processed$functions$name) {
-          first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), cpp_code)[[1]]
-          if (first_pos > 0 && first_pos < namespace_pos) {
-            wrapper_section <- gsub(
-              paste0("model_namespace::", fn_name, "("),
-              paste0(fn_name, "("),
-              wrapper_section,
-              fixed = TRUE
-            )
-          }
+    )
+    wrapper_section <- processed$wrapper_section
+    if (length(external_cpp) > 0) {
+      # stanc's standalone-functions codegen always has a wrapper call
+      # `model_namespace::<fn>(...)`, assuming <fn> is defined inside
+      # model_namespace -- true for ordinary Stan functions, but not for
+      # one implemented via `external_cpp`: that implementation is
+      # prepended by the *first* stanc() call above *before*
+      # `namespace model_namespace {` opens (i.e. at file/global scope),
+      # so `model_namespace::<fn>` doesn't exist there and would fail to
+      # link. Detected by comparing each exposed function's first
+      # occurrence in `cpp_code` against where model_namespace opens: an
+      # external_cpp implementation's first (and only) occurrence is the
+      # prepended definition, strictly before that point, while an
+      # ordinary Stan function's every occurrence is inside
+      # model_namespace. Unqualifying the call is safe either way: from
+      # within `model_namespace`, the model's own generated code already
+      # calls these external functions unqualified (relying on ordinary
+      # scope fallback to file/global scope) -- see `cpp_code` itself --
+      # and this wrapper lives at file scope too, so the same unqualified
+      # call resolves identically.
+      namespace_pos <- regexpr(
+        "namespace model_namespace",
+        cpp_code,
+        fixed = TRUE
+      )[[1]]
+      for (fn_name in processed$functions$name) {
+        first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), cpp_code)[[1]]
+        if (first_pos > 0 && first_pos < namespace_pos) {
+          wrapper_section <- gsub(
+            paste0("model_namespace::", fn_name, "("),
+            paste0(fn_name, "("),
+            wrapper_section,
+            fixed = TRUE
+          )
         }
       }
-      writeLines(c(cpp_code, model_support, wrapper_section), cpp_file)
-    } else {
-      writeLines(c(cpp_code, model_support), cpp_file)
     }
+    writeLines(c(cpp_code, model_support, wrapper_section), cpp_file)
+  } else {
+    writeLines(c(cpp_code, model_support), cpp_file)
   }
 
   cppflags <- .stanr_base_cppflags()
@@ -517,38 +554,27 @@
       cppflags = compilation_cppflags,
       libs = libs,
       extra_assignments = extra_assignments,
-      rebuild = force_recompile,
-      cache_dir = cache_dir,
+      rebuild = FALSE,
+      cache_dir = build_dir,
       verbose = verbose
     )
   }
 
-  # Diffed around the compile rather than derived from `cache_dir`, which is
-  # shared by every model: this has to attribute the shared library to *this*
-  # hash. A warm cache still loads its library here, so the first compile of a
-  # hash in a session always registers one.
-  loaded_before <- .stanr_loaded_dll_paths()
-  .stanr_compile_with_pch_retry(
+  result <- .stanr_compile_with_pch_retry(
     compile_model,
     cppflags,
     base_cppflags,
     pch_enabled,
     verbose
   )
-  .stanr_register_dynlibs(
+  .stanr_write_build_cache(
+    cache_file,
     model_hash,
-    cache_dir,
-    cpp_file,
-    target$alias,
-    setdiff(.stanr_loaded_dll_paths(), loaded_before)
+    result$buildDirectory,
+    cpp_file
   )
 
-  if (target$alias > 0L) {
-    file.create(stale_marker, showWarnings = FALSE)
-  } else if (force_recompile) {
-    unlink(stale_marker)
-  }
-
+  memo[[model_hash]] <- env
   env
 }
 
@@ -633,19 +659,21 @@
 #'
 #' @return A [`StanModel`] object.
 #'
-#'   Compiled models are cached persistently on disk (keyed on a hash of the
-#'   generated C++, so the cache is reused across R sessions as long as the
-#'   Stan program, `include_paths`, `external_cpp`, and installed stanr/Stan
-#'   versions are unchanged) under `getOption("stanr_cache_dir")`, which
-#'   defaults to a subdirectory of [tools::R_user_dir()]. Use
-#'   [stanr_clear_cache()] to remove the cached models and precompiled
-#'   headers. On a cache hit, the Stan-to-C++ transpiler is skipped entirely,
-#'   so any transpiler warnings (e.g. from pedantic mode or deprecated
-#'   syntax) are only surfaced the first time a given model is compiled, not
-#'   on subsequent cache hits.
+#'   The compiled model is cached persistently on disk as a single file next
+#'   to `stan_file` (named after it, e.g. `mymodel.stan` gets a sibling
+#'   `.mymodel.stanrc`), or under [tempdir()] when the model was created from
+#'   a `code` string, or when `stan_file`'s directory isn't writable. The
+#'   cache file embeds a hash of the generated C++, so it's reused across R
+#'   sessions as long as the Stan program, `include_paths`, `external_cpp`,
+#'   and installed stanr/Stan versions are unchanged, and is silently
+#'   recompiled and overwritten otherwise -- there is no separate cache-clearing
+#'   step. On a cache hit, the Stan-to-C++ transpiler is skipped entirely, so
+#'   any transpiler warnings (e.g. from pedantic mode or deprecated syntax)
+#'   are only surfaced the first time a given model is compiled, not on
+#'   subsequent cache hits.
 #'
 #' @seealso [`StanModel`], [`$compile()`][model-method-compile],
-#'   [`$sample()`][model-method-sample], [stanr_clear_cache()]
+#'   [`$sample()`][model-method-sample]
 #'
 #' @examples
 #' \dontrun{
@@ -701,91 +729,4 @@ stan_model <- function(
     use_opencl = use_opencl,
     compile_standalone = compile_standalone
   )
-}
-
-#' Paths of DLLs currently mapped into this session from under `dir`.
-#'
-#' Windows refuses to unlink a DLL while it is mapped into the process, so
-#' `unlink(recursive = TRUE)` over a cache tree removes everything *except*
-#' the loaded model artifacts and the directories holding them. This reports
-#' which files those are, so `stanr_clear_cache()` can name them rather
-#' than appear to have succeeded. POSIX unlinks a mapped file without
-#' complaint, so in practice this is only ever non-empty on Windows.
-#'
-#' @noRd
-.stanr_loaded_dlls_under <- function(dir) {
-  if (!dir.exists(dir)) {
-    return(character())
-  }
-  loaded <- .stanr_loaded_dll_paths()
-  root <- normalizePath(dir, winslash = "/", mustWork = FALSE)
-  loaded[startsWith(loaded, paste0(root, "/"))]
-}
-
-#' Clear stanr's persistent compilation caches
-#'
-#' @description Deletes stanr's on-disk caches of compiled Stan models and
-#'   precompiled model headers (PCH), freeing disk space and forcing the next
-#'   compilation(s) to rebuild from scratch.
-#'
-#'   This always clears the package's own default cache root under
-#'   [tools::R_user_dir("stanr", "cache")][tools::R_user_dir()] -- i.e. its
-#'   `models` and `pch` subdirectories -- regardless of whether
-#'   `getOption("stanr_cache_dir")` or `getOption("stanr_pch_dir")` has
-#'   been set to point compilation at different directories. An overridden
-#'   `stanr_cache_dir`/`stanr_pch_dir` is deliberately left untouched:
-#'   stanr does not own that directory (it may be shared with other
-#'   software or point outside the user cache root entirely), so this
-#'   function only ever removes paths it created by default.
-#'
-#' @return An invisible named character vector with elements `models` and
-#'   `pch`, giving the cache paths targeted for removal (present whether or
-#'   not they existed beforehand).
-#'
-#' @section Models compiled in this session:
-#'   Windows will not delete a DLL that is still mapped into the running
-#'   process, so a model compiled earlier in this session keeps its own
-#'   compiled artifact (and the directories containing it) alive: everything
-#'   else is removed and those files remain. This function warns, naming
-#'   what survived -- restart R and call it again to reclaim the rest.
-#'   Models are *not* unloaded automatically, because any [`StanModel`] still
-#'   referring to one would be left calling into unmapped memory. POSIX
-#'   unlinks a mapped file without complaint, so this does not arise there.
-#'
-#' @seealso [stan_model()]
-#'
-#' @export
-stanr_clear_cache <- function() {
-  cache_root <- tools::R_user_dir("stanr", "cache")
-  models_dir <- file.path(cache_root, "models")
-  pch_dir <- file.path(cache_root, "pch")
-  targets <- c(models_dir, pch_dir)
-
-  for (target in targets) {
-    if (dir.exists(target)) {
-      unlink(target, recursive = TRUE)
-    }
-  }
-
-  # `unlink()` signals failure only through its return code, and on Windows
-  # it partially succeeds -- everything comes out except DLLs still mapped
-  # into this session. Report that instead of returning as though the cache
-  # were gone (see the "Models compiled in this session" section above).
-  leftover <- targets[dir.exists(targets)]
-  if (length(leftover)) {
-    blocking <- unlist(lapply(leftover, .stanr_loaded_dlls_under))
-    warning(
-      "Could not fully clear the stanr cache. Still present:\n",
-      paste0("  ", leftover, collapse = "\n"),
-      if (length(blocking)) {
-        paste0(
-          "\nStill loaded in this R session (restart R to release):\n",
-          paste0("  ", blocking, collapse = "\n")
-        )
-      },
-      call. = FALSE
-    )
-  }
-
-  invisible(c(models = models_dir, pch = pch_dir))
 }

@@ -414,6 +414,7 @@ stan_model_compile <- function(
   private$compiled_env_ <- .compile_stan_model_environment(
     code = private$resolved_code(),
     model_name = private$model_name_,
+    stan_file = private$stan_file_,
     external_cpp = private$external_cpp_,
     verbose = !quiet,
     precompiled_headers = private$precompiled_headers_,
@@ -677,6 +678,7 @@ stan_model_expose_stan_functions <- function(global = FALSE, verbose = FALSE) {
       # must work on a `compile = FALSE` model without compiling it.
       private$functions_compiled_env_ <- .compile_standalone_functions_environment(
         code = private$resolved_code(),
+        stan_file = private$stan_file_,
         external_cpp = private$external_cpp_,
         cpp_options = private$cpp_options_,
         verbose = verbose,

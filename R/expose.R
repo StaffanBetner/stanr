@@ -227,6 +227,9 @@
 #'
 #' @param code Stan program source, already `#include`-resolved by the
 #'   caller (e.g. a model's `resolved_code()`).
+#' @param stan_file `NULL`, or the model's source file path -- see
+#'   `.stanr_build_cache_file()` (R/stan_model.R) for how it controls where
+#'   the persistent build cache lives.
 #' @param external_cpp `NULL`, or a character vector of paths, forwarded to
 #'   `stanc()`.
 #' @param cpp_options C++ compilation options; see `stan_model()`.
@@ -239,6 +242,7 @@
 #' @noRd
 .compile_standalone_functions_environment <- function(
   code,
+  stan_file = NULL,
   external_cpp = NULL,
   cpp_options = list(),
   verbose = FALSE,
@@ -281,16 +285,29 @@
     algo = "xxhash64"
   )
 
-  # Functions .cpp files live alongside model .cpp files in the same cache
-  # dir, distinguished only by filename prefix.
-  cache_dir <- .stanr_models_cache_dir()
-  cpp_file <- file.path(cache_dir, paste0("functions_", functions_hash, ".cpp"))
-  if (!file.exists(cpp_file)) {
-    if (verbose) {
-      message("[stanr] Compiling Stan functions...")
-    }
-    writeLines(processed$full_code, cpp_file)
+  memo <- .stanr_env_memo()
+  memo_key <- paste0("fn:", functions_hash)
+  if (!is.null(memo[[memo_key]])) {
+    return(memo[[memo_key]])
   }
+
+  cache_file <- .stanr_build_cache_file(
+    stan_file,
+    functions_hash,
+    suffix = ".functions"
+  )
+  env <- new.env()
+  if (.stanr_restore_build_cache(cache_file, functions_hash, env)) {
+    memo[[memo_key]] <- env
+    return(env)
+  }
+
+  build_dir <- .stanr_build_scratch_dir()
+  cpp_file <- file.path(build_dir, paste0("functions_", functions_hash, ".cpp"))
+  if (verbose) {
+    message("[stanr] Compiling Stan functions...")
+  }
+  writeLines(processed$full_code, cpp_file)
 
   base_cppflags <- .stanr_base_cppflags()
   pch_enabled <- FALSE
@@ -306,8 +323,6 @@
     cppflags <- base_cppflags
   }
 
-  env <- new.env()
-
   compile_functions <- function(compilation_cppflags) {
     .stanr_sourcecpp(
       cpp_file = cpp_file,
@@ -316,19 +331,26 @@
       libs = .stanr_tbb_libs(),
       extra_assignments = extra_assignments,
       rebuild = FALSE,
-      cache_dir = cache_dir,
+      cache_dir = build_dir,
       verbose = verbose
     )
   }
 
-  .stanr_compile_with_pch_retry(
+  result <- .stanr_compile_with_pch_retry(
     compile_functions,
     cppflags,
     base_cppflags,
     pch_enabled,
     verbose
   )
+  .stanr_write_build_cache(
+    cache_file,
+    functions_hash,
+    result$buildDirectory,
+    cpp_file
+  )
 
+  memo[[memo_key]] <- env
   env
 }
 

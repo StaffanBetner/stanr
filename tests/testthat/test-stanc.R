@@ -20,7 +20,7 @@ test_that("stanc resolves nested includes from include_directories", {
 
 test_that("stan_model forwards include_paths to stanc", {
   mod <- stan_model(
-    stan_file = test_path("test-models/include_model.stan"),
+    stan_file = test_stan_file("include_model.stan"),
     include_paths = test_path("test-models/includes")
   )
 
@@ -192,7 +192,7 @@ test_that("StanModel$variables() caches result", {
 
 test_that("StanModel$variables() works with stan_file", {
   mod <- stan_model(
-    stan_file = test_path("test-models/bernoulli.stan"),
+    stan_file = test_stan_file("bernoulli.stan"),
     compile = FALSE
   )
 
@@ -204,7 +204,7 @@ test_that("StanModel$variables() works with stan_file", {
 test_that("StanModel resolves includes identically regardless of compile()/variables() order", {
   # $compile() first, then $variables()
   mod_compile_first <- stan_model(
-    stan_file = test_path("test-models/include_model.stan"),
+    stan_file = test_stan_file("include_model.stan"),
     include_paths = test_path("test-models/includes"),
     compile = FALSE
   )
@@ -213,7 +213,7 @@ test_that("StanModel resolves includes identically regardless of compile()/varia
 
   # $variables() first, then $compile()
   mod_variables_first <- stan_model(
-    stan_file = test_path("test-models/include_model.stan"),
+    stan_file = test_stan_file("include_model.stan"),
     include_paths = test_path("test-models/includes"),
     compile = FALSE
   )
@@ -250,7 +250,7 @@ test_that("StanModel caches resolved #include code between $compile() and $varia
   )
 
   mod <- stan_model(
-    stan_file = test_path("test-models/include_model.stan"),
+    stan_file = test_stan_file("include_model.stan"),
     include_paths = test_path("test-models/includes"),
     compile = FALSE
   )

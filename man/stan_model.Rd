@@ -109,16 +109,18 @@ what gets exposed and how.}
 \value{
 A \code{\link{StanModel}} object.
 
-Compiled models are cached persistently on disk (keyed on a hash of the
-generated C++, so the cache is reused across R sessions as long as the
-Stan program, \code{include_paths}, \code{external_cpp}, and installed stanr/Stan
-versions are unchanged) under \code{getOption("stanr_cache_dir")}, which
-defaults to a subdirectory of \code{\link[tools:R_user_dir]{tools::R_user_dir()}}. Use
-\code{\link[=stanr_clear_cache]{stanr_clear_cache()}} to remove the cached models and precompiled
-headers. On a cache hit, the Stan-to-C++ transpiler is skipped entirely,
-so any transpiler warnings (e.g. from pedantic mode or deprecated
-syntax) are only surfaced the first time a given model is compiled, not
-on subsequent cache hits.
+The compiled model is cached persistently on disk as a single file next
+to \code{stan_file} (named after it, e.g. \code{mymodel.stan} gets a sibling
+\code{.mymodel.stanrc}), or under \code{\link[=tempdir]{tempdir()}} when the model was created from
+a \code{code} string, or when \code{stan_file}'s directory isn't writable. The
+cache file embeds a hash of the generated C++, so it's reused across R
+sessions as long as the Stan program, \code{include_paths}, \code{external_cpp},
+and installed stanr/Stan versions are unchanged, and is silently
+recompiled and overwritten otherwise -- there is no separate cache-clearing
+step. On a cache hit, the Stan-to-C++ transpiler is skipped entirely, so
+any transpiler warnings (e.g. from pedantic mode or deprecated syntax)
+are only surfaced the first time a given model is compiled, not on
+subsequent cache hits.
 }
 \description{
 Create a new \code{\link{StanModel}} object from a Stan program file or
@@ -153,5 +155,5 @@ fit$summary()
 }
 \seealso{
 \code{\link{StanModel}}, \code{\link[=model-method-compile]{$compile()}},
-\code{\link[=model-method-sample]{$sample()}}, \code{\link[=stanr_clear_cache]{stanr_clear_cache()}}
+\code{\link[=model-method-sample]{$sample()}}
 }
