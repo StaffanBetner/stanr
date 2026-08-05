@@ -156,19 +156,15 @@ test_that("StanGQ$num_chains() reports the draws' own chain count, 0L with no dr
     show_messages = FALSE,
     num_threads = test_threads()
   )
-  draws_mat <- posterior::as_draws_matrix(samp$draws())
 
   gq <- mod$generate_quantities(
-    fitted_params = draws_mat,
+    fitted_params = samp$draws(),
     data = data,
     seed = 42,
     show_messages = FALSE,
     num_threads = test_threads()
   )
-  # `generate_quantities()` always flattens `fitted_params` to a chainless
-  # draws_matrix before the native call, so its output is one logical chain
-  # regardless of how many chains the input draws had.
-  expect_equal(gq$num_chains(), 1L)
+  expect_equal(gq$num_chains(), samp$num_chains())
   expect_equal(gq$num_chains(), posterior::nchains(gq$draws()))
 
   empty_gq <- stanr:::StanGQ$new(
