@@ -77,6 +77,8 @@ namespace stanr {
       array.attr("dimnames") = Rcpp::List::create(
           R_NilValue, R_NilValue,
           Rcpp::CharacterVector(names.begin(), names.end()));
+      array.attr("class") = Rcpp::CharacterVector::create(
+          "draws_array", "draws", "array");
       return array;
     };
 

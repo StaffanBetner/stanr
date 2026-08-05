@@ -1,7 +1,7 @@
 ^src/stan/(?!(src$|src/stan))
 ^src/math/(?!(stan|lib$|lib/opencl_([^\/]*)|lib/sundials_([^\/]*)$|lib/sundials_([^\/]*)/src|lib/sundials_([^\/]*)/include))
 ^src/math/lib/sundials_([^\/]*)/src/sunnonlinsol/fixedpoint/fmod
-^src/walnutpie/(?!include)
+^src/walnutpie/(?!(include|LICENSE))
 ^src/sundials
 ^inst/include/(?!stanr)
 ^\.Rproj\.user$
@@ -27,4 +27,4 @@ inst/lib
 .*\.dll$
 ^man-roxygen$
 ^\.([^\/]*)$
-**.stanrc
+.*\.stanrc$

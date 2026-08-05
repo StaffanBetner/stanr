@@ -8,6 +8,8 @@ Authors@R:
             comment = c(ORCID = "0000-0001-7000-8065")),
   person("Stan Development Team", role = "cph",
           comment = "Stan sources and headers"),
+  person("Walnutpie Developers", role = "cph",
+          comment = "Walnutpie sources and headers"),
   person("Lawrence Livermore National Security", role = "cph",
           comment = "SUNDIALS sources and headers")
   )

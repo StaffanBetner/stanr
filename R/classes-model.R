@@ -1018,7 +1018,7 @@ stan_model_sample <- function(
     if (result$return_code != 0) {
       list(draws = NULL, diagnostics = NULL)
     } else {
-      draws <- posterior::as_draws_array(result$samples)
+      draws <- result$samples
       # walnuts collects no sampler diagnostics; a zero-variable array keeps
       # the diagnostic checks honestly silent. Other engines that emit no
       # diagnostic columns keep the all-NA placeholder (see
@@ -1026,7 +1026,7 @@ stan_model_sample <- function(
       diagnostics <- if (
         engine == "walnuts" || dim(result$diagnostics)[3] > 0
       ) {
-        posterior::as_draws_array(result$diagnostics)
+        result$diagnostics
       } else {
         posterior::draws_df(
           "stepsize__" = NA,
@@ -1041,10 +1041,10 @@ stan_model_sample <- function(
         draws = draws,
         diagnostics = diagnostics,
         warmup_draws = if (!is.null(result$warmup_samples)) {
-          posterior::as_draws_array(result$warmup_samples)
+          result$warmup_samples
         },
         warmup_diagnostics = if (!is.null(result$warmup_diagnostics)) {
-          posterior::as_draws_array(result$warmup_diagnostics)
+          result$warmup_diagnostics
         },
         inv_metric = result$inv_metric,
         step_size = result$step_size
@@ -1161,7 +1161,7 @@ stan_model_optimize <- function(
   num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
   refresh <- .stanr_int(refresh, "refresh")
   iter <- .stanr_int(iter, "iter")
-  history_size <- .stanr_int(history_size, "history_size")
+  history_size <- .stanr_int(history_size, "history_size", min = 1L)
 
   native_args_fn <- function(seed, resolved_init, model) {
     list(
@@ -1606,11 +1606,11 @@ stan_model_pathfinder <- function(
   num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
   refresh <- .stanr_int(refresh, "refresh")
   num_paths <- .stanr_int(num_paths, "num_paths", min = 1L)
-  single_path_draws <- .stanr_int(single_path_draws, "single_path_draws")
-  draws <- .stanr_int(draws, "draws")
+  single_path_draws <- .stanr_int(single_path_draws, "single_path_draws", min = 1L)
+  draws <- .stanr_int(draws, "draws", min = 1L)
   max_lbfgs_iters <- .stanr_int(max_lbfgs_iters, "max_lbfgs_iters")
   num_elbo_draws <- .stanr_int(num_elbo_draws, "num_elbo_draws")
-  history_size <- .stanr_int(history_size, "history_size")
+  history_size <- .stanr_int(history_size, "history_size", min = 1L)
 
   native_args_fn <- function(seed, resolved_init, model) {
     list(
@@ -1727,6 +1727,7 @@ stan_model_generate_quantities <- function(
   } else {
     posterior::as_draws_matrix(fitted_params)
   }
+  nchains_input <- posterior::nchains(input)
 
   native_args_fn <- function(seed, resolved_init, model) {
     pars <- .stanr_bracket_names(self$constrained_param_names(model))
@@ -1740,12 +1741,13 @@ stan_model_generate_quantities <- function(
       verbose = show_messages,
       show_exceptions = show_exceptions,
       num_threads = num_threads,
+      nchains = nchains_input,
       draws = draws_matrix
     )
   }
 
   payload_fn <- function(result) {
-    list(draws = posterior::as_draws_array(result$samples))
+    list(draws = result$samples)
   }
 
   res <- .stanr_run_service(

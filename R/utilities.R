@@ -345,6 +345,7 @@ resolve_init <- function(init) {
       is.null(names(init)) &&
       is.numeric(init) &&
       !is.na(init) &&
+      is.finite(init) &&
       init >= 0
   )
   if (is_radius) {
