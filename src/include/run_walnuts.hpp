@@ -2,7 +2,8 @@
 #define STANR_RUN_WALNUTS_HPP
 
 #include <Rcpp.h>
-#include <walnutpie.hpp>
+#include <walnutpie/adaptive_walnuts.hpp>
+#include <walnutpie/config.hpp>
 #include <stan/model/model_base.hpp>
 #include <stan/model/log_prob_grad.hpp>
 #include <stan/services/util/create_rng.hpp>
