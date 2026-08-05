@@ -40,6 +40,24 @@ Suggests:
     BH
 Config/testthat/edition: 3
 Encoding: UTF-8
+Collate:
+    "stanr-package.R"
+    "utilities.R"
+    "stanmodel-sample.R"
+    "stanmodel-optimize.R"
+    "stanmodel-laplace.R"
+    "stanmodel-variational.R"
+    "stanmodel-pathfinder.R"
+    "stanmodel-generate-quantities.R"
+    "stanmodel-diagnose.R"
+    "pch.R"
+    "expose.R"
+    "stanc.R"
+    "stan_model.R"
+    "classes-model.R"
+    "classes-fit.R"
+    "diagnostics.R"
+    "zzz.R"
 Roxygen: list(markdown = TRUE)
 Config/build/compilation-database: true
 Config/roxygen2/version: 8.0.0

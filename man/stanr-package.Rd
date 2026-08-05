@@ -29,6 +29,7 @@ Authors:
 Other contributors:
 \itemize{
   \item Stan Development Team (Stan sources and headers) [copyright holder]
+  \item Walnutpie Developers (Walnutpie sources and headers) [copyright holder]
   \item Lawrence Livermore National Security (SUNDIALS sources and headers) [copyright holder]
 }
 

@@ -70,6 +70,7 @@ StanModel <- R6Class(
   "StanModel",
   public = list(
     functions = NULL,
+
     initialize = function(
       stan_file = NULL,
       code = NULL,
@@ -104,7 +105,7 @@ StanModel <- R6Class(
       if (!is.null(stan_file)) {
         if (
           !is.character(stan_file) ||
-            length(stan_file) != 1L ||
+            length(stan_file) != 1 ||
             is.na(stan_file) ||
             !file.exists(stan_file)
         ) {
@@ -176,6 +177,246 @@ StanModel <- R6Class(
         self$compile()
       }
       invisible(self)
+    },
+
+    # ---- Information methods ----
+
+    stan_file = function() private$stan_file_ %||% character(),
+    has_stan_file = function() !is.null(private$stan_file_),
+    code = function() private$code_,
+    print = function() {
+      cat(private$code_, "\n", sep = "")
+      invisible(self)
+    },
+    model_name = function() private$model_name_,
+    include_paths = function() private$include_paths_,
+    stan_version = function() .stanr_stan_version(),
+    is_compiled = function() !is.null(private$compiled_env_),
+    compile_generation = function() private$compile_generation_,
+    cpp_options = function() private$cpp_options_,
+    stanc_options = function() private$stanc_options_,
+    use_opencl = function() private$use_opencl_,
+
+    # ---- Variables method ----
+
+    variables = function() {
+      if (is.null(private$variables_)) {
+        private$variables_ <- model_variables(
+          model_code = private$resolved_code(),
+          include_directories = character(),
+          allow_undefined = length(private$external_cpp_) > 0
+        )
+      }
+      private$variables_
+    },
+
+    # ---- Compilation methods ----
+
+    compile = function(
+      force_recompile = private$force_recompile_,
+      quiet = private$quiet_,
+      compile_standalone = private$compile_standalone_
+    ) {
+      force_recompile <- .stanr_flag(force_recompile, "force_recompile")
+      quiet <- .stanr_flag(quiet, "quiet")
+      compile_standalone <- .stanr_flag(
+        compile_standalone,
+        "compile_standalone"
+      )
+      # Incremented unconditionally, before compilation runs, so the generation
+      # always reflects "a compile was attempted" -- fits use this (via
+      # `$compile_generation()`) to know whether their cached native pointer
+      # might now be stale, even if `.compile_stan_model_environment()` below
+      # throws partway through.
+      private$compile_generation_ <- private$compile_generation_ + 1L
+      private$compiled_env_ <- .compile_stan_model_environment(
+        code = private$resolved_code(),
+        model_name = private$model_name_,
+        stan_file = private$stan_file_,
+        external_cpp = private$external_cpp_,
+        verbose = !quiet,
+        precompiled_headers = private$precompiled_headers_,
+        force_recompile = force_recompile,
+        use_opencl = private$use_opencl_,
+        cpp_options = private$cpp_options_,
+        standalone_functions = compile_standalone
+      )
+      if (compile_standalone) {
+        # cmdstanr parity: compile_standalone exposes without a separate
+        # $expose_stan_functions() call. Unconditional on every $compile() run
+        # (not just the first) -- $compile() can be re-run via
+        # force_recompile, and rebuilding from the fresh compiled env keeps
+        # the function objects pointing at live (not stale/freed) symbols.
+        private$functions_compiled_env_ <- private$compiled_env_
+        .stanr_build_functions_env(
+          private$compiled_env_,
+          self$functions,
+          global = FALSE
+        )
+      }
+      invisible(self)
+    },
+
+    check_syntax = function(pedantic = FALSE, quiet = FALSE) {
+      pedantic <- .stanr_flag(pedantic, "pedantic")
+      quiet <- .stanr_flag(quiet, "quiet")
+      stanc(
+        private$resolved_code(),
+        external_cpp = private$external_cpp_,
+        use_opencl = private$use_opencl_,
+        warn_pedantic = pedantic
+      )
+      if (!quiet) {
+        message("[stanr] Stan program is syntactically correct.")
+      }
+      invisible(TRUE)
+    },
+
+    format = function(
+      overwrite_file = FALSE,
+      canonicalize = FALSE,
+      backup = TRUE,
+      max_line_length = NULL,
+      quiet = FALSE
+    ) {
+      overwrite_file <- .stanr_flag(overwrite_file, "overwrite_file")
+      backup <- .stanr_flag(backup, "backup")
+      quiet <- .stanr_flag(quiet, "quiet")
+      if (
+        !isFALSE(canonicalize) &&
+          !isTRUE(canonicalize) &&
+          !is.character(canonicalize)
+      ) {
+        stop(
+          "`canonicalize` must be FALSE, TRUE, or a character vector.",
+          call. = FALSE
+        )
+      }
+      if (!is.null(max_line_length)) {
+        max_line_length <- .stanr_int(
+          max_line_length,
+          "max_line_length",
+          min = 1L
+        )
+      }
+      if (overwrite_file) {
+        if (!self$has_stan_file()) {
+          stop(
+            "`overwrite_file = TRUE` requires a model created with `stan_file`.",
+            call. = FALSE
+          )
+        }
+        if (grepl("#include", private$code_, fixed = TRUE)) {
+          stop(
+            "`overwrite_file = TRUE` is not supported for programs with ",
+            "`#include` directives, since formatting inlines them.",
+            call. = FALSE
+          )
+        }
+      }
+
+      formatted <- stanc_format(
+        private$resolved_code(),
+        canonicalize = canonicalize,
+        max_line_length = max_line_length
+      )
+
+      if (overwrite_file) {
+        if (backup) {
+          backup_file <- paste0(
+            private$stan_file_,
+            ".bak-",
+            format(Sys.time(), "%Y%m%d%H%M%S")
+          )
+          file.copy(private$stan_file_, backup_file)
+          if (!quiet) {
+            message("[stanr] Old version of the model stored to ", backup_file)
+          }
+        }
+        # `formatted` already ends in "\n"; writeLines() would add a second one.
+        writeLines(formatted, private$stan_file_, sep = "")
+      }
+
+      formatted
+    },
+
+    # ---- Function exposure methods ----
+
+    expose_stan_functions = function(global = FALSE, verbose = FALSE) {
+      global <- .stanr_flag(global, "global")
+      verbose <- .stanr_flag(verbose, "verbose")
+
+      if (is.null(private$functions_compiled_env_)) {
+        if (
+          !is.null(private$compiled_env_) &&
+            !is.null(private$compiled_env_$stanr_exposed_functions)
+        ) {
+          private$functions_compiled_env_ <- private$compiled_env_
+        } else {
+          # Deliberately does not go through `private$ensure_compiled()` /
+          # `self$native_function()`: either would trigger a full `self$compile()`
+          # as a side effect on a never-compiled model, but exposing functions
+          # must work on a `compile = FALSE` model without compiling it.
+          private$functions_compiled_env_ <- .compile_standalone_functions_environment(
+            code = private$resolved_code(),
+            stan_file = private$stan_file_,
+            external_cpp = private$external_cpp_,
+            cpp_options = private$cpp_options_,
+            verbose = verbose,
+            precompiled_headers = private$precompiled_headers_
+          )
+        }
+      }
+
+      .stanr_build_functions_env(
+        private$functions_compiled_env_,
+        self$functions,
+        global
+      )
+      invisible(self$functions)
+    },
+    expose_functions = function(global = FALSE, verbose = FALSE) {
+      self$expose_stan_functions(global = global, verbose = verbose)
+    },
+
+    # ---- Fitting methods (defined in stanmodel-*.R files) ----
+
+    sample = stan_model_sample_impl,
+    optimize = stan_model_optimize_impl,
+    laplace = stan_model_laplace_impl,
+    variational = stan_model_variational_impl,
+    pathfinder = stan_model_pathfinder_impl,
+    generate_quantities = stan_model_generate_quantities_impl,
+    diagnose = stan_model_diagnose_impl,
+
+    # ---- Internal native entry points ----
+    # These remain public because sourceCpp functions live in a model-specific
+    # environment. They are not the user-facing API.
+
+    new_model = function(data, seed, declarations = NULL) {
+      private$ensure_compiled()
+      private$compiled_env_$new_model(data, seed, declarations)
+    },
+    run_model = function(model, args) {
+      private$ensure_compiled()
+      private$compiled_env_$run_model(model, args)
+    },
+    constrained_param_names = function(model) {
+      private$ensure_compiled()
+      private$compiled_env_$constrained_param_names(model)
+    },
+    native_function = function(name, required = TRUE) {
+      private$ensure_compiled()
+      fun <- private$compiled_env_[[name]]
+      if (is.null(fun) && required) {
+        stop(
+          "The compiled model does not provide native function `",
+          name,
+          "`; recompile the model with the current stanr version.",
+          call. = FALSE
+        )
+      }
+      fun
     }
   ),
   private = list(
@@ -215,12 +456,22 @@ StanModel <- R6Class(
         )
       }
       private$resolved_code_
+    },
+    # Selects the OpenCL platform/device for the model's native computations.
+    # Triggers lazy compilation via `native_function()` if needed.
+    select_opencl = function(opencl_ids) {
+      ids <- as.integer(opencl_ids)
+      if (length(ids) != 2L || anyNA(ids) || any(ids < 0L)) {
+        stop("`opencl_ids` must be c(platform_id, device_id).", call. = FALSE)
+      }
+      self$native_function("select_opencl_device")(ids[[1]], ids[[2]])
+      invisible(NULL)
     }
   ),
   cloneable = FALSE
 )
 
-# StanModel information methods ------------------------------------------------
+# StanModel information method documentation -----------------------------------
 
 #' Access information from a `StanModel` object
 #'
@@ -267,44 +518,7 @@ StanModel <- R6Class(
 #'
 NULL
 
-stan_model_stan_file <- function() private$stan_file_ %||% character()
-StanModel$set("public", "stan_file", stan_model_stan_file)
-
-stan_model_has_stan_file <- function() !is.null(private$stan_file_)
-StanModel$set("public", "has_stan_file", stan_model_has_stan_file)
-
-stan_model_code <- function() private$code_
-StanModel$set("public", "code", stan_model_code)
-
-stan_model_print <- function() {
-  cat(private$code_, "\n", sep = "")
-  invisible(self)
-}
-StanModel$set("public", "print", stan_model_print)
-
-stan_model_model_name <- function() private$model_name_
-StanModel$set("public", "model_name", stan_model_model_name)
-
-stan_model_include_paths <- function() private$include_paths_
-StanModel$set("public", "include_paths", stan_model_include_paths)
-
-stan_model_stan_version <- function() .stanr_stan_version()
-StanModel$set("public", "stan_version", stan_model_stan_version)
-
-stan_model_is_compiled <- function() !is.null(private$compiled_env_)
-StanModel$set("public", "is_compiled", stan_model_is_compiled)
-
-stan_model_compile_generation <- function() private$compile_generation_
-StanModel$set("public", "compile_generation", stan_model_compile_generation)
-
-stan_model_cpp_options <- function() private$cpp_options_
-StanModel$set("public", "cpp_options", stan_model_cpp_options)
-
-stan_model_stanc_options <- function() private$stanc_options_
-StanModel$set("public", "stanc_options", stan_model_stanc_options)
-
-stan_model_use_opencl <- function() private$use_opencl_
-StanModel$set("public", "use_opencl", stan_model_use_opencl)
+# StanModel variables method documentation -------------------------------------
 
 #' Input and output variables of a Stan program
 #'
@@ -356,19 +570,7 @@ StanModel$set("public", "use_opencl", stan_model_use_opencl)
 #'
 NULL
 
-stan_model_variables <- function() {
-  if (is.null(private$variables_)) {
-    private$variables_ <- model_variables(
-      model_code = private$resolved_code(),
-      include_directories = character(),
-      allow_undefined = length(private$external_cpp_) > 0
-    )
-  }
-  private$variables_
-}
-StanModel$set("public", "variables", stan_model_variables)
-
-# StanModel compilation methods ------------------------------------------------
+# StanModel compilation method documentation -----------------------------------
 
 #' Compile a Stan program
 #'
@@ -397,49 +599,6 @@ StanModel$set("public", "variables", stan_model_variables)
 #'
 NULL
 
-stan_model_compile <- function(
-  force_recompile = private$force_recompile_,
-  quiet = private$quiet_,
-  compile_standalone = private$compile_standalone_
-) {
-  force_recompile <- .stanr_flag(force_recompile, "force_recompile")
-  quiet <- .stanr_flag(quiet, "quiet")
-  compile_standalone <- .stanr_flag(compile_standalone, "compile_standalone")
-  # Incremented unconditionally, before compilation runs, so the generation
-  # always reflects "a compile was attempted" -- fits use this (via
-  # `$compile_generation()`) to know whether their cached native pointer
-  # might now be stale, even if `.compile_stan_model_environment()` below
-  # throws partway through.
-  private$compile_generation_ <- private$compile_generation_ + 1L
-  private$compiled_env_ <- .compile_stan_model_environment(
-    code = private$resolved_code(),
-    model_name = private$model_name_,
-    stan_file = private$stan_file_,
-    external_cpp = private$external_cpp_,
-    verbose = !quiet,
-    precompiled_headers = private$precompiled_headers_,
-    force_recompile = force_recompile,
-    use_opencl = private$use_opencl_,
-    cpp_options = private$cpp_options_,
-    standalone_functions = compile_standalone
-  )
-  if (compile_standalone) {
-    # cmdstanr parity: compile_standalone exposes without a separate
-    # $expose_stan_functions() call. Unconditional on every $compile() run
-    # (not just the first) -- $compile() can be re-run via
-    # force_recompile, and rebuilding from the fresh compiled env keeps
-    # the function objects pointing at live (not stale/freed) symbols.
-    private$functions_compiled_env_ <- private$compiled_env_
-    .stanr_build_functions_env(
-      private$compiled_env_,
-      self$functions,
-      global = FALSE
-    )
-  }
-  invisible(self)
-}
-StanModel$set("public", "compile", stan_model_compile)
-
 #' Check Stan program syntax
 #'
 #' @name model-method-check-syntax
@@ -461,22 +620,6 @@ StanModel$set("public", "compile", stan_model_compile)
 #' @seealso [`$compile()`][model-method-compile]
 #'
 NULL
-
-stan_model_check_syntax <- function(pedantic = FALSE, quiet = FALSE) {
-  pedantic <- .stanr_flag(pedantic, "pedantic")
-  quiet <- .stanr_flag(quiet, "quiet")
-  stanc(
-    private$resolved_code(),
-    external_cpp = private$external_cpp_,
-    use_opencl = private$use_opencl_,
-    warn_pedantic = pedantic
-  )
-  if (!quiet) {
-    message("[stanr] Stan program is syntactically correct.")
-  }
-  invisible(TRUE)
-}
-StanModel$set("public", "check_syntax", stan_model_check_syntax)
 
 #' Format a Stan program
 #'
@@ -512,89 +655,7 @@ StanModel$set("public", "check_syntax", stan_model_check_syntax)
 #'
 NULL
 
-stan_model_format <- function(
-  overwrite_file = FALSE,
-  canonicalize = FALSE,
-  backup = TRUE,
-  max_line_length = NULL,
-  quiet = FALSE
-) {
-  overwrite_file <- .stanr_flag(overwrite_file, "overwrite_file")
-  backup <- .stanr_flag(backup, "backup")
-  quiet <- .stanr_flag(quiet, "quiet")
-  if (
-    !isFALSE(canonicalize) &&
-      !isTRUE(canonicalize) &&
-      !is.character(canonicalize)
-  ) {
-    stop(
-      "`canonicalize` must be FALSE, TRUE, or a character vector.",
-      call. = FALSE
-    )
-  }
-  if (!is.null(max_line_length)) {
-    max_line_length <- .stanr_int(max_line_length, "max_line_length", min = 1L)
-  }
-  if (overwrite_file) {
-    if (!self$has_stan_file()) {
-      stop(
-        "`overwrite_file = TRUE` requires a model created with `stan_file`.",
-        call. = FALSE
-      )
-    }
-    if (grepl("#include", private$code_, fixed = TRUE)) {
-      stop(
-        "`overwrite_file = TRUE` is not supported for programs with ",
-        "`#include` directives, since formatting inlines them.",
-        call. = FALSE
-      )
-    }
-  }
-
-  formatted <- stanc_format(
-    private$resolved_code(),
-    canonicalize = canonicalize,
-    max_line_length = max_line_length
-  )
-
-  if (overwrite_file) {
-    if (backup) {
-      backup_file <- paste0(
-        private$stan_file_,
-        ".bak-",
-        format(Sys.time(), "%Y%m%d%H%M%S")
-      )
-      file.copy(private$stan_file_, backup_file)
-      if (!quiet) {
-        message("[stanr] Old version of the model stored to ", backup_file)
-      }
-    }
-    # `formatted` already ends in "\n"; writeLines() would add a second one.
-    writeLines(formatted, private$stan_file_, sep = "")
-  }
-
-  formatted
-}
-StanModel$set("public", "format", stan_model_format)
-
-# Selects the OpenCL platform/device for the model's native computations to
-# run on. Triggers lazy compilation via `native_function()` if needed, and
-# runs on the R thread before `new_model()` -- with `use_opencl` codegen,
-# data transfer to the OpenCL device happens inside the model constructor
-# itself, so device selection must happen first. Errors cleanly (via the
-# C++ stub's `Rcpp::stop()`) if the compiled model was not built with
-# `use_opencl = TRUE`.
-stan_model_select_opencl <- function(opencl_ids) {
-  ids <- as.integer(opencl_ids)
-  if (length(ids) != 2L || anyNA(ids) || any(ids < 0L)) {
-    stop("`opencl_ids` must be c(platform_id, device_id).", call. = FALSE)
-  }
-  self$native_function("select_opencl_device")(ids[[1]], ids[[2]])
-  invisible(NULL)
-}
-StanModel$set("private", "select_opencl", stan_model_select_opencl)
-
-# StanModel function-exposure methods -------------------------------------------
+# StanModel function-exposure method documentation -----------------------------
 
 #' Expose Stan functions as R functions
 #'
@@ -660,1260 +721,3 @@ StanModel$set("private", "select_opencl", stan_model_select_opencl)
 #'   exposes functions as part of the model's own compilation.
 #'
 NULL
-
-stan_model_expose_stan_functions <- function(global = FALSE, verbose = FALSE) {
-  global <- .stanr_flag(global, "global")
-  verbose <- .stanr_flag(verbose, "verbose")
-
-  if (is.null(private$functions_compiled_env_)) {
-    if (
-      !is.null(private$compiled_env_) &&
-        !is.null(private$compiled_env_$stanr_exposed_functions)
-    ) {
-      private$functions_compiled_env_ <- private$compiled_env_
-    } else {
-      # Deliberately does not go through `private$ensure_compiled()` /
-      # `self$native_function()`: either would trigger a full `self$compile()`
-      # as a side effect on a never-compiled model, but exposing functions
-      # must work on a `compile = FALSE` model without compiling it.
-      private$functions_compiled_env_ <- .compile_standalone_functions_environment(
-        code = private$resolved_code(),
-        stan_file = private$stan_file_,
-        external_cpp = private$external_cpp_,
-        cpp_options = private$cpp_options_,
-        verbose = verbose,
-        precompiled_headers = private$precompiled_headers_
-      )
-    }
-  }
-
-  .stanr_build_functions_env(
-    private$functions_compiled_env_,
-    self$functions,
-    global
-  )
-  invisible(self$functions)
-}
-StanModel$set(
-  "public",
-  "expose_stan_functions",
-  stan_model_expose_stan_functions
-)
-StanModel$set("public", "expose_functions", stan_model_expose_stan_functions)
-
-# StanModel fitting methods ----------------------------------------------------
-
-#' Run MCMC sampling
-#'
-#' @name model-method-sample
-#' @aliases sample
-#' @family StanModel methods
-#'
-#' @description The `$sample()` method of a [`StanModel`] object runs Stan's
-#'   `"sample"` method, which uses Hamiltonian Monte Carlo (HMC) with the
-#'   No-U-Turn Sampler (NUTS) to draw from the posterior distribution.
-#'   Returns a [`StanMCMC`] object.
-#'
-#' @template param-data
-#' @param seed (integer) The random seed for reproducibility.
-#' @param refresh (integer) How often (in iterations) to print progress.
-#' @template param-init
-#' @param chains (integer) The number of MCMC chains.
-#' @param chain_ids (integer vector) The IDs for each chain.
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
-#' @param iter_warmup (integer) The number of warmup iterations.
-#' @param iter_sampling (integer) The number of sampling iterations.
-#' @param save_warmup (logical) Should warmup samples be saved? Ignored when
-#'   `fixed_param = TRUE`, since that mode runs no warmup and so has nothing
-#'   to save.
-#' @param thin (integer) Thin interval.
-#' @param max_treedepth (integer) Maximum tree depth for NUTS.
-#' @param adapt_engaged (logical) Should step size adaptation be used?
-#' @param adapt_delta (number) Target acceptance statistic for HMC.
-#' @param step_size (number) Step size for HMC.
-#' @param metric Character string indicating the metric to use: `"diag_e"`,
-#'   `"dense_e"`, or `"unit_e"`.
-#' @param inv_metric (numeric) Initial inverse mass matrix values.
-#' @param init_buffer (integer) Adaptation phase: initial buffer length.
-#' @param term_buffer (integer) Adaptation phase: terminal buffer length.
-#' @param window (integer) Adaptation phase: window length.
-#' @param fixed_param (logical) Treat all parameters as fixed (no adaptation).
-#' @param show_messages (logical) When `TRUE` (the default), print progress
-#'   and informational output (e.g. iteration and timing messages) to the
-#'   console. Set to `FALSE` to silence it. Suppressed output is still
-#'   recorded and available via the fit's `$output()` method.
-#' @param show_exceptions (logical) When `TRUE` (the default), print
-#'   informational messages about numerical exceptions -- e.g. Metropolis
-#'   proposal rejections and rejected initial values. Set to `FALSE` to
-#'   silence them. Suppressed messages are still recorded and available via
-#'   the fit's `$output()` method.
-#' @param diagnostics (character vector) Which sampler diagnostics to check
-#'   immediately after sampling, printing a warning message for any problems
-#'   found -- see [`$diagnostic_summary()`][fit-method-mcmc]. One or more of
-#'   `"divergences"`, `"treedepth"`, and `"ebfmi"`. The default checks all
-#'   three; `NULL` or `""` skips the check entirely. Ignored when
-#'   `fixed_param = TRUE`.
-#' @param engine (string) The sampling engine: `"nuts"`, `"static"`, or
-#'   `"walnuts"` (see [walnutpie](https://github.com/flatironinstitute/walnutpie)).
-#'   `walnuts` only supports `metric = "diag_e"` and `adapt_engaged = TRUE`.
-#'   It reuses `max_treedepth` as the maximum trajectory doublings,
-#'   `adapt_delta` as the step size acceptance target, and `step_size` as the
-#'   initial step size; `refresh`, `step_size_jitter`, `init_buffer`,
-#'   `term_buffer`, `window`, and `adapt_gamma`/`adapt_kappa`/`adapt_t0` are
-#'   ignored, and no sampler diagnostics or progress output are produced.
-#' @param int_time (number) Integration time for static HMC.
-#' @param step_size_jitter (number) Jitter for step size after adaptation.
-#' @param adapt_gamma (number) Adaptation hyperparameter for dual averaging.
-#' @param adapt_kappa (number) Adaptation hyperparameter for dual averaging.
-#' @param adapt_t0 (number) Adaptation hyperparameter for dual averaging.
-#' @param max_step_halvings (integer) `walnuts` only: maximum number of step
-#'   size halvings per macro step.
-#' @param min_micro_steps (integer) `walnuts` only: minimum number of micro
-#'   steps per macro step.
-#' @param max_hamiltonian_error (number) `walnuts` only: maximum allowed
-#'   error in the Hamiltonian at a macro step.
-#' @param mass_init_count (number) `walnuts` only: initial count for the
-#'   mass matrix estimator.
-#' @param mass_additive_smoothing (number) `walnuts` only: additive
-#'   smoothing for the mass matrix estimator.
-#' @param max_macro_steps_target (number) `walnuts` only: target number of
-#'   macro steps per iteration.
-#' @param step_learning_rate (number) `walnuts` only: learning rate for the
-#'   Adam step size adaptation.
-#' @param step_gradient_decay (number) `walnuts` only: gradient decay rate
-#'   for the Adam step size adaptation.
-#' @param step_sq_gradient_decay (number) `walnuts` only: squared gradient
-#'   decay rate for the Adam step size adaptation.
-#' @param step_stabilization (number) `walnuts` only: stabilization term for
-#'   the Adam step size adaptation.
-#' @param step_learn_rate_decay (number) `walnuts` only: learning rate decay
-#'   exponent for the Adam step size adaptation.
-#' @template param-opencl_ids
-#'
-#' @return A [`StanMCMC`] object containing posterior draws and diagnostics.
-#'
-#' @seealso [`$optimize()`][model-method-optimize],
-#'   [`$variational()`][model-method-variational]
-#'
-NULL
-
-stan_model_sample <- function(
-  data = list(),
-  seed = NULL,
-  refresh = 100L,
-  init = 2,
-  save_latent_dynamics = FALSE,
-  chains = 4,
-  chain_ids = seq_len(chains),
-  num_threads = RcppParallel::defaultNumThreads(),
-  opencl_ids = NULL,
-  iter_warmup = 1000L,
-  iter_sampling = 1000L,
-  save_warmup = FALSE,
-  thin = 1L,
-  max_treedepth = 10L,
-  adapt_engaged = TRUE,
-  adapt_delta = 0.8,
-  step_size = 1,
-  metric = "diag_e",
-  metric_file = NULL,
-  inv_metric = NULL,
-  init_buffer = 75L,
-  term_buffer = 50L,
-  window = 25L,
-  fixed_param = FALSE,
-  show_messages = TRUE,
-  show_exceptions = TRUE,
-  diagnostics = c("divergences", "treedepth", "ebfmi"),
-  engine = "nuts",
-  int_time = 2 * pi,
-  step_size_jitter = 0,
-  adapt_gamma = 0.05,
-  adapt_kappa = 0.75,
-  adapt_t0 = 10,
-  max_step_halvings = 5L,
-  min_micro_steps = 1L,
-  max_hamiltonian_error = 0.5,
-  mass_init_count = 4,
-  mass_additive_smoothing = 1e-5,
-  max_macro_steps_target = 15,
-  step_learning_rate = 0.05,
-  step_gradient_decay = 0.8,
-  step_sq_gradient_decay = 0.9,
-  step_stabilization = 1e-4,
-  step_learn_rate_decay = 0.5
-) {
-  save_latent_dynamics <- .stanr_flag(
-    save_latent_dynamics,
-    "save_latent_dynamics"
-  )
-  save_warmup <- .stanr_flag(save_warmup, "save_warmup")
-  adapt_engaged <- .stanr_flag(adapt_engaged, "adapt_engaged")
-  fixed_param <- .stanr_flag(fixed_param, "fixed_param")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (is.null(diagnostics) || identical(diagnostics, "")) {
-    diagnostics <- character()
-  } else {
-    diagnostics <- match.arg(
-      diagnostics,
-      choices = c("divergences", "treedepth", "ebfmi"),
-      several.ok = TRUE
-    )
-  }
-  if (fixed_param && save_warmup) {
-    warning(
-      "`save_warmup` is ignored when `fixed_param = TRUE`.",
-      call. = FALSE
-    )
-    save_warmup <- FALSE
-  }
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
-  if (save_latent_dynamics) {
-    stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
-  }
-  if (!is.null(metric_file)) {
-    stop(
-      "`metric_file` is not yet supported; supply `inv_metric` in memory.",
-      call. = FALSE
-    )
-  }
-  if (!engine %in% c("nuts", "static", "walnuts")) {
-    stop(
-      "`engine` must be one of \"nuts\", \"static\", \"walnuts\".",
-      call. = FALSE
-    )
-  }
-  if (!metric %in% c("diag_e", "dense_e", "unit_e")) {
-    stop(
-      "`metric` must be one of \"diag_e\", \"dense_e\", \"unit_e\".",
-      call. = FALSE
-    )
-  }
-  if (engine == "walnuts") {
-    if (fixed_param) {
-      stop(
-        "`fixed_param` is not supported by `engine = \"walnuts\"`.",
-        call. = FALSE
-      )
-    }
-    if (!adapt_engaged) {
-      stop(
-        "`adapt_engaged = FALSE` is not supported by `engine = \"walnuts\"`.",
-        call. = FALSE
-      )
-    }
-    if (metric != "diag_e") {
-      stop(
-        "`engine = \"walnuts\"` only supports `metric = \"diag_e\"`.",
-        call. = FALSE
-      )
-    }
-  }
-  ids <- .stanr_validate_chains(chains, chain_ids)
-  chains <- ids$chains
-  chain_ids <- ids$chain_ids
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  iter_warmup <- .stanr_int(iter_warmup, "iter_warmup")
-  iter_sampling <- .stanr_int(iter_sampling, "iter_sampling")
-  thin <- .stanr_int(thin, "thin", min = 1L)
-  # Calculate in double precision so adding two valid integer iteration counts
-  # cannot overflow to NA before the explicit R-size guard below.
-  num_saved_draws <- ceiling(as.double(iter_sampling) / as.double(thin))
-  if (save_warmup) {
-    num_saved_draws <- num_saved_draws +
-      ceiling(as.double(iter_warmup) / as.double(thin))
-  }
-  if (num_saved_draws > .Machine$integer.max) {
-    stop("Requested number of saved draws is too large.", call. = FALSE)
-  }
-  if (!fixed_param && engine == "static" && chains > 1L) {
-    stop(
-      "Static HMC only supports a single chain. Set `chains` = 1.",
-      call. = FALSE
-    )
-  }
-  inv_metric <- .stanr_normalize_inv_metric(
-    inv_metric = inv_metric,
-    metric = metric,
-    chains = chains
-  )
-  refresh <- .stanr_int(refresh, "refresh")
-  max_treedepth <- .stanr_int(max_treedepth, "max_treedepth")
-  init_buffer <- .stanr_int(init_buffer, "init_buffer")
-  term_buffer <- .stanr_int(term_buffer, "term_buffer")
-  window <- .stanr_int(window, "window")
-  max_step_halvings <- .stanr_int(max_step_halvings, "max_step_halvings")
-  min_micro_steps <- .stanr_int(min_micro_steps, "min_micro_steps")
-
-  diagnostic_vars <- if (engine == "walnuts") {
-    character()
-  } else if (!fixed_param && engine == "static") {
-    c("accept_stat__", "stepsize__", "int_time__")
-  } else {
-    c(
-      "accept_stat__",
-      "stepsize__",
-      "treedepth__",
-      "n_leapfrog__",
-      "divergent__",
-      "energy__"
-    )
-  }
-
-  native_args_fn <- function(seed, resolved_init, model) {
-    native <- list(
-      method = "sample",
-      algorithm = if (fixed_param) "fixed_param" else "hmc",
-      engine = if (fixed_param) "nuts" else engine,
-      metric = metric,
-      adapt_engaged = adapt_engaged,
-      seed = seed,
-      id = chain_ids[[1]],
-      num_chains = chains,
-      init_radius = resolved_init$radius,
-      num_warmup = iter_warmup,
-      num_samples = iter_sampling,
-      thin = thin,
-      save_warmup = save_warmup,
-      refresh = refresh,
-      stepsize = as.double(step_size),
-      stepsize_jitter = as.double(step_size_jitter),
-      max_depth = max_treedepth,
-      int_time = as.double(int_time),
-      delta = as.double(adapt_delta),
-      gamma = as.double(adapt_gamma),
-      kappa = as.double(adapt_kappa),
-      t0 = as.double(adapt_t0),
-      init_buffer = init_buffer,
-      term_buffer = term_buffer,
-      window = window,
-      init = resolved_init$values,
-      verbose = show_messages,
-      show_exceptions = show_exceptions,
-      num_threads = num_threads,
-      diagnostic_names = diagnostic_vars,
-      max_step_halvings = max_step_halvings,
-      min_micro_steps = min_micro_steps,
-      max_hamiltonian_error = as.double(max_hamiltonian_error),
-      mass_init_count = as.double(mass_init_count),
-      mass_additive_smoothing = as.double(mass_additive_smoothing),
-      max_macro_steps_target = as.double(max_macro_steps_target),
-      step_learning_rate = as.double(step_learning_rate),
-      step_gradient_decay = as.double(step_gradient_decay),
-      step_sq_gradient_decay = as.double(step_sq_gradient_decay),
-      step_stabilization = as.double(step_stabilization),
-      step_learn_rate_decay = as.double(step_learn_rate_decay)
-    )
-    if (!is.null(inv_metric)) {
-      native$inv_metric <- inv_metric
-    }
-    native
-  }
-
-  payload_fn <- function(result) {
-    if (result$return_code != 0) {
-      list(draws = NULL, diagnostics = NULL)
-    } else {
-      draws <- result$samples
-      # walnuts collects no sampler diagnostics; a zero-variable array keeps
-      # the diagnostic checks honestly silent. Other engines that emit no
-      # diagnostic columns keep the all-NA placeholder (see
-      # `$diagnostic_summary()`).
-      diagnostics <- if (
-        engine == "walnuts" || dim(result$diagnostics)[3] > 0
-      ) {
-        result$diagnostics
-      } else {
-        posterior::draws_df(
-          "stepsize__" = NA,
-          "treedepth__" = NA,
-          "n_leapfrog__" = NA,
-          "divergent__" = NA,
-          "energy__" = NA
-        )
-      }
-
-      list(
-        draws = draws,
-        diagnostics = diagnostics,
-        warmup_draws = if (!is.null(result$warmup_samples)) {
-          result$warmup_samples
-        },
-        warmup_diagnostics = if (!is.null(result$warmup_diagnostics)) {
-          result$warmup_diagnostics
-        },
-        inv_metric = result$inv_metric,
-        step_size = result$step_size
-      )
-    }
-  }
-
-  res <- .stanr_run_service(
-    self = self,
-    data = data,
-    seed = seed,
-    init = init,
-    native_args_fn = native_args_fn,
-    payload_fn = payload_fn
-  )
-
-  StanMCMC$new(
-    payload = res$payload,
-    model = self,
-    data = data,
-    seed = res$seed,
-    init = init,
-    elapsed = res$elapsed,
-    metadata = list(
-      method = "sample",
-      chains = ids$chains,
-      chain_ids = ids$chain_ids,
-      num_threads = num_threads,
-      show_exceptions = show_exceptions,
-      save_warmup = save_warmup,
-      fixed_param = fixed_param,
-      diagnostics = diagnostics
-    )
-  )
-}
-StanModel$set("public", "sample", stan_model_sample)
-
-#' Run optimization
-#'
-#' @name model-method-optimize
-#' @aliases optimize
-#' @family StanModel methods
-#'
-#' @description The `$optimize()` method of a [`StanModel`] object runs Stan's
-#'   `"optimize"` method to find the maximum a posteriori (MAP) estimate or
-#'   maximum likelihood estimate (MLE). Returns a [`StanMLE`] object.
-#'
-#' @template param-data
-#' @template param-init
-#' @param algorithm (string) The optimization algorithm: `"lbfgs"`, `"bfgs"`,
-#'   or `"newton"`.
-#' @param jacobian (logical) Should the log density be adjusted by the
-#'   abs-determinant of the Jacobian of the inverse transformation?
-#' @param init_alpha (number) Initial step size for LBFGS.
-#' @param iter (integer) Maximum number of optimization iterations.
-#' @param tol_obj (number) Absolute tolerance for changes in objective value.
-#' @param tol_rel_obj (number) Relative tolerance for changes in objective value.
-#' @param tol_grad (number) Absolute tolerance for the norm of the gradient.
-#' @param tol_rel_grad (number) Relative tolerance for the norm of the gradient.
-#' @param tol_param (number) Absolute tolerance for changes in parameter values.
-#' @param history_size (integer) Number of corrections in LBFGS approximation.
-#' @param save_iterations (logical) Should optimization iterations be saved?
-#'   When `TRUE`, [`$draws()`][fit-method-draws] on the returned [`StanMLE`]
-#'   exposes the full optimization path (one row per saved iteration,
-#'   including the initial point) instead of a single row for the final
-#'   estimate. [`$mle()`][fit-method-mle] is unaffected either way and always
-#'   reflects the final iteration.
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
-#' @template param-opencl_ids
-#'
-#' @return A [`StanMLE`] object containing the point estimate.
-#'
-#' @seealso [`$sample()`][model-method-sample],
-#'   [`$laplace()`][model-method-laplace]
-#'
-NULL
-
-stan_model_optimize <- function(
-  data = list(),
-  seed = NULL,
-  refresh = 100L,
-  init = 2,
-  num_threads = RcppParallel::defaultNumThreads(),
-  opencl_ids = NULL,
-  algorithm = "lbfgs",
-  jacobian = FALSE,
-  init_alpha = 0.001,
-  iter = 2000L,
-  tol_obj = 1e-12,
-  tol_rel_obj = 1e4,
-  tol_grad = 1e-8,
-  tol_rel_grad = 1e7,
-  tol_param = 1e-8,
-  history_size = 5L,
-  show_messages = TRUE,
-  show_exceptions = TRUE,
-  save_iterations = FALSE
-) {
-  jacobian <- .stanr_flag(jacobian, "jacobian")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  save_iterations <- .stanr_flag(save_iterations, "save_iterations")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
-  if (!algorithm %in% c("lbfgs", "bfgs", "newton")) {
-    stop(
-      "`algorithm` must be one of \"lbfgs\", \"bfgs\", \"newton\".",
-      call. = FALSE
-    )
-  }
-
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
-  iter <- .stanr_int(iter, "iter")
-  history_size <- .stanr_int(history_size, "history_size", min = 1L)
-
-  native_args_fn <- function(seed, resolved_init, model) {
-    list(
-      method = "optimize",
-      algorithm = algorithm,
-      seed = seed,
-      id = 1L,
-      init_radius = resolved_init$radius,
-      iter = iter,
-      init_alpha = as.double(init_alpha),
-      tol_obj = as.double(tol_obj),
-      tol_rel_obj = as.double(tol_rel_obj),
-      tol_grad = as.double(tol_grad),
-      tol_rel_grad = as.double(tol_rel_grad),
-      tol_param = as.double(tol_param),
-      history_size = history_size,
-      save_iterations = save_iterations,
-      jacobian = jacobian,
-      refresh = refresh,
-      verbose = show_messages,
-      show_exceptions = show_exceptions,
-      num_threads = num_threads,
-      init = resolved_init$values
-    )
-  }
-
-  payload_fn <- function(result) {
-    par_mat <- result$par
-    par_vec <- if (is.matrix(par_mat) && nrow(par_mat) > 0) {
-      par_mat[nrow(par_mat), , drop = TRUE]
-    } else {
-      numeric(0)
-    }
-    payload <- list(par = par_vec, value = result$value)
-    if (save_iterations) {
-      payload$iterations <- par_mat
-    }
-    payload
-  }
-
-  res <- .stanr_run_service(
-    self = self,
-    data = data,
-    seed = seed,
-    init = init,
-    native_args_fn = native_args_fn,
-    payload_fn = payload_fn
-  )
-
-  StanMLE$new(
-    payload = res$payload,
-    model = self,
-    data = data,
-    seed = res$seed,
-    init = init,
-    elapsed = res$elapsed,
-    metadata = list(
-      method = "optimize",
-      jacobian = jacobian,
-      num_threads = num_threads,
-      show_exceptions = show_exceptions
-    )
-  )
-}
-StanModel$set("public", "optimize", stan_model_optimize)
-
-#' Run Laplace approximation
-#'
-#' @name model-method-laplace
-#' @aliases laplace
-#' @family StanModel methods
-#'
-#' @description The `$laplace()` method of a [`StanModel`] object runs Stan's
-#'   `"laplace"` method to draw from a Gaussian approximation to the posterior
-#'   centered at the mode. Returns a [`StanLaplace`] object.
-#'
-#' @template param-data
-#' @template param-init
-#' @param mode A numeric vector of parameter values at the mode, or a
-#'   [`StanMLE`] object from [`$optimize()`][model-method-optimize]. If `NULL`,
-#'   optimization is run first.
-#' @param opt_args (list) Additional arguments to pass to
-#'   [`$optimize()`][model-method-optimize] when finding the mode.
-#' @param jacobian (logical) Should the log density be adjusted by the
-#'   abs-determinant of the Jacobian of the inverse transformation?
-#' @param draws (integer) The number of draws from the Laplace approximation.
-#' @param calculate_lp (logical) Should the log density of the Laplace
-#'   approximation be calculated?
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
-#' @template param-opencl_ids
-#'
-#' @return A [`StanLaplace`] object containing approximate posterior draws.
-#'
-#' @seealso [`$optimize()`][model-method-optimize],
-#'   [`$variational()`][model-method-variational]
-#'
-NULL
-
-stan_model_laplace <- function(
-  data = list(),
-  seed = NULL,
-  refresh = 100L,
-  init = 2,
-  num_threads = RcppParallel::defaultNumThreads(),
-  opencl_ids = NULL,
-  mode = NULL,
-  opt_args = NULL,
-  jacobian = TRUE,
-  draws = 1000L,
-  show_messages = TRUE,
-  show_exceptions = TRUE,
-  calculate_lp = TRUE
-) {
-  if (!is.null(mode) && !is.null(opt_args)) {
-    stop("`mode` and `opt_args` cannot both be supplied.", call. = FALSE)
-  }
-  reserved <- intersect(
-    names(opt_args),
-    c("data", "seed", "init", "jacobian", "show_messages", "show_exceptions")
-  )
-  if (length(reserved)) {
-    stop(
-      "`opt_args` cannot override: ",
-      paste(reserved, collapse = ", "),
-      ".",
-      call. = FALSE
-    )
-  }
-  jacobian <- .stanr_flag(jacobian, "jacobian")
-  calculate_lp <- .stanr_flag(calculate_lp, "calculate_lp")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
-  # Seed is resolved once so the internal mode-finding optimize() run (if
-  # any) and the laplace run itself share it.
-  resolved_seed <- .stanr_seed(seed)
-
-  mode_fit <- NULL
-  if (is.null(mode)) {
-    mode_fit <- do.call(
-      self$optimize,
-      c(
-        list(
-          data = data,
-          seed = resolved_seed,
-          init = init,
-          jacobian = jacobian,
-          show_messages = show_messages,
-          show_exceptions = show_exceptions
-        ),
-        opt_args %||% list()
-      )
-    )
-    mode_val <- mode_fit$mle()
-  } else if (inherits(mode, "StanMLE")) {
-    mode_fit <- mode
-    mode_val <- mode_fit$mle()
-  } else {
-    # Numeric mode vector (stanr extension)
-    mode_val <- mode
-  }
-
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
-  draws <- .stanr_int(draws, "draws")
-
-  if (!is.numeric(mode_val) || is.null(names(mode_val))) {
-    stop(
-      "mode must be a named numeric vector or an optimization result.",
-      call. = FALSE
-    )
-  }
-
-  native_args_fn <- function(seed, resolved_init, model) {
-    pars <- self$constrained_param_names(model)
-    mode_val <- mode_val[.stanr_bracket_names(pars)]
-    if (anyNA(mode_val)) {
-      stop(
-        "mode must contain every constrained model parameter.",
-        call. = FALSE
-      )
-    }
-    list(
-      method = "laplace",
-      mode = as.double(mode_val),
-      jacobian = jacobian,
-      num_draws = draws,
-      calculate_lp = calculate_lp,
-      seed = seed,
-      refresh = refresh,
-      verbose = show_messages,
-      show_exceptions = show_exceptions,
-      num_threads = num_threads
-    )
-  }
-
-  payload_fn <- function(result) {
-    list(draws = posterior::as_draws_matrix(result$draws))
-  }
-
-  # `init` is not part of laplace's native args (the Laplace approximation is
-  # centered at `mode`, not resolved via init), so the resolved default is
-  # simply unused here.
-  res <- .stanr_run_service(
-    self = self,
-    data = data,
-    seed = resolved_seed,
-    init = NULL,
-    native_args_fn = native_args_fn,
-    payload_fn = payload_fn
-  )
-
-  StanLaplace$new(
-    payload = res$payload,
-    model = self,
-    data = data,
-    seed = resolved_seed,
-    init = init,
-    elapsed = res$elapsed,
-    mode = mode_fit %||% mode,
-    metadata = list(
-      method = "laplace",
-      jacobian = jacobian,
-      num_threads = num_threads,
-      show_exceptions = show_exceptions
-    )
-  )
-}
-StanModel$set("public", "laplace", stan_model_laplace)
-
-#' Run variational inference (ADVI)
-#'
-#' @name model-method-variational
-#' @aliases variational
-#' @family StanModel methods
-#'
-#' @description The `$variational()` method of a [`StanModel`] object runs
-#'   Stan's `"variational"` method, which uses Automatic Differentiation
-#'   Variational Inference (ADVI) to approximate the posterior distribution.
-#'   Returns a [`StanVB`] object.
-#'
-#' @template param-data
-#' @template param-init
-#' @param algorithm (string) The variational inference algorithm: `"meanfield"`
-#'   or `"fullrank"`.
-#' @param iter (integer) The number of ADVI iterations.
-#' @param grad_samples (integer) Number of samples to use for gradient estimation.
-#' @param elbo_samples (integer) Number of samples for ELBO evaluation.
-#' @param eta (number) Learning rate for ADVI.
-#' @param adapt_engaged (logical) Should the learning rate be adapted?
-#' @param adapt_iter (integer) Number of iterations for learning rate adaptation.
-#' @param tol_rel_obj (number) Relative tolerance for ELBO convergence.
-#' @param eval_elbo (integer) How often to evaluate the ELBO.
-#' @param draws (integer) The number of draws from the variational approximation.
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
-#' @template param-opencl_ids
-#'
-#' @return A [`StanVB`] object containing approximate posterior draws.
-#'
-#' @seealso [`$sample()`][model-method-sample],
-#'   [`$pathfinder()`][model-method-pathfinder]
-#'
-NULL
-
-stan_model_variational <- function(
-  data = list(),
-  seed = NULL,
-  refresh = 100L,
-  init = 2,
-  save_latent_dynamics = FALSE,
-  num_threads = RcppParallel::defaultNumThreads(),
-  opencl_ids = NULL,
-  algorithm = "meanfield",
-  iter = 10000L,
-  grad_samples = 1L,
-  elbo_samples = 100L,
-  eta = 1,
-  adapt_engaged = TRUE,
-  adapt_iter = 50L,
-  tol_rel_obj = 0.01,
-  eval_elbo = 100L,
-  draws = 1000L,
-  show_messages = TRUE,
-  show_exceptions = TRUE
-) {
-  save_latent_dynamics <- .stanr_flag(
-    save_latent_dynamics,
-    "save_latent_dynamics"
-  )
-  adapt_engaged <- .stanr_flag(adapt_engaged, "adapt_engaged")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
-  if (save_latent_dynamics) {
-    stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
-  }
-  if (!algorithm %in% c("meanfield", "fullrank")) {
-    stop(
-      "`algorithm` must be one of \"meanfield\", \"fullrank\".",
-      call. = FALSE
-    )
-  }
-
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
-  iter <- .stanr_int(iter, "iter")
-  grad_samples <- .stanr_int(grad_samples, "grad_samples")
-  elbo_samples <- .stanr_int(elbo_samples, "elbo_samples")
-  adapt_iter <- .stanr_int(adapt_iter, "adapt_iter")
-  eval_elbo <- .stanr_int(eval_elbo, "eval_elbo")
-  draws <- .stanr_int(draws, "draws")
-
-  native_args_fn <- function(seed, resolved_init, model) {
-    list(
-      method = "variational",
-      algorithm = algorithm,
-      seed = seed,
-      id = 1L,
-      init_radius = resolved_init$radius,
-      iter = iter,
-      grad_samples = grad_samples,
-      elbo_samples = elbo_samples,
-      tol_rel_obj = as.double(tol_rel_obj),
-      eta = as.double(eta),
-      adapt_engaged = adapt_engaged,
-      adapt_iter = adapt_iter,
-      eval_elbo = eval_elbo,
-      output_samples = draws,
-      verbose = show_messages,
-      show_exceptions = show_exceptions,
-      num_threads = num_threads,
-      init = resolved_init$values
-    )
-  }
-
-  payload_fn <- function(result) {
-    list(
-      draws = if (result$return_code == 0L) {
-        posterior::as_draws_matrix(result$draws)
-      }
-    )
-  }
-
-  res <- .stanr_run_service(
-    self = self,
-    data = data,
-    seed = seed,
-    init = init,
-    native_args_fn = native_args_fn,
-    payload_fn = payload_fn
-  )
-
-  StanVB$new(
-    payload = res$payload,
-    model = self,
-    data = data,
-    seed = res$seed,
-    init = init,
-    elapsed = res$elapsed,
-    metadata = list(
-      method = "variational",
-      num_threads = num_threads,
-      show_exceptions = show_exceptions
-    )
-  )
-}
-StanModel$set("public", "variational", stan_model_variational)
-
-#' Run Pathfinder
-#'
-#' @name model-method-pathfinder
-#' @aliases pathfinder
-#' @family StanModel methods
-#'
-#' @description The `$pathfinder()` method of a [`StanModel`] object runs
-#'   Stan's `"pathfinder"` method, which uses a parallel iterative optimization
-#'   approach to approximate the posterior distribution. Returns a
-#'   [`StanPathfinder`] object.
-#'
-#' @template param-data
-#' @template param-init
-#' @param num_paths (integer) The number of paths to use.
-#' @param single_path_draws (integer) Number of draws per path.
-#' @param draws (integer) Total number of draws from the approximation.
-#' @param max_lbfgs_iters (integer) Maximum LBFGS iterations per path.
-#' @param num_elbo_draws (integer) Number of draws for ELBO estimation.
-#' @param save_single_paths (logical) Should single path results be saved?
-#' @param psis_resample (logical) Should Pareto smoothed importance sampling
-#'   resampling be used?
-#' @param calculate_lp (logical) Should the log density be calculated?
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
-#' @template param-opencl_ids
-#'
-#' @return A [`StanPathfinder`] object containing approximate posterior draws.
-#'
-#' @seealso [`$sample()`][model-method-sample],
-#'   [`$variational()`][model-method-variational]
-#'
-NULL
-
-stan_model_pathfinder <- function(
-  data = list(),
-  seed = NULL,
-  refresh = 100L,
-  init = 2,
-  num_threads = RcppParallel::defaultNumThreads(),
-  opencl_ids = NULL,
-  init_alpha = 0.001,
-  tol_obj = 1e-12,
-  tol_rel_obj = 1e4,
-  tol_grad = 1e-8,
-  tol_rel_grad = 1e7,
-  tol_param = 1e-8,
-  history_size = 5L,
-  single_path_draws = 1000L,
-  draws = 1000L,
-  num_paths = 4,
-  max_lbfgs_iters = 1000L,
-  num_elbo_draws = 25L,
-  save_single_paths = FALSE,
-  psis_resample = TRUE,
-  calculate_lp = TRUE,
-  show_messages = TRUE,
-  show_exceptions = TRUE
-) {
-  save_single_paths <- .stanr_flag(save_single_paths, "save_single_paths")
-  psis_resample <- .stanr_flag(psis_resample, "psis_resample")
-  calculate_lp <- .stanr_flag(calculate_lp, "calculate_lp")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
-
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
-  num_paths <- .stanr_int(num_paths, "num_paths", min = 1L)
-  single_path_draws <- .stanr_int(single_path_draws, "single_path_draws", min = 1L)
-  draws <- .stanr_int(draws, "draws", min = 1L)
-  max_lbfgs_iters <- .stanr_int(max_lbfgs_iters, "max_lbfgs_iters")
-  num_elbo_draws <- .stanr_int(num_elbo_draws, "num_elbo_draws")
-  history_size <- .stanr_int(history_size, "history_size", min = 1L)
-
-  native_args_fn <- function(seed, resolved_init, model) {
-    list(
-      method = "pathfinder",
-      seed = seed,
-      id = 1L,
-      init_radius = resolved_init$radius,
-      max_lbfgs_iters = max_lbfgs_iters,
-      history_size = history_size,
-      num_elbo_draws = num_elbo_draws,
-      num_draws = single_path_draws,
-      num_paths = num_paths,
-      num_psis_draws = draws,
-      init_alpha = as.double(init_alpha),
-      tol_obj = as.double(tol_obj),
-      tol_rel_obj = as.double(tol_rel_obj),
-      tol_grad = as.double(tol_grad),
-      tol_rel_grad = as.double(tol_rel_grad),
-      tol_param = as.double(tol_param),
-      save_single_paths = save_single_paths,
-      psis_resample = psis_resample,
-      calculate_lp = calculate_lp,
-      refresh = refresh,
-      verbose = show_messages,
-      show_exceptions = show_exceptions,
-      num_threads = num_threads,
-      init = resolved_init$values
-    )
-  }
-
-  payload_fn <- function(result) {
-    if (result$return_code != 0) {
-      return(list(draws = NULL))
-    }
-    draws <- posterior::as_draws_matrix(result$draws)
-    special_vars <- c("lp_approx__", "lp__", "path__")
-    present <- intersect(special_vars, colnames(result$draws))
-    diagnostics <- if (length(present)) {
-      posterior::subset_draws(draws, variable = present)
-    }
-    list(draws = draws, diagnostics = diagnostics)
-  }
-
-  res <- .stanr_run_service(
-    self = self,
-    data = data,
-    seed = seed,
-    init = init,
-    native_args_fn = native_args_fn,
-    payload_fn = payload_fn
-  )
-
-  StanPathfinder$new(
-    payload = res$payload,
-    model = self,
-    data = data,
-    seed = res$seed,
-    init = init,
-    elapsed = res$elapsed,
-    metadata = list(
-      method = "pathfinder",
-      num_paths = num_paths,
-      num_threads = num_threads,
-      show_exceptions = show_exceptions
-    )
-  )
-}
-StanModel$set("public", "pathfinder", stan_model_pathfinder)
-
-#' Run generated quantities
-#'
-#' @name model-method-generate-quantities
-#' @aliases generate_quantities
-#' @family StanModel methods
-#'
-#' @description The `$generate_quantities()` method of a [`StanModel`] object
-#'   runs Stan's `"generate quantities"` method, which evaluates the generated
-#'   quantities block of the Stan program for a set of parameter values.
-#'   Returns a [`StanGQ`] object.
-#'
-#' @param fitted_params A [`StanFit`] object, or anything accepted by
-#'   [posterior::as_draws_matrix()], containing draws with every model
-#'   parameter present by name (e.g. `beta[1]`, not a positional column).
-#' @template param-data
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
-#' @template param-opencl_ids
-#'
-#' @return A [`StanGQ`] object containing the generated quantities.
-#'
-#' @seealso [`$sample()`][model-method-sample]
-#'
-NULL
-
-stan_model_generate_quantities <- function(
-  fitted_params,
-  data = list(),
-  seed = NULL,
-  num_threads = RcppParallel::defaultNumThreads(),
-  opencl_ids = NULL,
-  show_messages = TRUE,
-  show_exceptions = TRUE
-) {
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
-
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-
-  input <- if (inherits(fitted_params, "StanFit")) {
-    fitted_params$draws(format = "draws_matrix")
-  } else {
-    posterior::as_draws_matrix(fitted_params)
-  }
-  nchains_input <- posterior::nchains(input)
-
-  native_args_fn <- function(seed, resolved_init, model) {
-    pars <- .stanr_bracket_names(self$constrained_param_names(model))
-    draws_matrix <- posterior::as_draws_matrix(
-      posterior::subset_draws(input, variable = pars)
-    )
-
-    list(
-      method = "generate_quantities",
-      seed = seed,
-      verbose = show_messages,
-      show_exceptions = show_exceptions,
-      num_threads = num_threads,
-      nchains = nchains_input,
-      draws = draws_matrix
-    )
-  }
-
-  payload_fn <- function(result) {
-    list(draws = result$samples)
-  }
-
-  res <- .stanr_run_service(
-    self = self,
-    data = data,
-    seed = seed,
-    init = NULL,
-    native_args_fn = native_args_fn,
-    payload_fn = payload_fn
-  )
-
-  StanGQ$new(
-    payload = res$payload,
-    model = self,
-    data = data,
-    seed = res$seed,
-    init = NULL,
-    elapsed = res$elapsed,
-    metadata = list(
-      method = "generate_quantities",
-      num_threads = num_threads,
-      show_exceptions = show_exceptions
-    )
-  )
-}
-StanModel$set("public", "generate_quantities", stan_model_generate_quantities)
-
-#' Run gradient diagnostics
-#'
-#' @name model-method-diagnose
-#' @aliases diagnose
-#' @family StanModel methods
-#'
-#' @description The `$diagnose()` method of a [`StanModel`] object runs Stan's
-#'   `"diagnose"` method to check the correctness of gradients computed by
-#'   Stan. Returns a [`StanDiagnose`] object.
-#'
-#' @param epsilon (number) The finite difference step size.
-#' @param error (number) The maximum allowed relative error.
-#'
-#' @return A [`StanDiagnose`] object containing gradient check results.
-#'
-#' @seealso [`$sample()`][model-method-sample]
-#'
-NULL
-
-stan_model_diagnose <- function(
-  data = list(),
-  seed = NULL,
-  init = 2,
-  epsilon = 1e-6,
-  error = 1e-6,
-  show_messages = TRUE,
-  show_exceptions = TRUE
-) {
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-
-  if (!is.numeric(epsilon) || length(epsilon) != 1L || epsilon <= 0) {
-    stop("`epsilon` must be a positive number.", call. = FALSE)
-  }
-  if (!is.numeric(error) || length(error) != 1L || error <= 0) {
-    stop("`error` must be a positive number.", call. = FALSE)
-  }
-
-  native_args_fn <- function(seed, resolved_init, model) {
-    list(
-      method = "diagnose",
-      epsilon = as.double(epsilon),
-      error = as.double(error),
-      seed = as.integer(seed),
-      id = 1L,
-      init_radius = resolved_init$radius,
-      verbose = show_messages,
-      show_exceptions = show_exceptions,
-      num_threads = 1L,
-      init = resolved_init$values
-    )
-  }
-
-  payload_fn <- function(result) {
-    list(
-      num_failed = as.integer(result$num_failed),
-      gradients = data.frame(
-        param_idx = seq_along(result$value) - 1L,
-        value = result$value,
-        model = result$model,
-        finite_diff = result$finite_diff,
-        error = result$error,
-        check.names = FALSE
-      ),
-      lp = result$lp
-    )
-  }
-
-  res <- .stanr_run_service(
-    self = self,
-    data = data,
-    seed = seed,
-    init = init,
-    native_args_fn = native_args_fn,
-    payload_fn = payload_fn
-  )
-
-  if (res$payload$num_failed == 0L) {
-    message("[stanr] All gradient tests passed.")
-  } else {
-    message(sprintf(
-      "[stanr] %d parameter(s) failed the gradient test.",
-      res$payload$num_failed
-    ))
-  }
-
-  StanDiagnose$new(
-    payload = res$payload,
-    model = self,
-    data = data,
-    seed = res$seed,
-    init = init,
-    elapsed = res$elapsed,
-    metadata = list(
-      method = "diagnose",
-      epsilon = epsilon,
-      error = error
-    )
-  )
-}
-StanModel$set("public", "diagnose", stan_model_diagnose)
-
-# StanModel internal native entry points ---------------------------------------
-# These remain public because sourceCpp functions live in a model-specific
-# environment. They are not the user-facing API.
-
-stan_model_new_model <- function(data, seed, declarations = NULL) {
-  private$ensure_compiled()
-  private$compiled_env_$new_model(data, seed, declarations)
-}
-StanModel$set("public", "new_model", stan_model_new_model)
-
-stan_model_run_model <- function(model, args) {
-  private$ensure_compiled()
-  private$compiled_env_$run_model(model, args)
-}
-StanModel$set("public", "run_model", stan_model_run_model)
-
-stan_model_constrained_param_names <- function(model) {
-  private$ensure_compiled()
-  private$compiled_env_$constrained_param_names(model)
-}
-StanModel$set(
-  "public",
-  "constrained_param_names",
-  stan_model_constrained_param_names
-)
-
-stan_model_native_function <- function(name, required = TRUE) {
-  private$ensure_compiled()
-  fun <- private$compiled_env_[[name]]
-  if (is.null(fun) && required) {
-    stop(
-      "The compiled model does not provide native function `",
-      name,
-      "`; recompile the model with the current stanr version.",
-      call. = FALSE
-    )
-  }
-  fun
-}
-StanModel$set("public", "native_function", stan_model_native_function)
