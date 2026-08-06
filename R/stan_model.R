@@ -288,6 +288,7 @@
   }
   extract_dir <- tempfile("stanr_load_")
   dir.create(extract_dir)
+  extract_dir <- tools::file_path_as_absolute(extract_dir)
   ok <- tryCatch(
     {
       utils::untar(cache_file, exdir = extract_dir, tar = "internal")
@@ -311,11 +312,7 @@
   }
   wrapper_text <- paste(readLines(wrapper_file, warn = FALSE), collapse = "\n")
   wrapper_text <- gsub("{{STANR_SO}}", so_file, wrapper_text, fixed = TRUE)
-  # Write to a file and source it rather than using textConnection(), which
-  # would interpret backslashes in Windows paths (e.g., C:\Users\...) as
-  # escape sequences and trigger parse errors like '\U' hex digit errors.
-  writeLines(wrapper_text, wrapper_file)
-  source(wrapper_file, local = env)
+  eval(parse(text = wrapper_text))
   TRUE
 }
 
