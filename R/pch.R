@@ -34,7 +34,8 @@
   }
   output <- tryCatch(
     .stanr_rcmd(c("config", variable), stdout = TRUE, stderr = FALSE),
-    error = function(e) character()
+    error = function(e) character(),
+    warning = function(e) character()
   )
   value <- paste(output, collapse = "\n")
   .stanr_memo[[memo_key]] <- value
