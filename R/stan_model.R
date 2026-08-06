@@ -226,14 +226,16 @@
         readLines(wrapper_file, warn = FALSE),
         collapse = "\n"
       )
+      # Match dyn.load() with either single or double quotes -- Rcpp may
+      # use different quote styles on different platforms.
       so_match <- regmatches(
         wrapper_text,
-        regexpr("dyn\\.load\\('[^']+'\\)", wrapper_text)
+        regexpr("dyn\\.load\\(['\"][^'\"]+['\"]\\)", wrapper_text)
       )
       if (!length(so_match)) {
         return(invisible(NULL))
       }
-      so_file <- sub("^dyn\\.load\\('([^']+)'\\)$", "\\1", so_match)
+      so_file <- sub("^dyn\\.load\\(['\"]([^'\"]+)['\"]\\)$", "\\1", so_match)
       if (!file.exists(so_file)) {
         return(invisible(NULL))
       }
@@ -309,7 +311,11 @@
   }
   wrapper_text <- paste(readLines(wrapper_file, warn = FALSE), collapse = "\n")
   wrapper_text <- gsub("{{STANR_SO}}", so_file, wrapper_text, fixed = TRUE)
-  source(textConnection(wrapper_text), local = env)
+  # Write to a file and source it rather than using textConnection(), which
+  # would interpret backslashes in Windows paths (e.g., C:\Users\...) as
+  # escape sequences and trigger parse errors like '\U' hex digit errors.
+  writeLines(wrapper_text, wrapper_file)
+  source(wrapper_file, local = env)
   TRUE
 }
 
