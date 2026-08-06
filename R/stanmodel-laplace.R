@@ -11,6 +11,7 @@
 #'   centered at the mode. Returns a [`StanLaplace`] object.
 #'
 #' @template param-data
+#' @template param-seed
 #' @template param-init
 #' @param mode A numeric vector of parameter values at the mode, or a
 #'   [`StanMLE`] object from [`$optimize()`][model-method-optimize]. If `NULL`,
@@ -22,8 +23,9 @@
 #' @param draws (integer) The number of draws from the Laplace approximation.
 #' @param calculate_lp (logical) Should the log density of the Laplace
 #'   approximation be calculated?
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
+#' @template param-num_threads
+#' @template param-show_messages
+#' @template param-show_exceptions
 #' @template param-opencl_ids
 #'
 #' @return A [`StanLaplace`] object containing approximate posterior draws.

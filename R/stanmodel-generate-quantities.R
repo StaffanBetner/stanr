@@ -15,8 +15,10 @@
 #'   [posterior::as_draws_matrix()], containing draws with every model
 #'   parameter present by name (e.g. `beta[1]`, not a positional column).
 #' @template param-data
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
+#' @template param-seed
+#' @template param-num_threads
+#' @template param-show_messages
+#' @template param-show_exceptions
 #' @template param-opencl_ids
 #'
 #' @return A [`StanGQ`] object containing the generated quantities.

@@ -35,6 +35,8 @@ enclosing array element, which is only correct when that slot is itself
 a plain (non-container) \code{complex} -- for anything else (e.g. a
 \code{complex_vector} tuple slot), use the list shapes above instead.}
 
+\item{seed}{(integer) The random seed for reproducibility.}
+
 \item{init}{Initial values for parameters. Either \code{NULL} (equivalent to
 the default radius of 2), a non-negative number, used as the range of
 CmdStan-style random initialization (\code{Uniform(-init, init)} on the
@@ -63,8 +65,19 @@ resampling be used?}
 
 \item{calculate_lp}{(logical) Should the log density be calculated?}
 
-\item{num_threads}{(integer) The total number of threads to use across all
-chains. Defaults to \code{RcppParallel::defaultNumThreads()} (all available threads).}
+\item{num_threads}{(integer) The total number of threads to use. Defaults
+to \code{RcppParallel::defaultNumThreads()} (all available threads).}
+
+\item{show_messages}{(logical) When \code{TRUE} (the default), print progress
+and informational output (e.g. iteration and timing messages) to the
+console. Set to \code{FALSE} to silence it. Suppressed output is still
+recorded and available via the fit's \verb{$output()} method.}
+
+\item{show_exceptions}{(logical) When \code{TRUE} (the default), print
+informational messages about numerical exceptions -- e.g. Metropolis
+proposal rejections and rejected initial values. Set to \code{FALSE} to
+silence them. Suppressed messages are still recorded and available via
+the fit's \verb{$output()} method.}
 
 \item{opencl_ids}{(integer vector) \code{c(platform_id, device_id)} identifying
 the OpenCL platform/device to run on. Only meaningful for a model

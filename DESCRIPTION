@@ -56,6 +56,11 @@ Collate:
     "stan_model.R"
     "classes-model.R"
     "classes-fit.R"
+    "fit-mcmc.R"
+    "fit-mle.R"
+    "fit-approx.R"
+    "fit-gq.R"
+    "fit-diagnose.R"
     "diagnostics.R"
     "zzz.R"
 Roxygen: list(markdown = TRUE)

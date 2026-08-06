@@ -12,6 +12,7 @@
 #'   [`StanPathfinder`] object.
 #'
 #' @template param-data
+#' @template param-seed
 #' @template param-init
 #' @param num_paths (integer) The number of paths to use.
 #' @param single_path_draws (integer) Number of draws per path.
@@ -22,8 +23,9 @@
 #' @param psis_resample (logical) Should Pareto smoothed importance sampling
 #'   resampling be used?
 #' @param calculate_lp (logical) Should the log density be calculated?
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
+#' @template param-num_threads
+#' @template param-show_messages
+#' @template param-show_exceptions
 #' @template param-opencl_ids
 #'
 #' @return A [`StanPathfinder`] object containing approximate posterior draws.

@@ -54,8 +54,8 @@ list may include tuple-shaped list entries and R complex values for
 
 \item{chain_ids}{(integer vector) The IDs for each chain.}
 
-\item{num_threads}{(integer) The total number of threads to use across all
-chains. Defaults to \code{RcppParallel::defaultNumThreads()} (all available threads).}
+\item{num_threads}{(integer) The total number of threads to use. Defaults
+to \code{RcppParallel::defaultNumThreads()} (all available threads).}
 
 \item{iter_warmup}{(integer) The number of warmup iterations.}
 

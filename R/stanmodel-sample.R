@@ -12,13 +12,12 @@
 #'   Returns a [`StanMCMC`] object.
 #'
 #' @template param-data
-#' @param seed (integer) The random seed for reproducibility.
+#' @template param-seed
 #' @param refresh (integer) How often (in iterations) to print progress.
 #' @template param-init
 #' @param chains (integer) The number of MCMC chains.
 #' @param chain_ids (integer vector) The IDs for each chain.
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
+#' @template param-num_threads
 #' @param iter_warmup (integer) The number of warmup iterations.
 #' @param iter_sampling (integer) The number of sampling iterations.
 #' @param save_warmup (logical) Should warmup samples be saved? Ignored when
@@ -36,15 +35,8 @@
 #' @param term_buffer (integer) Adaptation phase: terminal buffer length.
 #' @param window (integer) Adaptation phase: window length.
 #' @param fixed_param (logical) Treat all parameters as fixed (no adaptation).
-#' @param show_messages (logical) When `TRUE` (the default), print progress
-#'   and informational output (e.g. iteration and timing messages) to the
-#'   console. Set to `FALSE` to silence it. Suppressed output is still
-#'   recorded and available via the fit's `$output()` method.
-#' @param show_exceptions (logical) When `TRUE` (the default), print
-#'   informational messages about numerical exceptions -- e.g. Metropolis
-#'   proposal rejections and rejected initial values. Set to `FALSE` to
-#'   silence them. Suppressed messages are still recorded and available via
-#'   the fit's `$output()` method.
+#' @template param-show_messages
+#' @template param-show_exceptions
 #' @param diagnostics (character vector) Which sampler diagnostics to check
 #'   immediately after sampling, printing a warning message for any problems
 #'   found -- see [`$diagnostic_summary()`][fit-method-mcmc]. One or more of

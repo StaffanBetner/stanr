@@ -11,6 +11,7 @@
 #'   maximum likelihood estimate (MLE). Returns a [`StanMLE`] object.
 #'
 #' @template param-data
+#' @template param-seed
 #' @template param-init
 #' @param algorithm (string) The optimization algorithm: `"lbfgs"`, `"bfgs"`,
 #'   or `"newton"`.
@@ -30,8 +31,9 @@
 #'   including the initial point) instead of a single row for the final
 #'   estimate. [`$mle()`][fit-method-mle] is unaffected either way and always
 #'   reflects the final iteration.
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
+#' @template param-num_threads
+#' @template param-show_messages
+#' @template param-show_exceptions
 #' @template param-opencl_ids
 #'
 #' @return A [`StanMLE`] object containing the point estimate.

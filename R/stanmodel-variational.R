@@ -12,6 +12,7 @@
 #'   Returns a [`StanVB`] object.
 #'
 #' @template param-data
+#' @template param-seed
 #' @template param-init
 #' @param algorithm (string) The variational inference algorithm: `"meanfield"`
 #'   or `"fullrank"`.
@@ -24,8 +25,9 @@
 #' @param tol_rel_obj (number) Relative tolerance for ELBO convergence.
 #' @param eval_elbo (integer) How often to evaluate the ELBO.
 #' @param draws (integer) The number of draws from the variational approximation.
-#' @param num_threads (integer) The total number of threads to use across all
-#'   chains. Defaults to `RcppParallel::defaultNumThreads()` (all available threads).
+#' @template param-num_threads
+#' @template param-show_messages
+#' @template param-show_exceptions
 #' @template param-opencl_ids
 #'
 #' @return A [`StanVB`] object containing approximate posterior draws.

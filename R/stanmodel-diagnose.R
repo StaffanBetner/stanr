@@ -10,8 +10,13 @@
 #'   `"diagnose"` method to check the correctness of gradients computed by
 #'   Stan. Returns a [`StanDiagnose`] object.
 #'
+#' @template param-data
+#' @template param-seed
+#' @template param-init
 #' @param epsilon (number) The finite difference step size.
 #' @param error (number) The maximum allowed relative error.
+#' @template param-show_messages
+#' @template param-show_exceptions
 #'
 #' @return A [`StanDiagnose`] object containing gradient check results.
 #'

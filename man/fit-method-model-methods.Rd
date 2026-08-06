@@ -14,11 +14,14 @@ abs-determinant of the Jacobian of the inverse transformation?}
 
 \item{draws}{A posterior draws object, or \code{NULL} to use the fit's draws.}
 
-\item{format}{(string) The output format from the \pkg{posterior} package.
-Defaults to \code{NULL}, which uses the fit's default draws format (see
-\code{\link[=fit-method-draws]{$draws()}}).}
+\item{format}{(string) The format of the returned draws. Must be a valid
+format from the \pkg{posterior} package. Defaults depend on the fitting
+method: \code{"draws_array"} for MCMC and generated quantities, \code{"draws_matrix"}
+for all other methods.}
 
-\item{inc_warmup}{(logical) Include warmup draws?}
+\item{inc_warmup}{(logical) Should warmup draws be included? Defaults to
+\code{FALSE}. Errors unless the fit is a \code{\link[=model-method-sample]{$sample()}} run
+with \code{save_warmup = TRUE}.}
 
 \item{transformed_parameters}{(logical) Include transformed parameters?}
 
