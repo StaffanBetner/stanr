@@ -18,7 +18,7 @@ License: BSD_3_clause + file LICENSE
 URL: https://github.com/andrjohns/stanr
 BugReports: https://github.com/andrjohns/stanr/issues
 Depends:
-    R (>= 4.3)
+    R (>= 4.0)
 Imports:
     R6,
     Rcpp (>= 1.0.0),
