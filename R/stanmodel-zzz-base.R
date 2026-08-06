@@ -139,10 +139,9 @@ StanModel <- R6Class(
       if (length(include_paths)) {
         include_paths <- normalizePath(include_paths, mustWork = TRUE)
       }
-      # Validated (and, for the raw-string form, syntax-checked) up front so
-      # a malformed `cpp_options` entry fails fast at construction rather
-      # than at compile time; the parsed assignments themselves are
-      # re-derived from the stored raw list in `.compile_stan_model_environment()`.
+      # Validated up front so a malformed entry fails fast at construction
+      # rather than at compile time; re-derived from the raw list later in
+      # `.compile_stan_model_environment()`.
       .stanr_parse_cpp_options(cpp_options)
       if (!is.list(stanc_options)) {
         stop("`stanc_options` must be a list.", call. = FALSE)
@@ -223,11 +222,9 @@ StanModel <- R6Class(
         compile_standalone,
         "compile_standalone"
       )
-      # Incremented unconditionally, before compilation runs, so the generation
-      # always reflects "a compile was attempted" -- fits use this (via
-      # `$compile_generation()`) to know whether their cached native pointer
-      # might now be stale, even if `.compile_stan_model_environment()` below
-      # throws partway through.
+      # Incremented before compilation runs, so it always reflects "a compile
+      # was attempted" even if the call below throws partway through -- fits
+      # use `$compile_generation()` to detect a possibly-stale native pointer.
       private$compile_generation_ <- private$compile_generation_ + 1L
       private$compiled_env_ <- .compile_stan_model_environment(
         code = private$resolved_code(),
@@ -242,11 +239,10 @@ StanModel <- R6Class(
         standalone_functions = compile_standalone
       )
       if (compile_standalone) {
-        # cmdstanr parity: compile_standalone exposes without a separate
-        # $expose_stan_functions() call. Unconditional on every $compile() run
-        # (not just the first) -- $compile() can be re-run via
-        # force_recompile, and rebuilding from the fresh compiled env keeps
-        # the function objects pointing at live (not stale/freed) symbols.
+        # cmdstanr parity: exposes without a separate $expose_stan_functions()
+        # call. Runs on every $compile(), not just the first, so a
+        # force_recompile rebuilds from the fresh env instead of leaving
+        # function objects pointing at stale/freed symbols.
         private$functions_compiled_env_ <- private$compiled_env_
         .stanr_build_functions_env(
           private$compiled_env_,
@@ -353,9 +349,8 @@ StanModel <- R6Class(
         ) {
           private$functions_compiled_env_ <- private$compiled_env_
         } else {
-          # Deliberately does not go through `private$ensure_compiled()` /
-          # `self$native_function()`: either would trigger a full `self$compile()`
-          # as a side effect on a never-compiled model, but exposing functions
+          # Not routed through `private$ensure_compiled()`/`self$native_function()`:
+          # both would trigger a full `self$compile()`, but exposing functions
           # must work on a `compile = FALSE` model without compiling it.
           private$functions_compiled_env_ <- .compile_standalone_functions_environment(
             code = private$resolved_code(),
@@ -443,11 +438,10 @@ StanModel <- R6Class(
       }
       invisible(NULL)
     },
-    # `code_` is immutable after `initialize()` (never reassigned), so this
-    # needs no invalidation logic: once resolved, it is valid for the
-    # object's whole lifetime. Shared between `$compile()` and `$variables()`
-    # so `#include` resolution -- a recursive file-system walk -- happens at
-    # most once per model, however many times either method is called.
+    # `code_` is immutable after `initialize()`, so no invalidation logic is
+    # needed: once resolved it's valid for the object's whole lifetime.
+    # Shared by `$compile()` and `$variables()` so `#include` resolution (a
+    # recursive file-system walk) happens at most once per model.
     resolved_code = function() {
       if (is.null(private$resolved_code_)) {
         private$resolved_code_ <- resolve_stan_includes(

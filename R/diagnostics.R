@@ -1,17 +1,12 @@
-#' Warn about divergent transitions after MCMC sampling
-#'
-#' Mirrors cmdstanr's `check_divergences()`.
-#'
-#' @param num_divergent (integer vector) Divergences per chain, or all-`NA` if
-#'   not collected.
-#' @param num_draws (integer) Total post-warmup draws across all chains.
-#'
-#' @noRd
-.stanr_check_divergences <- function(num_divergent, num_draws) {
-  if (anyNA(num_divergent)) {
+# Warns about a count of problem transitions after MCMC sampling. Shared by
+# `.stanr_check_divergences()` and `.stanr_check_max_treedepth()`, which
+# differ only in `description` (completes "... transitions `description`.").
+# `count` is per-chain, all-`NA` if not collected.
+.stanr_check_transitions <- function(count, num_draws, description) {
+  if (anyNA(count)) {
     return(invisible(NULL))
   }
-  total <- sum(num_divergent)
+  total <- sum(count)
   if (total == 0) {
     return(invisible(NULL))
   }
@@ -22,57 +17,39 @@
     num_draws,
     " (",
     base::format(round(100 * total / num_draws, 0), nsmall = 1),
-    "%) transitions ended with a divergence.\n",
-    "See https://mc-stan.org/misc/warnings for details."
-  )
-}
-
-#' Warn about transitions that hit the maximum treedepth
-#'
-#' Mirrors cmdstanr's `check_max_treedepth()`.
-#'
-#' @noRd
-.stanr_check_max_treedepth <- function(
-  num_max_treedepth,
-  num_draws,
-  max_depth
-) {
-  if (anyNA(num_max_treedepth)) {
-    return(invisible(NULL))
-  }
-  total <- sum(num_max_treedepth)
-  if (total == 0) {
-    return(invisible(NULL))
-  }
-  message(
-    "[stanr] Warning: ",
-    total,
-    " of ",
-    num_draws,
-    " (",
-    base::format(round(100 * total / num_draws, 0), nsmall = 1),
-    "%) transitions hit the maximum treedepth limit of ",
-    max_depth,
+    "%) transitions ",
+    description,
     ".\n",
     "See https://mc-stan.org/misc/warnings for details."
   )
 }
 
-#' Compute E-BFMI per chain and warn about problems
-#'
-#' Mirrors cmdstanr's `ebfmi()`/`check_ebfmi()`. Unlike the divergence/
-#' treedepth checks, a chain that can't be computed at all (too few
-#' iterations, or missing/NA energy) is reported via `warning()` -- not
-#' suppressed by `quiet` -- since that's a different kind of problem than
-#' "computed fine but the value is bad".
-#'
-#' @param draws Sampler diagnostics as a `draws_array` (iteration x chain x
-#'   variable), already known to contain `energy__`.
-#' @param n_chains (integer) Number of chains.
-#' @param quiet (logical) Suppress the below-threshold/NaN message?
-#' @param threshold (number) E-BFMI values below this trigger a warning.
-#'
-#' @noRd
+.stanr_check_divergences <- function(num_divergent, num_draws) {
+  .stanr_check_transitions(
+    num_divergent,
+    num_draws,
+    "ended with a divergence"
+  )
+}
+
+.stanr_check_max_treedepth <- function(
+  num_max_treedepth,
+  num_draws,
+  max_depth
+) {
+  .stanr_check_transitions(
+    num_max_treedepth,
+    num_draws,
+    paste0("hit the maximum treedepth limit of ", max_depth)
+  )
+}
+
+# Computes E-BFMI per chain and warns about problems. Unlike the
+# divergence/treedepth checks, a chain that can't be computed at all (too
+# few iterations, or missing/NA energy) is reported via `warning()` -- not
+# suppressed by `quiet` -- since that's a different kind of problem than
+# "computed fine but the value is bad". `draws` must already contain
+# `energy__`.
 .stanr_check_ebfmi <- function(draws, n_chains, quiet, threshold = 0.3) {
   n_iter <- posterior::niterations(draws)
   if (n_iter < 3) {

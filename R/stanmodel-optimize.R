@@ -65,12 +65,19 @@ stan_model_optimize_impl <- function(
   save_iterations = FALSE
 ) {
   jacobian <- .stanr_flag(jacobian, "jacobian")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
   save_iterations <- .stanr_flag(save_iterations, "save_iterations")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
+  common <- .stanr_common_service_flags(
+    show_messages,
+    show_exceptions,
+    opencl_ids,
+    private,
+    num_threads,
+    refresh
+  )
+  show_messages <- common$show_messages
+  show_exceptions <- common$show_exceptions
+  num_threads <- common$num_threads
+  refresh <- common$refresh
   if (!algorithm %in% c("lbfgs", "bfgs", "newton")) {
     stop(
       "`algorithm` must be one of \"lbfgs\", \"bfgs\", \"newton\".",
@@ -78,8 +85,6 @@ stan_model_optimize_impl <- function(
     )
   }
 
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
   iter <- .stanr_int(iter, "iter")
   history_size <- .stanr_int(history_size, "history_size", min = 1L)
 

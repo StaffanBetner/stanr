@@ -1,27 +1,12 @@
-#' Post-process standalone-functions C++ into an `Rcpp::sourceCpp()` unit
-#'
-#' Rewrites the `// [[stan::function]]` wrappers emitted by
-#' `stanc(code, standalone_functions = TRUE)` into `// [[Rcpp::export]]`
-#' wrappers callable from R. The `pstream__` and (for `_rng` functions)
-#' `base_rng__` parameters are stripped from each signature -- they become
-#' file-static variables instead -- and a function registry is appended so
-#' the exposed set can be discovered on a cache hit without rerunning stanc.
-#'
-#' @param cpp_code The C++ text returned by
-#'   `stanc(code, standalone_functions = TRUE)`.
-#' @param reserved_names Character vector of function names that must not be
-#'   exposed; a collision is an error, not a skip.
-#'
-#' @return A list with elements:
-#'   * `full_code` -- the entire processed translation unit, usable as a
-#'     standalone compile unit.
-#'   * `wrapper_section` -- the RNG/registry prelude and rewritten wrappers
-#'     only, without the leading `model_header.hpp` include and
-#'     `model_namespace` block (for appending after a model's own generated
-#'     C++, which already provides those definitions).
-#'   * `functions` -- a data frame with columns `name` and `is_rng`, one row
-#'     per exposed function, in exposure order.
-#' @noRd
+# Post-processes standalone-functions C++ (from
+# `stanc(code, standalone_functions = TRUE)`) into an `Rcpp::sourceCpp()`
+# unit: rewrites each `// [[stan::function]]` wrapper to `// [[Rcpp::export]]`,
+# strips the `pstream__`/`base_rng__` params (replaced by file-static
+# variables), and appends a function registry so the exposed set can be
+# discovered on a cache hit without rerunning stanc. A name colliding with
+# `reserved_names` is an error, not a skip. Returns a list: `full_code` (the whole
+# TU), `wrapper_section` (just the prelude + wrappers, for appending after a
+# model's own generated C++), and `functions` (a `name`/`is_rng` data frame).
 .stanr_process_standalone_cpp <- function(cpp_code, reserved_names) {
   lines <- strsplit(cpp_code, "\n", fixed = TRUE)[[1]]
   marker_idx <- which(trimws(lines) == "// [[stan::function]]")
@@ -161,9 +146,10 @@
   # wrappers need; it must come after RcppEigen.h/Rcpp.h (both TU modes
   # satisfy this).
   # The `Rcpp::depends` attributes (matching inst/stan_model.cpp's own) are
-  # what let `Rcpp::sourceCpp()` resolve RcppEigen/BH/RcppParallel include
-  # paths itself; harmless if this ends up appended after inst/stan_model.cpp
-  # (combined-TU mode), which already declares the same three.
+  # inert -- stanr resolves RcppEigen/BH/RcppParallel flags itself
+  # (`.stanr_dependency_cppflags()`, R/pch.R) rather than through them -- but
+  # harmless if this ends up appended after inst/stan_model.cpp (combined-TU
+  # mode), which already declares the same three.
   prelude <- paste(
     c(
       "#include <RcppEigen.h>",
@@ -219,27 +205,13 @@
   )
 }
 
-#' Compile a Stan program's `functions` block into its own translation unit
-#'
-#' Mirrors `.compile_stan_model_environment()` (R/stan_model.R), but for the
-#' separate-TU expose path: no `model_name` messaging, no OpenCL, no
-#' `libstanr_runner.a` (this TU has no services to link against).
-#'
-#' @param code Stan program source, already `#include`-resolved by the
-#'   caller (e.g. a model's `resolved_code()`).
-#' @param stan_file `NULL`, or the model's source file path -- see
-#'   `.stanr_build_cache_file()` (R/stan_model.R) for how it controls where
-#'   the persistent build cache lives.
-#' @param external_cpp `NULL`, or a character vector of paths, forwarded to
-#'   `stanc()`.
-#' @param cpp_options C++ compilation options; see `stan_model()`.
-#' @param verbose Print compiler/cache progress messages.
-#' @param precompiled_headers Reuse the model-PCH `.gch` when flags match.
-#'
-#' @return An environment populated by `Rcpp::sourceCpp()`, with
-#'   `stanr_exposed_functions`, `stanr_rng_set_seed`, and one R function
-#'   per exposed Stan function.
-#' @noRd
+# Compiles a Stan program's `functions` block into its own translation
+# unit. Mirrors `.compile_stan_model_environment()` (R/stan_model.R), but
+# for the separate-TU expose path: no `model_name` messaging, no OpenCL, no
+# `libstanr_runner.a` (this TU has no services to link against). `code` is
+# already `#include`-resolved by the caller. Returns an environment
+# populated from the compiled build, with `stanr_exposed_functions`,
+# `stanr_rng_set_seed`, and one R function per exposed Stan function.
 .compile_standalone_functions_environment <- function(
   code,
   stan_file = NULL,
@@ -309,6 +281,9 @@
   }
   writeLines(processed$full_code, cpp_file)
 
+  harvest <- .stanr_harvest_exports(cpp_file, build_dir)
+  .stanr_append_build_info(harvest$cpp_file, functions_hash, harvest$loader)
+
   base_cppflags <- .stanr_base_cppflags()
   pch_enabled <- FALSE
   if (
@@ -324,49 +299,34 @@
   }
 
   compile_functions <- function(compilation_cppflags) {
-    .stanr_sourcecpp(
-      cpp_file = cpp_file,
-      env = env,
+    .stanr_compile(
+      cpp_file = harvest$cpp_file,
       cppflags = compilation_cppflags,
       libs = .stanr_tbb_libs(),
       extra_assignments = extra_assignments,
-      rebuild = FALSE,
-      cache_dir = build_dir,
       verbose = verbose
     )
   }
 
-  result <- .stanr_compile_with_pch_retry(
+  lib_file <- .stanr_compile_with_pch_retry(
     compile_functions,
     cppflags,
     base_cppflags,
     pch_enabled,
     verbose
   )
-  .stanr_write_build_cache(
-    cache_file,
-    functions_hash,
-    result$buildDirectory,
-    cpp_file
-  )
+  .stanr_load_build(lib_file, env)
+  .stanr_write_build_cache(cache_file, lib_file)
 
   memo[[memo_key]] <- env
   env
 }
 
-#' Wrap a compiled `_rng` export with an explicit `seed` argument
-#'
-#' The compiled export `fn` already has `pstream__`/`base_rng__` stripped
-#' from its C++ signature by `.stanr_process_standalone_cpp()`, so its R
-#' formals are exactly the user-facing Stan args. The wrapper's formals are
-#' copied from `fn` (rather than written as `function(..., seed = NULL)`) so
-#' `args()`/autocomplete on the exposed function shows real parameter names.
-#'
-#' @param fn A compiled `_rng` export.
-#' @param compiled_env The environment `fn` was sourced into (provides
-#'   `stanr_rng_set_seed()`).
-#' @return A function with `fn`'s formals plus a trailing `seed = NULL`.
-#' @noRd
+# Wraps a compiled `_rng` export (`fn`) with an explicit `seed` argument.
+# `fn`'s formals are exactly the user-facing Stan args (pstream__/
+# base_rng__ already stripped by `.stanr_process_standalone_cpp()`), and are
+# copied onto the wrapper -- rather than writing `function(..., seed =
+# NULL)` -- so `args()`/autocomplete shows the real parameter names.
 .stanr_rng_wrapper <- function(fn, compiled_env) {
   base_formals <- formals(fn)
   arg_names <- names(base_formals) %||% character()
@@ -380,22 +340,11 @@
   wrapper
 }
 
-#' Populate a target environment from a compiled functions environment
-#'
-#' Shared by both expose paths (separate-TU and combined-TU): reads the
-#' function registry off `compiled_env`, wraps
-#' `_rng` exports with `.stanr_rng_wrapper()`, and assigns everything into
-#' `target_env` (and, if `global`, also into `global_env`).
-#'
-#' @param compiled_env An environment as returned by
-#'   `.compile_standalone_functions_environment()`.
-#' @param target_env The environment to (re)populate, e.g. a model's
-#'   `$functions` env.
-#' @param global Also assign each function into `global_env`.
-#' @param global_env Environment to assign into when `global` is `TRUE`.
-#'
-#' @return `target_env`, invisibly.
-#' @noRd
+# Populates a target environment (e.g. a model's `$functions` env) from a
+# compiled functions environment. Shared by both expose paths: reads the
+# function registry off `compiled_env`, wraps `_rng` exports with
+# `.stanr_rng_wrapper()`, and assigns everything into `target_env` (and, if
+# `global`, also into `global_env`). Returns `target_env`, invisibly.
 .stanr_build_functions_env <- function(
   compiled_env,
   target_env,

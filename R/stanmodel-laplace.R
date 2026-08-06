@@ -67,11 +67,18 @@ stan_model_laplace_impl <- function(
   }
   jacobian <- .stanr_flag(jacobian, "jacobian")
   calculate_lp <- .stanr_flag(calculate_lp, "calculate_lp")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
+  common <- .stanr_common_service_flags(
+    show_messages,
+    show_exceptions,
+    opencl_ids,
+    private,
+    num_threads,
+    refresh
+  )
+  show_messages <- common$show_messages
+  show_exceptions <- common$show_exceptions
+  num_threads <- common$num_threads
+  refresh <- common$refresh
   # Seed is resolved once so the internal mode-finding optimize() run (if
   # any) and the laplace run itself share it.
   resolved_seed <- .stanr_seed(seed)
@@ -101,8 +108,6 @@ stan_model_laplace_impl <- function(
     mode_val <- mode
   }
 
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
   draws <- .stanr_int(draws, "draws")
 
   if (!is.numeric(mode_val) || is.null(names(mode_val))) {

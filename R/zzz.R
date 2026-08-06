@@ -1,9 +1,8 @@
-# Suppress R CMD check NOTES for R6 internal variables used in standalone
-# method definitions attached via $set().
+# Suppresses R CMD check NOTES for R6 `self`/`private`, used in standalone
+# method definitions assigned by reference into R6Class().
 private <- self <- NULL
 
-# Package-local memo environment. Holds session-lifetime caches for values
-# that depend only on session-stable inputs (installed package versions,
-# toolchain configuration, etc.) -- never on anything that can change within
-# a session, such as file contents covered by the PCH fingerprint.
+# Session-lifetime memo cache, keyed only on session-stable inputs (package
+# versions, toolchain identity, etc.) -- never on anything that can change
+# mid-session.
 .stanr_memo <- new.env(parent = emptyenv())

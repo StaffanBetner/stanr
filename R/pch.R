@@ -1,11 +1,8 @@
 # Precompiled Stan model header support ---------------------------------------
 
-# Optimization/warning flags appended (via `+=`) after Makeconf's own
-# CXXFLAGS/CXX20FLAGS so they win under last-flag-wins compiler precedence,
-# instead of being silently overridden the way `-O3 -w` used to be when it
-# lived in PKG_CPPFLAGS. Defined once and shared between the model TU compile
-# (R/stan_model.R) and the precompiled header build below so the two stay
-# byte-identical -- GCC/clang reject a PCH built with mismatched flags.
+# Appended via `+=` so these win last-flag-wins over Makeconf's own
+# CXXFLAGS. Shared between the model TU compile (R/stan_model.R) and the PCH
+# build below -- GCC/clang reject a PCH built under mismatched flags.
 .stanr_opt_flags <- function() {
   flags <- "-O3 -g0 -w"
 
@@ -27,15 +24,8 @@
 # but not through `.stanr_system2()`.
 .stanr_rcmd <- function(...) tools::Rcmd(...)
 
-#' Return the compiler configuration value used by R's build system.
-#'
-#' Memoized for the life of the R session: `R CMD config <variable>` is
-#' session-stable, so the underlying subprocess only ever runs once per
-#' `variable`. Delegates to `tools::Rcmd()` (via `.stanr_rcmd()`) rather
-#' than constructing the `R CMD` invocation by hand, so the Windows
-#' `Rcmd.exe` front-end is used correctly there too.
-#'
-#' @noRd
+# `R CMD config <variable>`, memoized per session and run through
+# `.stanr_rcmd()` so Windows' `Rcmd.exe` front-end is used.
 .stanr_r_config <- function(variable) {
   memo_key <- paste0("r_config:", variable)
   cached <- .stanr_memo[[memo_key]]
@@ -51,16 +41,8 @@
   value
 }
 
-#' Compiler flags injected by sourceCpp's dependency attributes.
-#'
-#' Memoized for the life of the R session (single key, this function takes
-#' no arguments): the installed package versions and `RcppParallel::CxxFlags()`
-#' output are session-stable. `RcppParallel::CxxFlags()` is captured
-#' in-process (mirroring `RcppParallel::RcppParallelLibs()` in
-#' `.compile_stan_model_environment()`, R/stan_model.R) instead of shelling
-#' out to `Rscript`.
-#'
-#' @noRd
+# Compiler flags injected by sourceCpp's dependency attributes (Rcpp,
+# RcppEigen, BH, RcppParallel), memoized per session.
 .stanr_dependency_cppflags <- function() {
   cached <- .stanr_memo$dependency_cppflags
   if (!is.null(cached)) {
@@ -90,14 +72,8 @@
   flags
 }
 
-#' Locate R's `Makeconf`.
-#'
-#' Windows keeps it under an architecture subdirectory (`etc/x64/Makeconf`);
-#' the platforms where `.Platform$r_arch` is `""` keep it directly in
-#' `etc/`. Falls back to the unsuffixed location if the arch-suffixed one
-#' is absent.
-#'
-#' @noRd
+# Locate R's `Makeconf`. Windows keeps it under an arch subdirectory
+# (`etc/x64/Makeconf`); falls back to the unsuffixed location if absent.
 .stanr_makeconf <- function() {
   if (nzchar(.Platform$r_arch)) {
     arch_makeconf <- file.path(R.home("etc"), .Platform$r_arch, "Makeconf")
@@ -108,23 +84,11 @@
   file.path(R.home("etc"), "Makeconf")
 }
 
-#' Create an R-toolchain Makefile for a precompiled header.
-#'
-#' The recipe names the `CXX20*` variables explicitly rather than the plain
-#' `CXX`/`CXXFLAGS`/`CXXPICFLAGS` ones. `USE_CXX20` is not a Makeconf switch --
-#' R implements it in `tools:::.shlib_internal()`, which substitutes
-#' `$(CXX20) $(CXX20STD)` etc. before invoking make -- so a bare `make -f`
-#' against Makeconf would silently get `$(CXX)`'s own default standard
-#' instead of the C++20 standard `sourceCpp()` compiles the model TU under
-#' (R/stan_model.R, which sets `USE_CXX20=1`). GCC/clang reject a PCH built
-#' under a different `-std` than its consumer.
-#'
-#' The recipe does not create `$(dir $(PCH))`; the caller does that in R,
-#' so the recipe needs no shell built-ins beyond the compiler itself (GNU
-#' make on Windows falls back to `cmd.exe` when no `sh` is on `PATH`, where
-#' `mkdir -p` would fail and abort the build).
-#'
-#' @noRd
+# Creates an R-toolchain Makefile for a precompiled header. Names the
+# `CXX20*` variables explicitly: bare Makeconf variables would get
+# `$(CXX)`'s default `-std`, and GCC/clang reject a PCH built under a
+# mismatched one. Creates no directories itself (the caller does, in R)
+# since GNU make on Windows falls back to a shell-less `cmd.exe` otherwise.
 .stanr_pch_makefile <- function() {
   makefile <- tempfile("stanr-pch-", fileext = ".mk")
   writeLines(
@@ -139,16 +103,9 @@
   makefile
 }
 
-#' Return an identity string for the active C++ compiler toolchain.
-#'
-#' Memoized for the life of the R session (single key -- the toolchain
-#' cannot change mid-session). Used to select PCH flags in
-#' `.stanr_pch_flags()` (clang vs gcc), and as a component of `model_hash`
-#' (`.compile_stan_model_environment()`, R/stan_model.R): `Rcpp::sourceCpp()`'s
-#' own cache has no notion of compiler identity, so an in-place toolchain
-#' upgrade could otherwise leave a stale `.so` reloaded indefinitely.
-#'
-#' @noRd
+# Identity string for the active C++ compiler, memoized per session. Used
+# to pick clang-vs-gcc PCH flags, and folded into `model_hash` so an
+# in-place toolchain upgrade doesn't keep reloading a stale `.so`.
 .stanr_compiler_identity <- function() {
   cached <- .stanr_memo$compiler_identity
   if (!is.null(cached)) {
@@ -174,38 +131,23 @@
   identity
 }
 
-#' The on-disk path of the PCH memoized for `cppflags`, or `NA_character_`.
-#'
-#' Shares `.stanr_pch_flags()`'s memo key so the staleness check in
-#' `.stanr_compile_with_pch_retry()` needn't duplicate its construction.
-#'
-#' @noRd
+# The on-disk path of the PCH memoized for `cppflags`, or `NA_character_`.
+# Shares `.stanr_pch_flags()`'s memo key so the staleness check in
+# `.stanr_compile_with_pch_retry()` needn't duplicate its construction.
 .stanr_pch_current <- function(cppflags) {
   memo_key <- paste0("pch_flags:", digest::digest(cppflags))
   .stanr_memo[[memo_key]]$pch %||% NA_character_
 }
 
-#' Return flags that make sourceCpp use a cached model PCH.
-#'
-#' Precompiles `stanr/model_pch.hpp` (`src/include/model_pch.hpp`, mirrored
-#' to the installed package as `inst/include/stanr/model_pch.hpp`), which
-#' transitively covers `stan/model/model_header.hpp`, `Rcpp.h`, and the
-#' stanr wrapper headers -- the full cold-compiled preamble of an assembled
-#' model translation unit (`inst/stan_model.cpp`).
-#' The resolved flags are memoized per-session, keyed on `cppflags` alone (not
-#' `rebuild`). A memo hit still revalidates the cached PCH via
-#' `file.exists()`; a miss falls through to recomputation.
-#'
-#' The two compiler families use different discovery mechanisms:
-#' * clang: `-include-pch <pch>` names the compiled `.gch` file directly, so
-#'   it can live anywhere with an arbitrary name.
-#' * GCC: only supports `-include <file>`, which substitutes a sibling
-#'   `<file>.gch` when one exists beside the exact (absolute) path given --
-#'   so a stand-in for the header inside the cache dir (a symlink, or a plain
-#'   copy on Windows, where symlinks are unavailable), with a `.gch` built
-#'   beside it, is sufficient.
-#'
-#' @noRd
+# Returns flags that make sourceCpp use a cached model PCH, precompiling
+# `stanr/model_pch.hpp` (the full cold-compile preamble of a model TU) if
+# needed. Memoized per session, keyed on `cppflags`; a memo hit still
+# revalidates via `file.exists()`.
+#
+# clang and GCC discover the PCH differently: clang's `-include-pch <pch>`
+# names the `.gch` directly, but GCC's `-include <file>` only picks up a
+# PCH from a sibling `<file>.gch`, so GCC needs a stand-in for the header
+# (symlink, or a plain copy on Windows) staged inside the cache dir.
 .stanr_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
   memo_key <- paste0("pch_flags:", digest::digest(cppflags))
   if (!rebuild) {
@@ -383,17 +325,9 @@
   }
 }
 
-#' Compile with a PCH, retrying once with a rebuilt PCH on staleness.
-#'
-#' Shared by both compile paths (model TU and functions TU:
-#' `.compile_stan_model_environment()` in R/stan_model.R and
-#' `.compile_standalone_functions_environment()` in R/expose.R), so it
-#' lives here alongside the other PCH helpers it calls
-#' (`.stanr_pch_current()`, `.stanr_pch_flags()`) rather than in either
-#' caller. `compile_fn` is a one-argument function `function(compilation_cppflags)`
-#' that performs the actual compile.
-#'
-#' @noRd
+# Compiles with a PCH, retrying once with a rebuilt PCH on staleness.
+# Shared by both compile paths. `compile_fn` is
+# `function(compilation_cppflags)`, performing the actual compile.
 .stanr_compile_with_pch_retry <- function(
   compile_fn,
   cppflags,
@@ -401,9 +335,9 @@
   pch_enabled,
   verbose = FALSE
 ) {
-  # `Rcpp::sourceCpp()` never propagates the compiler's actual diagnostics --
-  # it always raises a generic synthetic error -- so PCH staleness must be
-  # checked directly below rather than inferred from the error message.
+  # PCH staleness is checked directly below (file mtimes) rather than
+  # inferred from the compile error's message -- more robust than matching a
+  # compiler- and locale-dependent diagnostic string.
   tryCatch(
     compile_fn(cppflags),
     error = function(error) {

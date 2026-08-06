@@ -187,20 +187,23 @@ test_that("stan_model writes exactly one cache file next to stan_file", {
   mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
 
-  cache_file <- file.path(src_dir, ".model.stanrc")
+  cache_file <- file.path(src_dir, paste0(".model", .Platform$dynlib.ext))
   expect_true(file.exists(cache_file))
   contents <- setdiff(list.files(src_dir, all.files = TRUE), c(".", ".."))
-  expect_setequal(contents, c("model.stan", ".model.stanrc"))
+  expect_setequal(
+    contents,
+    c("model.stan", paste0(".model", .Platform$dynlib.ext))
+  )
 })
 
 test_that("stan_model caches to tempdir, not the working directory, for a code string", {
   code <- unique_stan_code()
-  before <- list.files(tempdir(), pattern = "[.]stanrc$")
+  before <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
 
   mod <- stan_model(code = code, precompiled_headers = FALSE)
   expect_true(mod$is_compiled())
 
-  after <- list.files(tempdir(), pattern = "[.]stanrc$")
+  after <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
   expect_gt(length(setdiff(after, before)), 0L)
 })
 
@@ -256,7 +259,7 @@ test_that("force_recompile forces a fresh compile and overwrites the single cach
   stan_file <- file.path(src_dir, "model.stan")
   writeLines(unique_stan_code(), stan_file)
   mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
-  cache_file <- file.path(src_dir, ".model.stanrc")
+  cache_file <- file.path(src_dir, paste0(".model", .Platform$dynlib.ext))
   expect_true(file.exists(cache_file))
   mtime_before <- file.mtime(cache_file)
   Sys.sleep(1)
@@ -275,7 +278,11 @@ test_that("force_recompile forces a fresh compile and overwrites the single cach
   expect_gt(file.mtime(cache_file), mtime_before)
   # Overwritten in place, not accumulated.
   expect_length(
-    list.files(src_dir, pattern = "[.]stanrc$", all.files = TRUE),
+    list.files(
+      src_dir,
+      pattern = paste0("\\", .Platform$dynlib.ext, "$"),
+      all.files = TRUE
+    ),
     1L
   )
 })
@@ -436,7 +443,7 @@ test_that("stan_model falls back to tempdir when stan_file's directory is unwrit
     "cannot make a directory unwritable in this environment (e.g. running as root)"
   )
 
-  before <- list.files(tempdir(), pattern = "[.]stanrc$")
+  before <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
   expect_no_warning(
     mod <- stan_model(stan_file = stan_file, precompiled_headers = FALSE)
   )
@@ -446,7 +453,7 @@ test_that("stan_model falls back to tempdir when stan_file's directory is unwrit
     setdiff(list.files(src_dir, all.files = TRUE), c(".", "..", "model.stan")),
     character()
   )
-  after <- list.files(tempdir(), pattern = "[.]stanrc$")
+  after <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
   expect_gt(length(setdiff(after, before)), 0L)
 })
 

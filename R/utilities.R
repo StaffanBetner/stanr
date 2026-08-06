@@ -22,15 +22,10 @@
 }
 
 # Parses `cpp_options` into an ordered list of `list(name, op, value)`
-# assignments, mirroring the semantics of lines in a Makevars file: a named
-# list element is an overriding (`=`) assignment, and so is an unnamed string
-# written as `"<NAME> = <value>"`; an unnamed string written as
-# `"<NAME> += <value>"` is an appending assignment. Entries are returned in
-# the order given -- a later assignment to the same name is meant to take
-# effect after an earlier one, exactly as repeated lines in a Makevars file
-# would (so, unlike a plain named list, the same name may legitimately appear
-# more than once, e.g. an overriding `CXXFLAGS = "-O3"` followed by an
-# appending `"CXXFLAGS += -Wall"`).
+# assignments; see `stan_model()`'s `@param cpp_options` for the supported
+# forms. Returned in input order (not deduplicated by name) since a later
+# assignment to the same name must take effect after an earlier one, as
+# with repeated lines in a Makevars file.
 .stanr_parse_cpp_options <- function(cpp_options) {
   if (!is.list(cpp_options)) {
     stop("`cpp_options` must be a list.", call. = FALSE)
@@ -91,6 +86,34 @@
       list(name = m[[2]], op = m[[3]], value = trimws(m[[4]]))
     }
   })
+}
+
+# Shared by every service method that takes `show_messages`/`show_exceptions`/
+# `opencl_ids` (all but `$diagnose()`): normalizes those flags, engages the
+# requested OpenCL device (if any), and -- when passed -- normalizes
+# `num_threads`/`refresh` too. Read via `missing()` rather than a `NULL`
+# default since `NULL` is itself a valid `num_threads` override.
+.stanr_common_service_flags <- function(
+  show_messages,
+  show_exceptions,
+  opencl_ids,
+  private,
+  num_threads,
+  refresh
+) {
+  show_messages <- .stanr_flag(show_messages, "show_messages")
+  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
+  if (!is.null(opencl_ids)) {
+    private$select_opencl(opencl_ids)
+  }
+  out <- list(show_messages = show_messages, show_exceptions = show_exceptions)
+  if (!missing(num_threads)) {
+    out$num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
+  }
+  if (!missing(refresh)) {
+    out$refresh <- .stanr_int(refresh, "refresh")
+  }
+  out
 }
 
 .stanr_seed <- function(seed) {
@@ -160,12 +183,8 @@
   )
 }
 
-#' Return the bundled Stan library version.
-#'
-#' Memoized for the life of the R session (single key, this function takes
-#' no arguments): the bundled header cannot change within a session.
-#'
-#' @noRd
+# Returns the bundled Stan library version. Memoized for the session: the
+# bundled header cannot change within a session.
 .stanr_stan_version <- function() {
   cached <- .stanr_memo$stan_version
   if (!is.null(cached)) {

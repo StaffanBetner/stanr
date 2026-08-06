@@ -13,3 +13,4 @@ lib
 inst/include
 src/sundials
 **.stanrc
+.posit

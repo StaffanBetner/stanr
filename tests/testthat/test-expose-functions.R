@@ -353,14 +353,14 @@ functions {
   real cache_reuse_add(real a, real b) { return a + b; }
 }
 "
-  before <- list.files(tempdir(), pattern = "[.]stanrc$")
+  before <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
 
   env1 <- stanr:::.compile_standalone_functions_environment(code)
-  after_first <- list.files(tempdir(), pattern = "[.]stanrc$")
+  after_first <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
   expect_length(setdiff(after_first, before), 1L)
 
   env2 <- stanr:::.compile_standalone_functions_environment(code)
-  after_second <- list.files(tempdir(), pattern = "[.]stanrc$")
+  after_second <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
   expect_identical(after_second, after_first)
 
   expect_equal(env1$cache_reuse_add(2, 3), 5)

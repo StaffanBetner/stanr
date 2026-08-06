@@ -1,11 +1,6 @@
-#' Return the (lazily created) QuickJSR context hosting `stanc.js`.
-#'
-#' Sourcing `stanc.js` is expensive (a 3.1 MB script) and is only needed by
-#' sessions that actually call into stanc, so the context is created on first
-#' use rather than at package load, then memoized for the life of the
-#' session.
-#'
-#' @noRd
+# The (lazily created) QuickJSR context hosting `stanc.js`. Sourcing it is
+# expensive (a 3.1 MB script) and only needed by sessions that actually call
+# into stanc, so it's created on first use, then memoized for the session.
 stanc_ctx <- function() {
   if (is.null(.stanr_memo$stanc_context)) {
     ctx <- QuickJSR::JSContext$new()
@@ -15,14 +10,9 @@ stanc_ctx <- function() {
   .stanr_memo$stanc_context
 }
 
-#' Resolve Stan `#include` directives
-#'
-#' @param model_code A Stan program as a single string.
-#' @param include_directories Character vector of directories to search, in order.
-#' @param include_stack Paths included while resolving the current program.
-#'
-#' @return The Stan program with matching include directives replaced by their contents.
-#' @noRd
+# Resolves Stan `#include` directives, replacing each with the contents of
+# the matching file from `include_directories` (searched in order).
+# `include_stack` tracks paths already included, to catch circular includes.
 resolve_stan_includes <- function(
   model_code,
   include_directories,
@@ -102,16 +92,9 @@ resolve_stan_includes <- function(
   paste(lines, collapse = "\n")
 }
 
-#' Validate `external_cpp` paths and read their contents
-#'
-#' Shared by `stanc()` and `.compile_stan_model_environment()` so both call
-#' sites validate and read `external_cpp` files identically.
-#'
-#' @param paths `NULL` or a character vector of file paths.
-#'
-#' @return A character vector of file contents (one element per path, in
-#'   order), or `character()` if `paths` is `NULL`.
-#' @noRd
+# Validates `external_cpp` paths and reads their contents (one element per
+# path, in order; `character()` if `paths` is `NULL`). Shared by `stanc()`
+# and `.compile_stan_model_environment()` so both validate/read identically.
 .stanr_external_cpp_contents <- function(paths) {
   if (is.null(paths)) {
     return(character())
@@ -241,17 +224,10 @@ stanc <- function(
   }
 }
 
-#' Extract variable metadata from Stan code using stanc info output
-#'
-#' @param model_code Stan model code as a single string.
-#' @param include_directories Character vector of directories to search for
-#'   Stan include files.
-#' @param allow_undefined Allow undefined functions.
-#'
-#' @return A named list with elements `data`, `parameters`,
-#'   `transformed_parameters`, and `generated_quantities`. Each element is a
-#'   named list of variables, where each variable has `type` and `dimensions`.
-#' @noRd
+# Extracts variable metadata from Stan code using stanc's info output.
+# Returns a named list with elements `data`, `parameters`,
+# `transformed_parameters`, and `generated_quantities`, each a named list of
+# variables with `type` and `dimensions`.
 model_variables <- function(
   model_code,
   include_directories = character(),
@@ -290,18 +266,8 @@ model_variables <- function(
   )]
 }
 
-#' Reformat Stan code using stanc's auto-formatter
-#'
-#' @param model_code Stan model code as a single string. Must not contain
-#'   unresolved `#include` directives.
-#' @param canonicalize `FALSE` (the default), `TRUE` to also canonicalize
-#'   deprecated syntax, or a character vector naming specific canonicalizations
-#'   (e.g. `"braces"`, `"parentheses"`).
-#' @param max_line_length Maximum output line width, or `NULL` for stanc's
-#'   default.
-#'
-#' @return The formatted Stan code as a single string.
-#' @noRd
+# Reformats Stan code (must not contain unresolved `#include` directives)
+# using stanc's auto-formatter, returning the result as a single string.
 stanc_format <- function(
   model_code,
   canonicalize = FALSE,

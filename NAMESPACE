@@ -3,7 +3,6 @@
 export(stan_model)
 export(stanc)
 importFrom(R6,R6Class)
-importFrom(Rcpp,sourceCpp)
 importFrom(RcppParallel,RcppParallelLibs)
 importFrom(jsonlite,fromJSON)
 importFrom(posterior,as_draws_df)

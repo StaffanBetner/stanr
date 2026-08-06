@@ -140,8 +140,18 @@ stan_model_sample_impl <- function(
   save_warmup <- .stanr_flag(save_warmup, "save_warmup")
   adapt_engaged <- .stanr_flag(adapt_engaged, "adapt_engaged")
   fixed_param <- .stanr_flag(fixed_param, "fixed_param")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
+  common <- .stanr_common_service_flags(
+    show_messages,
+    show_exceptions,
+    opencl_ids,
+    private,
+    num_threads,
+    refresh
+  )
+  show_messages <- common$show_messages
+  show_exceptions <- common$show_exceptions
+  num_threads <- common$num_threads
+  refresh <- common$refresh
   if (is.null(diagnostics) || identical(diagnostics, "")) {
     diagnostics <- character()
   } else {
@@ -157,9 +167,6 @@ stan_model_sample_impl <- function(
       call. = FALSE
     )
     save_warmup <- FALSE
-  }
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
   }
   if (save_latent_dynamics) {
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
@@ -205,7 +212,6 @@ stan_model_sample_impl <- function(
   ids <- .stanr_validate_chains(chains, chain_ids)
   chains <- ids$chains
   chain_ids <- ids$chain_ids
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
   iter_warmup <- .stanr_int(iter_warmup, "iter_warmup")
   iter_sampling <- .stanr_int(iter_sampling, "iter_sampling")
   thin <- .stanr_int(thin, "thin", min = 1L)
@@ -230,7 +236,6 @@ stan_model_sample_impl <- function(
     metric = metric,
     chains = chains
   )
-  refresh <- .stanr_int(refresh, "refresh")
   max_treedepth <- .stanr_int(max_treedepth, "max_treedepth")
   init_buffer <- .stanr_int(init_buffer, "init_buffer")
   term_buffer <- .stanr_int(term_buffer, "term_buffer")

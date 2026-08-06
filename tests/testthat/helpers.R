@@ -1,7 +1,7 @@
 # Compiled models now cache to a single file next to their `stan_file` (see
 # `.stanr_build_cache_file()`, R/stan_model.R), so tests must never compile
 # directly from `test_path("test-models", ...)`  -- that would write a
-# `.stanrc` sibling into the checked-in fixtures tree. `test_stan_file()`
+# `.so`/`.dll` sibling into the checked-in fixtures tree. `test_stan_file()`
 # copies the whole fixtures tree into a session-scratch tempdir once (so
 # `#include`/`include_paths`-relative lookups inside a copied `.stan` file
 # still resolve against copied siblings) and every `stan_file =` test call

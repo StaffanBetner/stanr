@@ -109,18 +109,18 @@ what gets exposed and how.}
 \value{
 A \code{\link{StanModel}} object.
 
-The compiled model is cached persistently on disk as a single file next
-to \code{stan_file} (named after it, e.g. \code{mymodel.stan} gets a sibling
-\code{.mymodel.stanrc}), or under \code{\link[=tempdir]{tempdir()}} when the model was created from
-a \code{code} string, or when \code{stan_file}'s directory isn't writable. The
-cache file embeds a hash of the generated C++, so it's reused across R
-sessions as long as the Stan program, \code{include_paths}, \code{external_cpp},
-and installed stanr/Stan versions are unchanged, and is silently
-recompiled and overwritten otherwise -- there is no separate cache-clearing
-step. On a cache hit, the Stan-to-C++ transpiler is skipped entirely, so
-any transpiler warnings (e.g. from pedantic mode or deprecated syntax)
-are only surfaced the first time a given model is compiled, not on
-subsequent cache hits.
+The compiled model is cached persistently on disk as the compiled shared
+library itself, next to \code{stan_file} (named after it, e.g. \code{mymodel.stan}
+gets a sibling \code{.mymodel.so}/\code{.mymodel.dll}), or under \code{\link[=tempdir]{tempdir()}} when
+the model was created from a \code{code} string, or when \code{stan_file}'s
+directory isn't writable. The library embeds a hash of the generated
+C++, so it's reused across R sessions as long as the Stan program,
+\code{include_paths}, \code{external_cpp}, and installed stanr/Stan versions are
+unchanged, and is silently recompiled and overwritten otherwise --
+there is no separate cache-clearing step. On a cache hit, the
+Stan-to-C++ transpiler is skipped entirely, so any transpiler warnings
+(e.g. from pedantic mode or deprecated syntax) are only surfaced the
+first time a given model is compiled, not on subsequent cache hits.
 }
 \description{
 Create a new \code{\link{StanModel}} object from a Stan program file or

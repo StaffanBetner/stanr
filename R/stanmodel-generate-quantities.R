@@ -36,13 +36,16 @@ stan_model_generate_quantities_impl <- function(
   show_messages = TRUE,
   show_exceptions = TRUE
 ) {
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
-
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
+  common <- .stanr_common_service_flags(
+    show_messages,
+    show_exceptions,
+    opencl_ids,
+    private,
+    num_threads
+  )
+  show_messages <- common$show_messages
+  show_exceptions <- common$show_exceptions
+  num_threads <- common$num_threads
 
   input <- if (inherits(fitted_params, "StanFit")) {
     fitted_params$draws(format = "draws_matrix")

@@ -63,14 +63,19 @@ stan_model_pathfinder_impl <- function(
   save_single_paths <- .stanr_flag(save_single_paths, "save_single_paths")
   psis_resample <- .stanr_flag(psis_resample, "psis_resample")
   calculate_lp <- .stanr_flag(calculate_lp, "calculate_lp")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
+  common <- .stanr_common_service_flags(
+    show_messages,
+    show_exceptions,
+    opencl_ids,
+    private,
+    num_threads,
+    refresh
+  )
+  show_messages <- common$show_messages
+  show_exceptions <- common$show_exceptions
+  num_threads <- common$num_threads
+  refresh <- common$refresh
 
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
   num_paths <- .stanr_int(num_paths, "num_paths", min = 1L)
   single_path_draws <- .stanr_int(
     single_path_draws,

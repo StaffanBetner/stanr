@@ -63,11 +63,18 @@ stan_model_variational_impl <- function(
     "save_latent_dynamics"
   )
   adapt_engaged <- .stanr_flag(adapt_engaged, "adapt_engaged")
-  show_messages <- .stanr_flag(show_messages, "show_messages")
-  show_exceptions <- .stanr_flag(show_exceptions, "show_exceptions")
-  if (!is.null(opencl_ids)) {
-    private$select_opencl(opencl_ids)
-  }
+  common <- .stanr_common_service_flags(
+    show_messages,
+    show_exceptions,
+    opencl_ids,
+    private,
+    num_threads,
+    refresh
+  )
+  show_messages <- common$show_messages
+  show_exceptions <- common$show_exceptions
+  num_threads <- common$num_threads
+  refresh <- common$refresh
   if (save_latent_dynamics) {
     stop("`save_latent_dynamics` is not yet supported.", call. = FALSE)
   }
@@ -78,8 +85,6 @@ stan_model_variational_impl <- function(
     )
   }
 
-  num_threads <- .stanr_int(num_threads %||% 1L, "num_threads", min = 1L)
-  refresh <- .stanr_int(refresh, "refresh")
   iter <- .stanr_int(iter, "iter")
   grad_samples <- .stanr_int(grad_samples, "grad_samples")
   elbo_samples <- .stanr_int(elbo_samples, "elbo_samples")

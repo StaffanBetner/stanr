@@ -667,9 +667,3 @@ NULL
 #' @seealso [`$expose_stan_functions()`][model-method-expose-stan-functions]
 #'
 NULL
-
-# Shared lp_approx for approximation classes -----------------------------------
-
-fit_lp_approx <- function() {
-  as.numeric(self$draws(variables = "lp_approx__", format = "draws_matrix"))
-}

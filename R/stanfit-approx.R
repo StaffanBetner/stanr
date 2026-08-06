@@ -1,3 +1,9 @@
+# Shared by StanLaplace/StanVB/StanPathfinder, all of which report an
+# approximate (rather than exact) log density.
+.stanr_lp_approx_impl <- function() {
+  as.numeric(self$draws(variables = "lp_approx__", format = "draws_matrix"))
+}
+
 # StanLaplace class ------------------------------------------------------------
 
 #' StanLaplace objects
@@ -47,7 +53,7 @@ StanLaplace <- R6Class(
 
     mode = function() private$mode_,
 
-    lp_approx = fit_lp_approx
+    lp_approx = .stanr_lp_approx_impl
   ),
   private = list(mode_ = NULL),
   cloneable = FALSE
@@ -131,7 +137,7 @@ StanVB <- R6Class(
       )
     },
 
-    lp_approx = fit_lp_approx
+    lp_approx = .stanr_lp_approx_impl
   ),
   cloneable = FALSE
 )
@@ -180,7 +186,7 @@ StanPathfinder <- R6Class(
       )
     },
 
-    lp_approx = fit_lp_approx
+    lp_approx = .stanr_lp_approx_impl
   ),
   cloneable = FALSE
 )

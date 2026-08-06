@@ -1,17 +1,17 @@
 Package: stanr
 Title: A Modern R Interface for Stan
-Version: 0.1.4
+Version: 0.1.5
 Authors@R:
   c(
     person(given = c("Andrew", "R."), family = "Johnson", role = c("aut", "cre"),
             email = "andrew.johnson@arjohnsonau.com",
             comment = c(ORCID = "0000-0001-7000-8065")),
-  person("Stan Development Team", role = "cph",
-          comment = "Stan sources and headers"),
-  person("Walnutpie Developers", role = "cph",
-          comment = "Walnutpie sources and headers"),
-  person("Lawrence Livermore National Security", role = "cph",
-          comment = "SUNDIALS sources and headers")
+    person("Stan Development Team", role = "cph",
+            comment = "Stan sources and headers"),
+    person("Walnutpie Developers", role = "cph",
+            comment = "Walnutpie sources and headers"),
+    person("Lawrence Livermore National Security", role = "cph",
+            comment = "SUNDIALS sources and headers")
   )
 Description: A modern, simpler R interface for Stan.
 License: BSD_3_clause + file LICENSE
@@ -38,34 +38,11 @@ Suggests:
     loo,
     RcppEigen,
     BH
-Config/testthat/edition: 3
 Encoding: UTF-8
-Collate:
-    "stanr-package.R"
-    "utilities.R"
-    "stanmodel-sample.R"
-    "stanmodel-optimize.R"
-    "stanmodel-laplace.R"
-    "stanmodel-variational.R"
-    "stanmodel-pathfinder.R"
-    "stanmodel-generate-quantities.R"
-    "stanmodel-diagnose.R"
-    "pch.R"
-    "expose.R"
-    "stanc.R"
-    "stan_model.R"
-    "classes-model.R"
-    "classes-fit.R"
-    "fit-mcmc.R"
-    "fit-mle.R"
-    "fit-approx.R"
-    "fit-gq.R"
-    "fit-diagnose.R"
-    "diagnostics.R"
-    "zzz.R"
 Roxygen: list(markdown = TRUE)
-Config/build/compilation-database: true
-Config/roxygen2/version: 8.0.0
 NeedsCompilation: yes
 SystemRequirements: GNU make, C++20
+Config/testthat/edition: 3
 Config/testthat/parallel: true
+Config/build/compilation-database: true
+Config/roxygen2/version: 8.0.0

@@ -72,11 +72,11 @@ test_that(".stanr_r_config() memoizes per variable and routes through .stanr_rcm
 })
 
 
-# The compile-failure retry gate in .compile_stan_model_environment()
-# (R/stan_model.R) should only rebuild the PCH when there's evidence it's
-# stale, not on every sourceCpp() failure. These tests fake out the actual
-# subprocess compiles (via .stanr_system2, as above) *and* Rcpp::sourceCpp()
-# itself, so no real (30-60s) PCH or model compile ever runs.
+# The compile-failure retry gate in .stanr_compile_with_pch_retry()
+# (R/pch.R) should only rebuild the PCH when there's evidence it's stale,
+# not on every compile failure. These tests call it directly with a
+# scripted `compile_fn`, faking out the actual subprocess compiles (via
+# .stanr_system2, as above), so no real PCH or model compile ever runs.
 
 # A minimal .stanr_rcmd mock shared by both tests below: it answers the
 # `R CMD config CXX20` probe (used by `.stanr_compiler_identity()` to find
@@ -130,25 +130,19 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
     .stanr_system2 = mock_pch_system2(pch_build_calls)
   )
 
-  sourceCpp_calls <- 0L
-  testthat::local_mocked_bindings(
-    sourceCpp = function(...) {
-      sourceCpp_calls <<- sourceCpp_calls + 1L
-      stop("simulated genuine model compile error")
-    },
-    .package = "Rcpp"
-  )
+  base_cppflags <- stanr:::.stanr_base_cppflags()
+  cppflags <- paste(stanr:::.stanr_pch_flags(base_cppflags), base_cppflags)
 
-  # unique_stan_code() (helpers.R): this always errors before reaching the
-  # compile memo/cache write, but must still be unique so an *earlier* test
-  # elsewhere in the suite that happened to memoize this exact code (with a
-  # real, non-mocked compile) can't short-circuit this call before it ever
-  # reaches the mocked sourceCpp() below.
-  code <- unique_stan_code()
+  compile_calls <- 0L
   expect_error(
-    stanr:::.compile_stan_model_environment(
-      code = code,
-      model_name = "pch_fresh_test"
+    stanr:::.stanr_compile_with_pch_retry(
+      function(compilation_cppflags) {
+        compile_calls <<- compile_calls + 1L
+        stop("simulated genuine model compile error")
+      },
+      cppflags,
+      base_cppflags,
+      pch_enabled = TRUE
     ),
     "simulated genuine model compile error"
   )
@@ -156,7 +150,7 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
   # attempt -- but no rebuild-and-retry, because the PCH that build just
   # produced is not stale relative to its dependency headers.
   expect_equal(pch_build_calls$n, 1L)
-  expect_equal(sourceCpp_calls, 1L)
+  expect_equal(compile_calls, 1L)
 })
 
 test_that("compile failure after model_pch.hpp becomes newer than the PCH triggers exactly one rebuild-and-retry", {
@@ -183,46 +177,41 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
     .stanr_system2 = mock_pch_system2(pch_build_calls)
   )
 
-  sourceCpp_calls <- 0L
-  testthat::local_mocked_bindings(
-    sourceCpp = function(...) {
-      sourceCpp_calls <<- sourceCpp_calls + 1L
-      # Fail only on the 2nd invocation (call B's primary attempt below);
-      # the 1st (call A, establishing a fresh PCH) and 3rd (call B's
-      # rebuild-and-retry) both "succeed".
-      if (sourceCpp_calls == 2L) {
-        stop("simulated genuine model compile error")
-      }
-      invisible(NULL)
-    },
-    .package = "Rcpp"
-  )
+  base_cppflags <- stanr:::.stanr_base_cppflags()
+  cppflags <- paste(stanr:::.stanr_pch_flags(base_cppflags), base_cppflags)
+  compile_calls <- 0L
 
   # Call A: establishes a fresh, on-disk PCH via a successful compile.
-  stanr:::.compile_stan_model_environment(
-    code = unique_stan_code(),
-    model_name = "pch_stale_test"
+  stanr:::.stanr_compile_with_pch_retry(
+    function(compilation_cppflags) compile_calls <<- compile_calls + 1L,
+    cppflags,
+    base_cppflags,
+    pch_enabled = TRUE
   )
   expect_equal(pch_build_calls$n, 1L)
-  expect_equal(sourceCpp_calls, 1L)
+  expect_equal(compile_calls, 1L)
 
   # Simulate model_pch.hpp changing after the PCH above was built (e.g. a
   # fresh `R CMD INSTALL` re-copying inst/include/) without anything else
   # (cppflags, stanr version, ...) changing.
   Sys.setFileTime(header, Sys.time() + 10)
 
-  # Call B: deliberately *different* code from call A (so it can't be served
-  # by call A's in-session compile memo, which is keyed on model_hash i.e.
-  # code content -- see `.stanr_env_memo()`, R/stan_model.R) but the *same*
-  # memoized PCH flags, since PCH staleness is tracked independently of any
-  # particular model (keyed only on cppflags -- see `.stanr_pch_current()`).
-  # The PCH on disk is now stale relative to model_pch.hpp's bumped mtime, so
-  # the compile-failure handler should rebuild it once and retry once.
-  stanr:::.compile_stan_model_environment(
-    code = unique_stan_code(),
-    model_name = "pch_stale_test"
+  # Call B: fails on its primary attempt (the 2nd compile_fn call overall,
+  # against the now-stale PCH), succeeds on the rebuild-and-retry (3rd) --
+  # PCH staleness is tracked independently of any particular model, keyed
+  # only on cppflags (see `.stanr_pch_current()`).
+  stanr:::.stanr_compile_with_pch_retry(
+    function(compilation_cppflags) {
+      compile_calls <<- compile_calls + 1L
+      if (compile_calls == 2L) {
+        stop("simulated genuine model compile error")
+      }
+    },
+    cppflags,
+    base_cppflags,
+    pch_enabled = TRUE
   )
-  expect_equal(sourceCpp_calls, 3L)
+  expect_equal(compile_calls, 3L)
   expect_equal(pch_build_calls$n, 2L)
 })
 
