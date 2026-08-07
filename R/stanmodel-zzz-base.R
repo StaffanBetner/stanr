@@ -235,17 +235,24 @@ StanModel <- R6Class(
         precompiled_headers = private$precompiled_headers_,
         force_recompile = force_recompile,
         use_opencl = private$use_opencl_,
-        cpp_options = private$cpp_options_,
-        standalone_functions = compile_standalone
+        cpp_options = private$cpp_options_
       )
       if (compile_standalone) {
         # cmdstanr parity: exposes without a separate $expose_stan_functions()
-        # call. Runs on every $compile(), not just the first, so a
-        # force_recompile rebuilds from the fresh env instead of leaving
-        # function objects pointing at stale/freed symbols.
-        private$functions_compiled_env_ <- private$compiled_env_
+        # call, via the same sourceCpp-based functions path. Runs on every
+        # $compile(), not just the first, so a force_recompile rebuilds from
+        # the fresh env instead of leaving function objects pointing at
+        # stale/freed symbols.
+        private$functions_compiled_env_ <- .compile_standalone_functions_environment(
+          code = private$resolved_code(),
+          stan_file = private$stan_file_,
+          external_cpp = private$external_cpp_,
+          cpp_options = private$cpp_options_,
+          verbose = !quiet,
+          precompiled_headers = private$precompiled_headers_
+        )
         .stanr_build_functions_env(
-          private$compiled_env_,
+          private$functions_compiled_env_,
           self$functions,
           global = FALSE
         )
@@ -343,24 +350,17 @@ StanModel <- R6Class(
       verbose <- .stanr_flag(verbose, "verbose")
 
       if (is.null(private$functions_compiled_env_)) {
-        if (
-          !is.null(private$compiled_env_) &&
-            !is.null(private$compiled_env_$stanr_exposed_functions)
-        ) {
-          private$functions_compiled_env_ <- private$compiled_env_
-        } else {
-          # Not routed through `private$ensure_compiled()`/`self$native_function()`:
-          # both would trigger a full `self$compile()`, but exposing functions
-          # must work on a `compile = FALSE` model without compiling it.
-          private$functions_compiled_env_ <- .compile_standalone_functions_environment(
-            code = private$resolved_code(),
-            stan_file = private$stan_file_,
-            external_cpp = private$external_cpp_,
-            cpp_options = private$cpp_options_,
-            verbose = verbose,
-            precompiled_headers = private$precompiled_headers_
-          )
-        }
+        # Not routed through `private$ensure_compiled()`/`self$native_function()`:
+        # both would trigger a full `self$compile()`, but exposing functions
+        # must work on a `compile = FALSE` model without compiling it.
+        private$functions_compiled_env_ <- .compile_standalone_functions_environment(
+          code = private$resolved_code(),
+          stan_file = private$stan_file_,
+          external_cpp = private$external_cpp_,
+          cpp_options = private$cpp_options_,
+          verbose = verbose,
+          precompiled_headers = private$precompiled_headers_
+        )
       }
 
       .stanr_build_functions_env(

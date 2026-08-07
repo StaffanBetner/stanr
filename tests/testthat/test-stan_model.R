@@ -173,11 +173,10 @@ test_that(".stanr_apply_makevars overrides on '=' and appends on '+='", {
 # had to: a live fit's mapped library is never touched by a later recompile.
 #
 # `model_hash` is keyed on Stan code content alone (not on `stan_file`'s
-# path), and both the on-disk cache and the in-session memo (`.stanr_memo`)
-# persist for the whole test run -- so any two tests using textually
-# identical Stan code would otherwise share a cache entry. Each test below
-# therefore uses `unique_stan_code()` (helpers.R) to keep its code, and
-# hence its hash, unique to that test.
+# path), and the on-disk cache persists for the whole test run -- so any two
+# tests using textually identical Stan code would otherwise share a cache
+# entry. Each test below therefore uses `unique_stan_code()` (helpers.R) to
+# keep its code, and hence its hash, unique to that test.
 
 test_that("stan_model writes exactly one cache file next to stan_file", {
   src_dir <- withr::local_tempdir()

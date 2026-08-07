@@ -13,66 +13,13 @@
   base
 }
 
-# Runs Rcpp::compileAttributes() (sourceCpp()'s first step) on a throwaway
-# package skeleton wrapping `cpp_file`, then appends the generated
-# RcppExports.cpp to it as the returned compile unit. `.registration = TRUE`
-# makes the loader call each wrapper via a plain `_stanrbuild_fn` symbol
-# lookup rather than `PACKAGE = "stanrbuild"` (which could never resolve);
-# prepending a getNativeSymbolInfo() binding per symbol lets that loader run
-# against whatever `dll` is supplied at eval time.
-.stanr_harvest_exports <- function(cpp_file, build_dir) {
-  pkg_dir <- file.path(build_dir, "stanrbuild")
-  dir.create(file.path(pkg_dir, "src"), recursive = TRUE)
-  # LinkingTo lists every package the TU names in `Rcpp::depends`
-  # attributes: compileAttributes() warns about any it can't find there.
-  writeLines(
-    c("Package: stanrbuild", "LinkingTo: Rcpp, RcppEigen, BH, RcppParallel"),
-    file.path(pkg_dir, "DESCRIPTION")
-  )
-  writeLines(
-    "useDynLib(stanrbuild, .registration = TRUE)",
-    file.path(pkg_dir, "NAMESPACE")
-  )
-  harvested <- file.path(pkg_dir, "src", basename(cpp_file))
-  file.copy(cpp_file, harvested)
-  Rcpp::compileAttributes(pkg_dir)
-
-  loader <- readLines(file.path(pkg_dir, "R", "RcppExports.R"))
-  syms <- unique(unlist(regmatches(
-    loader,
-    gregexpr("`_stanrbuild_[A-Za-z0-9_]+`", loader)
-  )))
-  syms <- gsub("`", "", syms)
-  bindings <- sprintf(
-    '`%s` <- getNativeSymbolInfo("%s", dll)$address',
-    syms,
-    syms
-  )
-
-  file.append(harvested, file.path(pkg_dir, "src", "RcppExports.cpp"))
-  list(
-    cpp_file = harvested,
-    loader = c(bindings, loader),
-    exports = sub("^_stanrbuild_", "", syms)
-  )
-}
-
-# Appends a plain C entry point returning the cache key + loader text, so a
-# compiled .so is self-describing (no sidecar file). Not
-# `// [[Rcpp::export]]`'d -- added after harvesting, so it's reachable only
-# via getNativeSymbolInfo("stanr_build_info", dll).
-.stanr_append_build_info <- function(cpp_file, key_hash, loader) {
-  loader_text <- paste(loader, collapse = "\n")
-  # Can't occur in loader text stanr itself assembled, but a loud stop here
-  # beats an inscrutable compiler error if that ever changes.
-  stopifnot(!grepl(')stanr"', loader_text, fixed = TRUE))
+# Appends a plain C entry point returning the cache key, so a compiled .so
+# is self-describing (no sidecar file). Reachable only via
+# getNativeSymbolInfo("stanr_build_key", dll).
+.stanr_append_build_key <- function(cpp_file, key_hash) {
   cat(
-    "\nextern \"C\" SEXP stanr_build_info(void) {\n",
-    "  SEXP out = PROTECT(Rf_allocVector(STRSXP, 2));\n",
-    "  SET_STRING_ELT(out, 0, Rf_mkChar(\"", key_hash, "\"));\n",
-    "  SET_STRING_ELT(out, 1, Rf_mkChar(R\"stanr(", loader_text, ")stanr\"));\n",
-    "  UNPROTECT(1);\n",
-    "  return out;\n",
+    "\nextern \"C\" SEXP stanr_build_key(void) {\n",
+    "  return Rf_ScalarString(Rf_mkChar(\"", key_hash, "\"));\n",
     "}\n",
     file = cpp_file,
     append = TRUE,
@@ -80,7 +27,7 @@
   )
 }
 
-# R CMD SHLIB on the harvested TU, run from its own directory with a
+# R CMD SHLIB on the model TU, run from its own directory with a
 # relative filename (mirroring sourceCpp()): GNU make chokes on paths with
 # spaces (e.g. a Windows user profile), which an absolute path risks.
 .stanr_compile_shlib <- function(cpp_file, verbose) {
@@ -111,9 +58,9 @@
 }
 
 # Shared by both compile paths. `assignment = "+="` appends after
-# Makeconf's own CXXFLAGS/CXX20FLAGS, so -O3 -g0 wins last-flag-wins
-# precedence over Makeconf's -g -O2 (a no-op for the other variables, which
-# Makeconf doesn't set).
+# Makeconf's own CXX20FLAGS, so -O3 -g0 wins last-flag-wins precedence over
+# Makeconf's -g -O2. With `USE_CXX20=1`, `R CMD SHLIB` uses CXX20FLAGS (not
+# CXXFLAGS), so that's the only flag override needed.
 .stanr_compile <- function(
   cpp_file,
   cppflags,
@@ -131,7 +78,6 @@
             collapse = " "
           ),
           PKG_LIBS = libs,
-          CXXFLAGS = .stanr_opt_flags(),
           CXX20FLAGS = .stanr_opt_flags()
         ),
         extra_assignments
@@ -161,7 +107,9 @@
 }
 
 # Shared by every compile path (model TU, functions-only TU): both need
-# RcppEigen/BH on top of base R's compiler toolchain.
+# RcppEigen/BH on top of base R's compiler toolchain. Rcpp is loaded too:
+# the model TU uses Rcpp types (XPtr, List, ...) whose callables are only
+# registered once the Rcpp namespace is loaded.
 .stanr_require_compile_packages <- function() {
   for (pkg in c("RcppEigen", "BH")) {
     if (!nzchar(system.file(package = pkg))) {
@@ -173,6 +121,7 @@
       )
     }
   }
+  loadNamespace("Rcpp")
 }
 
 # Non-OpenCL cppflags shared by every compile path; a model compile appends
@@ -252,7 +201,7 @@
 # than filename -- or under `tempdir()` (named by `key_hash`) when there's no
 # source path or its directory isn't writable. The cache file *is* the
 # compiled library; its own hash lives inside it (see
-# `.stanr_append_build_info()`).
+# `.stanr_append_build_key()`).
 .stanr_build_cache_file <- function(stan_file, key_hash, suffix = "") {
   if (length(stan_file)) {
     dir <- dirname(stan_file)
@@ -281,15 +230,19 @@
   )
 }
 
-# dyn.load()s `so_file`, reads the embedded build info (see
-# `.stanr_append_build_info()`), and binds its exports into `env`. Any
+# dyn.load()s `so_file`, reads the embedded build key (see
+# `.stanr_append_build_key()`), and binds its exports into `env`. Any
 # error propagates -- `.stanr_restore_build_cache()` treats it as a miss.
 .stanr_load_build <- function(so_file, env) {
-  env$dll <- dyn.load(so_file)
-  info <- .Call(getNativeSymbolInfo("stanr_build_info", env$dll)$address)
-  eval(parse(text = info[[2]]), envir = env)
-  rm("dll", envir = env)
-  info[[1]]
+  dll <- dyn.load(so_file)
+  for (name in .stanr_model_support_exports) {
+    sym <- getNativeSymbolInfo(name, dll)
+    env[[name]] <- local({
+      addr <- sym$address
+      function(...) .Call(addr, ...)
+    })
+  }
+  .Call(getNativeSymbolInfo("stanr_build_key", dll)$address)
 }
 
 # Restores the cached library into a fresh location and binds its exports.
@@ -327,7 +280,7 @@
   .stanr_memo$compiled_envs
 }
 
-# Kept in sync by hand with the `// [[Rcpp::export]]` function names in
+# Kept in sync by hand with the `extern "C"` function names in
 # inst/stan_model.cpp -- reserved so a combined-TU expose can't silently
 # shadow one of them.
 .stanr_model_support_exports <- c(
@@ -360,8 +313,7 @@
   precompiled_headers = TRUE,
   force_recompile = FALSE,
   use_opencl = FALSE,
-  cpp_options = list(),
-  standalone_functions = FALSE
+  cpp_options = list()
 ) {
   .stanr_require_compile_packages()
 
@@ -373,37 +325,14 @@
   # external_cpp is hashed by content, not path: stanc splices file contents
   # into the generated C++, so the hash must depend on content, not location.
   external_cpp_contents <- .stanr_external_cpp_contents(external_cpp)
-  # OPENCL_LIBS is consumed for link flags separately from the other
-  # `cpp_options` assignments (avoiding double-applying it), and pinned to
-  # `""` when OpenCL is off so it can't perturb the cache key.
   cpp_option_assignments <- .stanr_parse_cpp_options(cpp_options)
-  is_opencl_libs <- vapply(
-    cpp_option_assignments,
-    function(a) identical(a$name, "OPENCL_LIBS"),
-    logical(1)
-  )
-  opencl_assignments <- cpp_option_assignments[is_opencl_libs]
-  extra_assignments <- cpp_option_assignments[!is_opencl_libs]
-  opencl_libs <- if (use_opencl) {
-    opencl_default <- if (Sys.info()[["sysname"]] == "Darwin") {
-      "-framework OpenCL"
-    } else {
-      "-lOpenCL"
-    }
-    .stanr_apply_makevars(
-      c(OPENCL_LIBS = opencl_default),
-      opencl_assignments
-    )[["OPENCL_LIBS"]]
-  } else {
-    ""
-  }
+  extra_assignments <- cpp_option_assignments
   # R.version$platform and compiler identity are included so an in-place
   # toolchain upgrade still produces a new cache entry, rather than reusing
   # a .so built by a compiler no longer on this machine.
   model_hash <- digest::digest(
     c(
       code,
-      as.character(standalone_functions),
       external_cpp_contents,
       model_support,
       as.character(utils::packageVersion("stanr")),
@@ -411,7 +340,6 @@
       R.version$platform,
       .stanr_compiler_identity(),
       as.character(use_opencl),
-      opencl_libs,
       .stanr_cpp_options_hash_component(extra_assignments)
     ),
     algo = "xxhash64"
@@ -441,58 +369,9 @@
     external_cpp = external_cpp,
     use_opencl = use_opencl
   )
-  if (standalone_functions) {
-    # external_cpp is already in `cpp_code` (prepended by the model stanc
-    # call above), so it's omitted here to avoid duplicating it verbatim.
-    # allow_undefined is set explicitly since stanc()'s own inference only
-    # fires when `external_cpp` is passed directly.
-    functions_out <- stanc(
-      code,
-      standalone_functions = TRUE,
-      use_opencl = use_opencl,
-      allow_undefined = length(external_cpp) > 0
-    )
-    processed <- .stanr_process_standalone_cpp(
-      functions_out,
-      c(
-        .stanr_model_support_exports,
-        "stanr_exposed_functions",
-        "stanr_rng_set_seed"
-      )
-    )
-    wrapper_section <- processed$wrapper_section
-    if (length(external_cpp) > 0) {
-      # stanc's wrapper calls `model_namespace::<fn>(...)`, which only
-      # resolves for ordinary Stan functions -- an external_cpp definition
-      # sits at file scope, before `model_namespace` opens, so a qualified
-      # call to it would fail to link. A function's first occurrence in
-      # `cpp_code` tells the two apart (before vs. inside the namespace);
-      # unqualifying is safe either way, since the model's own generated
-      # code already calls these functions unqualified too.
-      namespace_pos <- regexpr(
-        "namespace model_namespace",
-        cpp_code,
-        fixed = TRUE
-      )[[1]]
-      for (fn_name in processed$functions$name) {
-        first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), cpp_code)[[1]]
-        if (first_pos > 0 && first_pos < namespace_pos) {
-          wrapper_section <- gsub(
-            paste0("model_namespace::", fn_name, "("),
-            paste0(fn_name, "("),
-            wrapper_section,
-            fixed = TRUE
-          )
-        }
-      }
-    }
-    writeLines(c(cpp_code, model_support, wrapper_section), cpp_file)
-  } else {
-    writeLines(c(cpp_code, model_support), cpp_file)
-  }
+  writeLines(c(cpp_code, model_support), cpp_file)
 
-  harvest <- .stanr_harvest_exports(cpp_file, build_dir)
-  .stanr_append_build_info(harvest$cpp_file, model_hash, harvest$loader)
+  .stanr_append_build_key(cpp_file, model_hash)
 
   cppflags <- .stanr_base_cppflags()
   if (use_opencl) {
@@ -535,12 +414,17 @@
   # the model solely through the stan::model::model_base virtual interface.
   libs <- paste(shQuote(runtime_archive), tbb_libs)
   if (use_opencl) {
-    libs <- paste(libs, opencl_libs)
+    opencl_default <- if (Sys.info()[["sysname"]] == "Darwin") {
+      "-framework OpenCL"
+    } else {
+      "-lOpenCL"
+    }
+    libs <- paste(libs, opencl_default)
   }
 
   compile_model <- function(compilation_cppflags) {
     .stanr_compile(
-      cpp_file = harvest$cpp_file,
+      cpp_file = cpp_file,
       cppflags = compilation_cppflags,
       libs = libs,
       extra_assignments = extra_assignments,
@@ -607,10 +491,7 @@
 #'
 #'   Entries are applied in list order, so the same name may appear more
 #'   than once, e.g. `list(CXXFLAGS = "-O3", "CXXFLAGS += -Wall")` first
-#'   overrides `CXXFLAGS`, then appends to it. `OPENCL_LIBS` is a special
-#'   name: overriding or appending to it changes the OpenCL link flags used
-#'   when `use_opencl = TRUE` -- see `use_opencl` below -- rather than a
-#'   real Makevars variable.
+#'   overrides `CXXFLAGS`, then appends to it.
 #' @param stanc_options (list) Stan-to-C++ transpiler options. Not yet supported.
 #' @param force_recompile (logical) Should the model be recompiled even if it
 #'   has not been modified? The default is `FALSE`, but can be set via the
@@ -632,14 +513,8 @@
 #'   methods (e.g. [`$sample()`][model-method-sample]), not by this argument;
 #'   `opencl_ids = NULL` (the default there) means `select_opencl_device()`
 #'   is simply never called, so the platform/device baked in at compile time
-#'   (0/0) is used. The library used to link OpenCL support can be overridden
-#'   via `cpp_options = list(OPENCL_LIBS = ...)` -- the default is
-#'   `"-framework OpenCL"` on macOS and `"-lOpenCL"` elsewhere. This override
-#'   is particularly relevant on Apple Silicon: the system OpenCL framework
-#'   exposes no double-precision (`fp64`) device there, and Stan requires
-#'   doubles, so real OpenCL testing on Apple Silicon requires an
-#'   OpenCL implementation with `fp64` support (e.g. POCL) and pointing
-#'   `OPENCL_LIBS` at its ICD loader instead of the system framework.
+#'   (0/0) is used. The default OpenCL link flags are `"-framework OpenCL"`
+#'   on macOS and `"-lOpenCL"` elsewhere.
 #'
 #' @return A [`StanModel`] object.
 #'

@@ -13,8 +13,8 @@ test_that("a cold-cache compile emits no warnings and uses a PCH", {
   expect_true(mod$is_compiled())
   pch_flags <- stanr:::.stanr_pch_flags(stanr:::.stanr_base_cppflags())
   expect_true(nzchar(pch_flags))
-  pch_path <- stanr:::.stanr_pch_current(stanr:::.stanr_base_cppflags())
-  expect_false(is.na(pch_path))
+  # The returned flags name a real, on-disk PCH.
+  pch_path <- sub("^.*-include-pch ['\"]?([^'\"]+).*$", "\\1", pch_flags)
   expect_true(file.exists(pch_path))
 })
 

@@ -1,140 +1,178 @@
-#include <Rcpp.h>
 #include <stan/model/model_base.hpp>
 #include <stanr/r_data_context.hpp>
 #include <stanr/model_methods.hpp>
+#include <Rcpp.h>
+#include <RcppEigen.h>
 
-// [[Rcpp::depends(BH)]]
-// [[Rcpp::depends(RcppEigen)]]
-// [[Rcpp::depends(RcppParallel)]]
+// Compiled directly by `R CMD SHLIB` (no Rcpp attribute processing), so
+// every export is an `extern "C"` routine taking/returning SEXP. The R side
+// binds these by name via getNativeSymbolInfo() and calls them as .Call
+// routines. Each body is wrapped in BEGIN_RCPP/END_RCPP (as Rcpp's generated
+// RcppExports.cpp would) so Rcpp exceptions surface as R errors rather than
+// crashing R. Kept in sync by hand with `.stanr_model_support_exports`
+// (R/stan_model.R).
 
-// [[Rcpp::export]]
-Rcpp::XPtr<stan::model::model_base> new_model(Rcpp::List data, unsigned int seed,
-                                              SEXP declarations = R_NilValue) {
-  stanr::r_data_context data_context(data, declarations);
+extern "C" {
+
+SEXP new_model(SEXP data, SEXP seed, SEXP declarations) {
+  BEGIN_RCPP
+  stanr::r_data_context data_context(Rcpp::as<Rcpp::List>(data), declarations);
   // Sampling services may execute this model on a native worker thread.
   // A generated model keeps this stream pointer, so it cannot point at an R
   // stream even though construction itself occurs on the R thread.
   Rcpp::XPtr<stan::model::model_base> m(
-      new stan_model(data_context, seed, &stanr::worker_safe_stream()));
-  return m;
+      new stan_model(data_context, Rcpp::as<unsigned int>(seed),
+                     &stanr::worker_safe_stream()));
+  return Rcpp::wrap(m);
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::List run_model(Rcpp::XPtr<stan::model::model_base> model, Rcpp::List args) {
-  return stanr::run_model(*model, args);
+SEXP run_model(SEXP model, SEXP args) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::run_model(*m, Rcpp::as<Rcpp::List>(args)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::CharacterVector constrained_param_names(
-  Rcpp::XPtr<stan::model::model_base> model) {
-  return stanr::model_constrained_names(*model, false, false);
+SEXP constrained_param_names(SEXP model) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_constrained_names(*m, false, false));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::XPtr<stan::rng_t> new_base_rng(unsigned int seed) {
-  return stanr::make_base_rng(seed);
+SEXP new_base_rng(SEXP seed) {
+  BEGIN_RCPP
+  return Rcpp::wrap(stanr::make_base_rng(Rcpp::as<unsigned int>(seed)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-int model_num_upars(Rcpp::XPtr<stan::model::model_base> model) {
-  return stanr::model_num_upars(*model);
+SEXP model_num_upars(SEXP model) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_num_upars(*m));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::List model_param_metadata(Rcpp::XPtr<stan::model::model_base> model) {
-  return stanr::model_param_metadata(*model);
+SEXP model_param_metadata(SEXP model) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_param_metadata(*m));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::CharacterVector model_constrained_names(
-    Rcpp::XPtr<stan::model::model_base> model, bool include_tparams = true,
-    bool include_gqs = true) {
-  return stanr::model_constrained_names(*model, include_tparams, include_gqs);
+SEXP model_constrained_names(SEXP model, SEXP include_tparams,
+                             SEXP include_gqs) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_constrained_names(
+      *m, Rcpp::as<bool>(include_tparams), Rcpp::as<bool>(include_gqs)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::CharacterVector model_unconstrained_names(
-    Rcpp::XPtr<stan::model::model_base> model) {
-  return stanr::model_unconstrained_names(*model);
+SEXP model_unconstrained_names(SEXP model) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_unconstrained_names(*m));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::NumericVector model_log_prob(Rcpp::XPtr<stan::model::model_base> model,
-                                   Rcpp::NumericVector upars,
-                                   bool jacobian = true) {
-  return stanr::model_log_prob(*model, upars, jacobian);
+SEXP model_log_prob(SEXP model, SEXP upars, SEXP jacobian) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_log_prob(
+      *m, Rcpp::as<Rcpp::NumericVector>(upars), Rcpp::as<bool>(jacobian)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::NumericVector model_grad_log_prob(Rcpp::XPtr<stan::model::model_base> model,
-                                        Rcpp::NumericVector upars,
-                                        bool jacobian = true) {
-  return stanr::model_grad_log_prob(*model, upars, jacobian);
+SEXP model_grad_log_prob(SEXP model, SEXP upars, SEXP jacobian) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_grad_log_prob(
+      *m, Rcpp::as<Rcpp::NumericVector>(upars), Rcpp::as<bool>(jacobian)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::List model_hessian(Rcpp::XPtr<stan::model::model_base> model,
-                         Rcpp::NumericVector upars,
-                         bool jacobian = true) {
-  return stanr::model_hessian(*model, upars, jacobian);
+SEXP model_hessian(SEXP model, SEXP upars, SEXP jacobian) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_hessian(
+      *m, Rcpp::as<Rcpp::NumericVector>(upars), Rcpp::as<bool>(jacobian)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::NumericVector model_unconstrain(Rcpp::XPtr<stan::model::model_base> model,
-                                      Rcpp::List variables,
-                                      SEXP declarations = R_NilValue) {
-  return stanr::model_unconstrain(*model, variables, declarations);
+SEXP model_unconstrain(SEXP model, SEXP variables, SEXP declarations) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_unconstrain(
+      *m, Rcpp::as<Rcpp::List>(variables), declarations));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::NumericMatrix model_unconstrain_matrix(
-    Rcpp::XPtr<stan::model::model_base> model, Rcpp::NumericMatrix values) {
-  return stanr::model_unconstrain_matrix(*model, values);
+SEXP model_unconstrain_matrix(SEXP model, SEXP values) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_unconstrain_matrix(
+      *m, Rcpp::as<Rcpp::NumericMatrix>(values)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::NumericVector model_constrain(Rcpp::XPtr<stan::model::model_base> model,
-                                    Rcpp::XPtr<stan::rng_t> rng,
-                                    Rcpp::NumericVector upars,
-                                    bool include_tparams = true,
-                                    bool include_gqs = true) {
-  return stanr::model_constrain(*model, *rng, upars, include_tparams,
-                                  include_gqs);
+SEXP model_constrain(SEXP model, SEXP rng, SEXP upars, SEXP include_tparams,
+                     SEXP include_gqs) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  Rcpp::XPtr<stan::rng_t> r(rng);
+  return Rcpp::wrap(stanr::model_constrain(
+      *m, *r, Rcpp::as<Rcpp::NumericVector>(upars),
+      Rcpp::as<bool>(include_tparams), Rcpp::as<bool>(include_gqs)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::NumericMatrix model_constrain_matrix(
-    Rcpp::XPtr<stan::model::model_base> model, Rcpp::XPtr<stan::rng_t> rng,
-    Rcpp::NumericMatrix upars, bool include_tparams = true,
-    bool include_gqs = true) {
-  return stanr::model_constrain_matrix(*model, *rng, upars, include_tparams,
-                                         include_gqs);
+SEXP model_constrain_matrix(SEXP model, SEXP rng, SEXP upars,
+                            SEXP include_tparams, SEXP include_gqs) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  Rcpp::XPtr<stan::rng_t> r(rng);
+  return Rcpp::wrap(stanr::model_constrain_matrix(
+      *m, *r, Rcpp::as<Rcpp::NumericMatrix>(upars),
+      Rcpp::as<bool>(include_tparams), Rcpp::as<bool>(include_gqs)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::List model_constrain_variables(
-    Rcpp::XPtr<stan::model::model_base> model, Rcpp::XPtr<stan::rng_t> rng,
-    Rcpp::NumericVector upars, bool include_tparams, bool include_gqs,
-    Rcpp::List declarations) {
-  return stanr::model_constrain_variables(*model, *rng, upars,
-                                          include_tparams, include_gqs,
-                                          declarations);
+SEXP model_constrain_variables(SEXP model, SEXP rng, SEXP upars,
+                               SEXP include_tparams, SEXP include_gqs,
+                               SEXP declarations) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  Rcpp::XPtr<stan::rng_t> r(rng);
+  return Rcpp::wrap(stanr::model_constrain_variables(
+      *m, *r, Rcpp::as<Rcpp::NumericVector>(upars),
+      Rcpp::as<bool>(include_tparams), Rcpp::as<bool>(include_gqs),
+      Rcpp::as<Rcpp::List>(declarations)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-Rcpp::List model_variable_skeleton(Rcpp::XPtr<stan::model::model_base> model,
-                                   bool include_tparams, bool include_gqs,
-                                   Rcpp::List declarations) {
-  return stanr::model_variable_skeleton(*model, include_tparams, include_gqs,
-                                        declarations);
+SEXP model_variable_skeleton(SEXP model, SEXP include_tparams,
+                             SEXP include_gqs, SEXP declarations) {
+  BEGIN_RCPP
+  Rcpp::XPtr<stan::model::model_base> m(model);
+  return Rcpp::wrap(stanr::model_variable_skeleton(
+      *m, Rcpp::as<bool>(include_tparams), Rcpp::as<bool>(include_gqs),
+      Rcpp::as<Rcpp::List>(declarations)));
+  END_RCPP
 }
 
-// [[Rcpp::export]]
-void select_opencl_device(int platform_id, int device_id) {
+SEXP select_opencl_device(SEXP platform_id, SEXP device_id) {
+  BEGIN_RCPP
 #ifdef STAN_OPENCL
-  stan::math::opencl_context.select_device(platform_id, device_id);
+  stan::math::opencl_context.select_device(Rcpp::as<int>(platform_id),
+                                           Rcpp::as<int>(device_id));
 #else
   Rcpp::stop("This model was not compiled with OpenCL support; "
              "create it with stan_model(use_opencl = TRUE).");
 #endif
+  return R_NilValue;
+  END_RCPP
 }
+
+}  // extern "C"

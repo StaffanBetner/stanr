@@ -57,10 +57,7 @@ for \verb{<NAME>} instead of replacing it (space-separated), matching how
 
 Entries are applied in list order, so the same name may appear more
 than once, e.g. \code{list(CXXFLAGS = "-O3", "CXXFLAGS += -Wall")} first
-overrides \code{CXXFLAGS}, then appends to it. \code{OPENCL_LIBS} is a special
-name: overriding or appending to it changes the OpenCL link flags used
-when \code{use_opencl = TRUE} -- see \code{use_opencl} below -- rather than a
-real Makevars variable.}
+overrides \code{CXXFLAGS}, then appends to it.}
 
 \item{stanc_options}{(list) Stan-to-C++ transpiler options. Not yet supported.}
 
@@ -88,14 +85,8 @@ used at runtime is controlled by the \code{opencl_ids} argument of the fit
 methods (e.g. \code{\link[=model-method-sample]{$sample()}}), not by this argument;
 \code{opencl_ids = NULL} (the default there) means \code{select_opencl_device()}
 is simply never called, so the platform/device baked in at compile time
-(0/0) is used. The library used to link OpenCL support can be overridden
-via \code{cpp_options = list(OPENCL_LIBS = ...)} -- the default is
-\code{"-framework OpenCL"} on macOS and \code{"-lOpenCL"} elsewhere. This override
-is particularly relevant on Apple Silicon: the system OpenCL framework
-exposes no double-precision (\code{fp64}) device there, and Stan requires
-doubles, so real OpenCL testing on Apple Silicon requires an
-OpenCL implementation with \code{fp64} support (e.g. POCL) and pointing
-\code{OPENCL_LIBS} at its ICD loader instead of the system framework.}
+(0/0) is used. The default OpenCL link flags are \code{"-framework OpenCL"}
+on macOS and \code{"-lOpenCL"} elsewhere.}
 
 \item{compile_standalone}{(logical) Should the Stan program's \code{functions}
 block be exposed as part of this compilation? The default is \code{FALSE}.

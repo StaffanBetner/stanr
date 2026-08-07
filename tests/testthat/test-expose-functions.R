@@ -347,24 +347,15 @@ functions {
   expect_equal(v1, v2)
 })
 
-test_that("compiling the same code twice without force_recompile reuses the cached build", {
+test_that(".compile_standalone_functions_environment compiles a functions block into a callable env", {
   code <- "
 functions {
   real cache_reuse_add(real a, real b) { return a + b; }
 }
 "
-  before <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
-
-  env1 <- stanr:::.compile_standalone_functions_environment(code)
-  after_first <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
-  expect_length(setdiff(after_first, before), 1L)
-
-  env2 <- stanr:::.compile_standalone_functions_environment(code)
-  after_second <- list.files(tempdir(), pattern = paste0("\\", .Platform$dynlib.ext, "$"))
-  expect_identical(after_second, after_first)
-
-  expect_equal(env1$cache_reuse_add(2, 3), 5)
-  expect_equal(env2$cache_reuse_add(2, 3), 5)
+  env <- stanr:::.compile_standalone_functions_environment(code)
+  expect_true(is.function(env$cache_reuse_add))
+  expect_equal(env$cache_reuse_add(2, 3), 5)
 })
 
 test_that(".stanr_build_functions_env populates a target env with callable functions, wrapping _rng exports", {
@@ -593,10 +584,9 @@ model {
   expect_error(mod$expose_stan_functions())
 })
 
-# Below: `compile_standalone = TRUE` integration tests -- the combined-TU
-# path, where the model's own compile appends the exposed-functions wrapper
-# section directly into the model's translation unit (see
-# .compile_stan_model_environment()'s `standalone_functions` argument).
+# Below: `compile_standalone = TRUE` integration tests -- the model's own
+# compile also exposes functions via the same sourceCpp-based functions path
+# (see .compile_standalone_functions_environment()).
 
 test_that("compile_standalone = TRUE exposes functions with zero extra compilation, and the model still works normally", {
   mod <- stan_model(
@@ -636,7 +626,7 @@ model {
   expect_equal(posterior::ndraws(result$draws()), 10L)
 })
 
-test_that("a second compile_standalone model with identical code hits the on-disk cache and still populates $functions", {
+test_that("a second compile_standalone model with identical code still populates $functions", {
   code <- "
 functions {
   real cache_hit_add(real a, real b) { return a + b; }
@@ -648,16 +638,6 @@ model {
   theta ~ normal(0, 1);
 }
 "
-  call_count <- 0
-  real_stanc <- stanc
-  testthat::local_mocked_bindings(
-    stanc = function(...) {
-      call_count <<- call_count + 1
-      real_stanc(...)
-    },
-    .package = "stanr"
-  )
-
   mod1 <- stan_model(
     code = code,
     compile_standalone = TRUE,
@@ -665,24 +645,20 @@ model {
   )
   expect_true(mod1$is_compiled())
   expect_equal(mod1$functions$cache_hit_add(2, 3), 5)
-  calls_after_first <- call_count
-  expect_gt(calls_after_first, 0L)
 
-  # Fresh R6 object, identical code: resolves to a cache hit under the
-  # hood (stanc() is not invoked again), but the post-compile hook that
-  # populates $functions must still run.
+  # Fresh R6 object, identical code: the post-compile hook that populates
+  # $functions must still run.
   mod2 <- stan_model(
     code = code,
     compile_standalone = TRUE,
     precompiled_headers = FALSE
   )
   expect_true(mod2$is_compiled())
-  expect_equal(call_count, calls_after_first)
   expect_true(is.function(mod2$functions$cache_hit_add))
   expect_equal(mod2$functions$cache_hit_add(4, 5), 9)
 })
 
-test_that("compile_standalone participates in the model cache key (distinct .cpp files)", {
+test_that("compile_standalone compiles the functions block via a separate stanc call", {
   code <- "
 functions {
   real hash_sep_add(real a, real b) { return a + b; }
@@ -709,10 +685,9 @@ model {
   calls_after_plain <- call_count
   expect_gt(calls_after_plain, 0L)
 
-  # Same Stan code, `compile_standalone = TRUE`: the generated .cpp content
-  # differs (it has the appended wrapper section), so this must be a
-  # distinct cache entry, not a reuse of the plain model's -- fresh stanc()
-  # call(s), not a hit off `mod_plain`'s cache/memo entry.
+  # Same Stan code, `compile_standalone = TRUE`: the model TU is identical
+  # (a cache hit), but the functions block is compiled separately via
+  # sourceCpp, which runs its own stanc() call.
   mod_standalone <- stan_model(
     code = code,
     compile_standalone = TRUE,
@@ -722,10 +697,10 @@ model {
   expect_gt(call_count, calls_after_plain)
 })
 
-test_that("compile_standalone errors on a Stan function named run_model (reserved-name collision)", {
+test_that("compile_standalone errors on a Stan function named stanr_exposed_functions (reserved-name collision)", {
   code <- "
 functions {
-  real run_model(real a, real b) { return a + b; }
+  real stanr_exposed_functions(real a, real b) { return a + b; }
 }
 parameters {
   real theta;
@@ -736,7 +711,7 @@ model {
 "
   expect_error(
     stan_model(code = code, compile_standalone = TRUE),
-    "run_model.*reserved"
+    "stanr_exposed_functions.*reserved"
   )
 })
 
@@ -792,13 +767,12 @@ model {
     add = TRUE
   )
 
-  # A compile_standalone model's compiled_env_ already provides
-  # stanr_exposed_functions(), so $expose_stan_functions() must take the
-  # fast path and never call the separate-TU compile helper.
+  # A compile_standalone model already compiled its functions env, so
+  # $expose_stan_functions() must not recompile via the separate-TU helper.
   testthat::local_mocked_bindings(
     .compile_standalone_functions_environment = function(...) {
       stop(
-        "must not recompile: compile_standalone model already has stanr_exposed_functions"
+        "must not recompile: compile_standalone model already has a functions env"
       )
     },
     .package = "stanr"

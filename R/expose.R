@@ -206,11 +206,9 @@
 }
 
 # Compiles a Stan program's `functions` block into its own translation
-# unit. Mirrors `.compile_stan_model_environment()` (R/stan_model.R), but
-# for the separate-TU expose path: no `model_name` messaging, no OpenCL, no
-# `libstanr_runner.a` (this TU has no services to link against). `code` is
-# already `#include`-resolved by the caller. Returns an environment
-# populated from the compiled build, with `stanr_exposed_functions`,
+# unit via `Rcpp::sourceCpp()`, which handles compilation, loading, and
+# binding. `code` is already `#include`-resolved by the caller. Returns an
+# environment populated with `stanr_exposed_functions`,
 # `stanr_rng_set_seed`, and one R function per exposed Stan function.
 .compile_standalone_functions_environment <- function(
   code,
@@ -234,92 +232,73 @@
   )
   processed <- .stanr_process_standalone_cpp(stanc_out, reserved_names)
 
-  # OPENCL_LIBS is meaningless here -- this TU never uses OpenCL.
+  # An external_cpp definition sits at file scope, before `model_namespace`
+  # opens, so a wrapper's qualified `model_namespace::<fn>(...)` call to it
+  # would fail to link. A function's first occurrence in `full_code` tells
+  # the two apart (before vs. inside the namespace); unqualifying is safe
+  # either way, since the model's own generated code already calls these
+  # functions unqualified too.
+  if (length(external_cpp) > 0) {
+    full_code <- processed$full_code
+    namespace_pos <- regexpr(
+      "namespace model_namespace",
+      full_code,
+      fixed = TRUE
+    )[[1]]
+    for (fn_name in processed$functions$name) {
+      first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), full_code)[[1]]
+      if (first_pos > 0 && first_pos < namespace_pos) {
+        full_code <- gsub(
+          paste0("model_namespace::", fn_name, "("),
+          paste0(fn_name, "("),
+          full_code,
+          fixed = TRUE
+        )
+      }
+    }
+    processed$full_code <- full_code
+  }
+
   cpp_option_assignments <- .stanr_parse_cpp_options(cpp_options)
-  extra_assignments <- Filter(
-    function(a) !identical(a$name, "OPENCL_LIBS"),
-    cpp_option_assignments
-  )
+  extra_assignments <- cpp_option_assignments
 
-  # Unlike the model hash, this hashes the post-processed *output* rather
-  # than pre-stanc inputs: there's no expensive compiler/filesystem work
-  # being skipped by avoiding the stanc()/post-processing call, only the
-  # actual C++ compile is cache-gated.
-  functions_hash <- digest::digest(
-    c(
-      processed$full_code,
-      as.character(utils::packageVersion("stanr")),
-      .stanr_stan_version(),
-      R.version$platform,
-      .stanr_compiler_identity(),
-      .stanr_cpp_options_hash_component(extra_assignments)
-    ),
-    algo = "xxhash64"
-  )
-
-  memo <- .stanr_env_memo()
-  memo_key <- paste0("fn:", functions_hash)
-  if (!is.null(memo[[memo_key]])) {
-    return(memo[[memo_key]])
-  }
-
-  cache_file <- .stanr_build_cache_file(
-    stan_file,
-    functions_hash,
-    suffix = ".functions"
-  )
-  env <- new.env()
-  if (.stanr_restore_build_cache(cache_file, functions_hash, env)) {
-    memo[[memo_key]] <- env
-    return(env)
-  }
-
-  build_dir <- .stanr_build_scratch_dir()
-  cpp_file <- file.path(build_dir, paste0("functions_", functions_hash, ".cpp"))
-  if (verbose) {
-    message("[stanr] Compiling Stan functions...")
-  }
-  writeLines(processed$full_code, cpp_file)
-
-  harvest <- .stanr_harvest_exports(cpp_file, build_dir)
-  .stanr_append_build_info(harvest$cpp_file, functions_hash, harvest$loader)
+  tmp_file <- tempfile(fileext = ".cpp")
+  on.exit(unlink(tmp_file))
+  writeLines(processed$full_code, tmp_file)
 
   base_cppflags <- .stanr_base_cppflags()
-  pch_enabled <- FALSE
   if (
     precompiled_headers &&
       length(external_cpp) == 0 &&
       !.stanr_cpp_options_block_pch(extra_assignments)
   ) {
     pch_flags <- .stanr_pch_flags(base_cppflags, verbose)
-    pch_enabled <- nzchar(pch_flags)
     cppflags <- paste(pch_flags, base_cppflags)
   } else {
     cppflags <- base_cppflags
   }
 
-  compile_functions <- function(compilation_cppflags) {
-    .stanr_compile(
-      cpp_file = harvest$cpp_file,
-      cppflags = compilation_cppflags,
-      libs = .stanr_tbb_libs(),
-      extra_assignments = extra_assignments,
+  if (verbose) {
+    message("[stanr] Compiling Stan functions...")
+  }
+  compiled_env <- new.env()
+  withr::with_makevars(
+    .stanr_apply_makevars(
+      c(
+        PKG_CPPFLAGS = paste(c(cppflags, .stanr_dependency_cppflags()), collapse = " "),
+        PKG_LIBS = .stanr_tbb_libs()
+      ),
+      extra_assignments
+    ),
+    assignment = "+=",
+    Rcpp::sourceCpp(
+      file = tmp_file,
+      env = compiled_env,
       verbose = verbose
     )
-  }
-
-  lib_file <- .stanr_compile_with_pch_retry(
-    compile_functions,
-    cppflags,
-    base_cppflags,
-    pch_enabled,
-    verbose
   )
-  .stanr_load_build(lib_file, env)
-  .stanr_write_build_cache(cache_file, lib_file)
 
-  memo[[memo_key]] <- env
-  env
+  compiled_env
 }
 
 # Wraps a compiled `_rng` export (`fn`) with an explicit `seed` argument.

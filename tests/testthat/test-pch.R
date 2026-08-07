@@ -2,81 +2,12 @@ local_test_context()
 
 init_test_cache("pch")
 
-# Tests for precompiled-header subprocess memoization (see .stanr_memo)
-
-reset_pch_memo <- function() {
-  rm(
-    list = ls(envir = stanr:::.stanr_memo),
-    envir = stanr:::.stanr_memo
-  )
-}
-
-test_that("second identical .stanr_pch_flags() call makes no additional .stanr_system2 calls", {
-  reset_pch_memo()
-  on.exit(reset_pch_memo(), add = TRUE)
-
-  call_count <- 0
-  testthat::local_mocked_bindings(
-    # A non-empty CXX20 lets `.stanr_compiler_identity()` reach its
-    # `--version` probe (mocked below), which is what needs to be exercised.
-    .stanr_rcmd = function(...) "cc",
-    .stanr_system2 = function(...) {
-      call_count <<- call_count + 1
-      # An empty/unrecognized compiler probe result routes
-      # `.stanr_pch_flags()` into its "unsupported compiler" branch before
-      # any cache-directory or PCH-build filesystem work happens, keeping
-      # this test side-effect free.
-      character()
-    }
-  )
-
-  flags <- "-Ifoo -DBAR"
-
-  suppressWarnings(suppressMessages(
-    stanr:::.stanr_pch_flags(flags)
-  ))
-  calls_after_first <- call_count
-  expect_gte(calls_after_first, 1)
-
-  suppressWarnings(suppressMessages(
-    stanr:::.stanr_pch_flags(flags)
-  ))
-  calls_after_second <- call_count
-
-  expect_equal(calls_after_second - calls_after_first, 0)
-})
-
-
-test_that(".stanr_r_config() memoizes per variable and routes through .stanr_rcmd", {
-  reset_pch_memo()
-  on.exit(reset_pch_memo(), add = TRUE)
-
-  call_count <- 0
-  testthat::local_mocked_bindings(
-    .stanr_rcmd = function(...) {
-      call_count <<- call_count + 1
-      "mocked-value"
-    }
-  )
-
-  first <- stanr:::.stanr_r_config("CXX")
-  expect_equal(call_count, 1)
-  expect_equal(first, "mocked-value")
-
-  second <- stanr:::.stanr_r_config("CXX")
-  expect_equal(call_count, 1)
-  expect_equal(second, first)
-
-  stanr:::.stanr_r_config("CXXFLAGS")
-  expect_equal(call_count, 2)
-})
-
-
 # The compile-failure retry gate in .stanr_compile_with_pch_retry()
-# (R/pch.R) should only rebuild the PCH when there's evidence it's stale,
-# not on every compile failure. These tests call it directly with a
-# scripted `compile_fn`, faking out the actual subprocess compiles (via
-# .stanr_system2, as above), so no real PCH or model compile ever runs.
+# (R/pch.R) should only rebuild the PCH when the compiler reports a
+# PCH-related diagnostic, not on every compile failure. These tests call it
+# directly with a scripted `compile_fn`, faking out the actual subprocess
+# compiles (via .stanr_system2, as above), so no real PCH or model compile
+# ever runs.
 
 # A minimal .stanr_rcmd mock shared by both tests below: it answers the
 # `R CMD config CXX20` probe (used by `.stanr_compiler_identity()` to find
@@ -107,7 +38,7 @@ mock_pch_system2 <- function(pch_build_calls_env) {
       pch_arg <- grep("PCH=", args, value = TRUE)[[1]]
       # `shQuote()` wraps in `'` under a POSIX shell but `"` under Windows'
       # cmd default, so strip whichever trailing quote is there.
-      pch_path <- sub("['\"]$", "", sub(".*PCH=", "", pch_arg))
+      pch_path <- sub("^['\"]", "", sub("['\"]$", "", sub(".*PCH=", "", pch_arg)))
       dir.create(dirname(pch_path), recursive = TRUE, showWarnings = FALSE)
       file.create(pch_path)
       return(character())
@@ -117,8 +48,6 @@ mock_pch_system2 <- function(pch_build_calls_env) {
 }
 
 test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
-  reset_pch_memo()
-  on.exit(reset_pch_memo(), add = TRUE)
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
   withr::local_options(stanr_pch_dir = file.path(cache_home, "pch"))
@@ -147,28 +76,16 @@ test_that("compile failure with a fresh PCH does not trigger a PCH rebuild", {
     "simulated genuine model compile error"
   )
   # One initial PCH build (there was none cached yet) and one compile
-  # attempt -- but no rebuild-and-retry, because the PCH that build just
-  # produced is not stale relative to its dependency headers.
+  # attempt -- but no rebuild-and-retry, because the error message carries
+  # no PCH-related diagnostic.
   expect_equal(pch_build_calls$n, 1L)
   expect_equal(compile_calls, 1L)
 })
 
-test_that("compile failure after model_pch.hpp becomes newer than the PCH triggers exactly one rebuild-and-retry", {
-  reset_pch_memo()
-  on.exit(reset_pch_memo(), add = TRUE)
+test_that("compile failure with a PCH-related diagnostic triggers exactly one rebuild-and-retry", {
   cache_home <- withr::local_tempdir()
   withr::local_envvar(R_USER_CACHE_DIR = cache_home)
   withr::local_options(stanr_pch_dir = file.path(cache_home, "pch"))
-
-  header <- system.file(
-    "include",
-    "stanr",
-    "model_pch.hpp",
-    package = "stanr",
-    mustWork = TRUE
-  )
-  original_mtime <- file.mtime(header)
-  on.exit(Sys.setFileTime(header, original_mtime), add = TRUE)
 
   pch_build_calls <- new.env()
   pch_build_calls$n <- 0L
@@ -191,20 +108,13 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   expect_equal(pch_build_calls$n, 1L)
   expect_equal(compile_calls, 1L)
 
-  # Simulate model_pch.hpp changing after the PCH above was built (e.g. a
-  # fresh `R CMD INSTALL` re-copying inst/include/) without anything else
-  # (cppflags, stanr version, ...) changing.
-  Sys.setFileTime(header, Sys.time() + 10)
-
-  # Call B: fails on its primary attempt (the 2nd compile_fn call overall,
-  # against the now-stale PCH), succeeds on the rebuild-and-retry (3rd) --
-  # PCH staleness is tracked independently of any particular model, keyed
-  # only on cppflags (see `.stanr_pch_current()`).
+  # Call B: fails on its primary attempt (the 2nd compile_fn call overall)
+  # with a stale-PCH diagnostic, succeeds on the rebuild-and-retry (3rd).
   stanr:::.stanr_compile_with_pch_retry(
     function(compilation_cppflags) {
       compile_calls <<- compile_calls + 1L
       if (compile_calls == 2L) {
-        stop("simulated genuine model compile error")
+        stop("error: PCH file built from a different file than the one being compiled")
       }
     },
     cppflags,
@@ -213,27 +123,6 @@ test_that("compile failure after model_pch.hpp becomes newer than the PCH trigge
   )
   expect_equal(compile_calls, 3L)
   expect_equal(pch_build_calls$n, 2L)
-})
-
-
-test_that(".stanr_dependency_cppflags() memoizes across calls without shelling out", {
-  reset_pch_memo()
-  on.exit(reset_pch_memo(), add = TRUE)
-
-  call_count <- 0
-  testthat::local_mocked_bindings(
-    .stanr_system2 = function(...) {
-      call_count <<- call_count + 1
-      character()
-    }
-  )
-
-  first <- stanr:::.stanr_dependency_cppflags()
-  second <- stanr:::.stanr_dependency_cppflags()
-
-  expect_identical(first, second)
-  # RcppParallel::CxxFlags() is captured in-process, so this never shells out.
-  expect_equal(call_count, 0)
 })
 
 withr::deferred_run()

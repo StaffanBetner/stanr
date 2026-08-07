@@ -28,3 +28,4 @@ inst/lib
 ^man-roxygen$
 ^\.([^\/]*)$
 .*\.stanrc$
+^tests/testthat/test-models/*\.hpp$

@@ -73,12 +73,12 @@ init_test_cache <- function(test_name) {
   options(stanr_pch_dir = file.path(cache_path, "pch"))
 }
 
-# `model_hash` (R/stan_model.R) is keyed on Stan code content alone, and both
-# the on-disk cache file and the in-session compile memo (`.stanr_memo`)
-# persist for the whole test run -- so any two `code = ` calls anywhere in
-# the suite using textually identical Stan source would otherwise share a
-# cache/memo entry (including with a mocked/fake compile from a PCH test).
-# Wrap any throwaway `code` string in this to keep it unique to its call site.
+# `model_hash` (R/stan_model.R) is keyed on Stan code content alone, and the
+# on-disk cache file persists for the whole test run -- so any two `code = `
+# calls anywhere in the suite using textually identical Stan source would
+# otherwise share a cache entry (including with a mocked/fake compile from a
+# PCH test). Wrap any throwaway `code` string in this to keep it unique to
+# its call site.
 unique_stan_code <- function(
   body = "parameters { real theta; } model { theta ~ normal(0, 1); }"
 ) {
