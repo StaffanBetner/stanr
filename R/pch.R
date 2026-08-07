@@ -37,6 +37,25 @@
   file.path(R.home("etc"), "Makeconf")
 }
 
+# The makefiles vector that `R CMD SHLIB` passes to make (see
+# tools:::.shlib_internal() in src/library/tools/R/install.R): Makeconf, the
+# site Makevars, the platform shlib makefile, and the user Makevars. Passing
+# the user Makevars is essential so the PCH is built with the same CXX20*
+# flags (e.g. -march=native) as the model translation unit.
+.stanr_makefiles <- function() {
+  rarch <- if (nzchar(.Platform$r_arch)) paste0("/", .Platform$r_arch) else ""
+  c(
+    file.path(paste0(R.home("etc"), rarch), "Makeconf"),
+    tools::makevars_site(),
+    file.path(
+      R.home("share"),
+      "make",
+      if (.Platform$OS.type == "windows") "winshlib.mk" else "shlib.mk"
+    ),
+    tools::makevars_user()
+  )
+}
+
 # Rcpp/RcppEigen/BH/RcppParallel include flags. RcppParallel's vary by TBB
 # usage, so they come from `RcppParallel::CxxFlags()`.
 .stanr_dependency_cppflags <- function() {
@@ -191,27 +210,28 @@
     if (verbose) {
       message("[stanr] Compiling precompiled model header...")
     }
-    # MAKEFILES pulls in R's Makeconf, defining the recipe's CXX20* vars.
+    # Pass the same makefiles vector as `R CMD SHLIB` (Makeconf, site
+    # Makevars, platform shlib makefile, user Makevars) via -f so the PCH is
+    # built with the same CXX20* flags (e.g. -march=native) as the model
+    # translation unit.
     output <- tryCatch(
-      withr::with_envvar(
-        c(MAKEFILES = .stanr_makeconf()),
-        .stanr_system2(
-          make,
-          c(
-            "-f",
-            shQuote(makefile),
-            shQuote(paste0("PCH=", pch)),
-            shQuote(paste0(
-              "HEADER=",
-              if (compiler_type == "gcc") cache_header else header
-            )),
-            shQuote(paste0("PKG_CPPFLAGS=", pch_cppflags)),
-            shQuote(paste0("EXTRA_CXXFLAGS=", pch_build_cxxflags)),
-            "pch"
-          ),
-          stdout = TRUE,
-          stderr = TRUE
-        )
+      .stanr_system2(
+        make,
+        c(
+          unlist(lapply(.stanr_makefiles(), function(f) c("-f", shQuote(f)))),
+          "-f",
+          shQuote(makefile),
+          shQuote(paste0("PCH=", pch)),
+          shQuote(paste0(
+            "HEADER=",
+            if (compiler_type == "gcc") cache_header else header
+          )),
+          shQuote(paste0("PKG_CPPFLAGS=", pch_cppflags)),
+          shQuote(paste0("EXTRA_CXXFLAGS=", pch_build_cxxflags)),
+          "pch"
+        ),
+        stdout = TRUE,
+        stderr = TRUE
       ),
       error = function(e) conditionMessage(e)
     )
