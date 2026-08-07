@@ -23,9 +23,8 @@ namespace stanr {
   Rcpp::List model_constrain_variables(const stan::model::model_base& model, stan::rng_t& rng, Rcpp::NumericVector values, bool include_tparams, bool include_gqs, Rcpp::List declarations);
   Rcpp::List model_variable_skeleton(const stan::model::model_base& model, bool include_tparams, bool include_gqs, Rcpp::List declarations);
 
-  // Generated Stan models retain their constructor's ostream pointer and can
-  // write through it while evaluating on a native/TBB worker.  This sink has
-  // static lifetime and deliberately bypasses R's console API.
+  // Generated models keep their constructor's ostream pointer and can write
+  // through it on a native/TBB worker; this sink bypasses R's console API.
   class null_streambuf : public std::streambuf {
   protected:
     int_type overflow(int_type ch) override { return traits_type::not_eof(ch); }

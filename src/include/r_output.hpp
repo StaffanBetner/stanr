@@ -91,15 +91,14 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   void operator()() override {
-    // Chain separator — do nothing (all chains stacked in same DataFrame)
+    // Chain separator -- do nothing (all chains stacked in same DataFrame)
   }
 
   void operator()(const std::string& message) override {
     messages_.push_back(message);
   }
 
-  // Stan's writer callback delivers draws in several shapes: a matrix is
-  // one sample per row; a column or row vector is a single sample.
+  // A matrix is one sample per row; a column/row vector is a single sample.
   void operator()(const Eigen::MatrixXd& values) override {
     check_initialized();
     for (Eigen::Index i = 0; i < values.rows(); ++i) {
@@ -117,11 +116,7 @@ class r_sample_writer : public stan::callbacks::writer {
     this->append_row(values);
   }
 
-  /**
-   * Convert collected data to an R matrix via RcppEigen.
-   *
-   * MUST be called from the main R thread (not from a TBB worker thread).
-   */
+  /** Convert collected data to an R matrix. Main R thread only. */
   Rcpp::NumericMatrix to_r_matrix() const {
     Rcpp::NumericMatrix r_mat(n_rows_, n_cols_);
     if (n_rows_ > 0) {
@@ -135,13 +130,11 @@ class r_sample_writer : public stan::callbacks::writer {
     return r_mat;
   }
 
-  // Column v's data (first n_rows_ entries valid; the buffer may be
-  // over-allocated from growth, same as the memcpy this replaces relied
-  // on). Main R thread only.
+  // Column v's data (first n_rows_ entries valid; buffer may be
+  // over-allocated from growth). Main R thread only.
   const double* column_ptr(int v) const { return values_.col(v).data(); }
 
-  // Frees the sample buffer once its chain has been copied out. The writer
-  // is unusable for further appends afterwards.
+  // Frees the sample buffer once its chain has been copied out.
   void release() { values_.resize(0, 0); }
 
   const std::vector<std::string>& colnames() const { return colnames_; }
@@ -149,8 +142,7 @@ class r_sample_writer : public stan::callbacks::writer {
   int n_rows() const { return n_rows_; }
   int n_cols() const { return n_cols_; }
 
-  // Signal that this writer is valid so Stan's concurrent_writer
-  // writes directly to us rather than copying via value semantics.
+  // Signal validity so Stan's concurrent_writer writes directly to us.
   bool is_valid() const noexcept override { return true; }
 };
 

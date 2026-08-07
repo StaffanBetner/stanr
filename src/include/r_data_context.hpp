@@ -22,17 +22,14 @@ namespace stanr {
 // construction, so Stan worker threads never access the R API.
 //
 // Tuple-typed values arrive as (nested) unnamed R lists and are flattened
-// here into the dotted per-leaf entries the generated Stan reader expects,
+// into the dotted per-leaf entries the generated Stan reader expects,
 // guided by `declarations` (one block of `model$variables()`):
-//
-//   * Every tuple-typed variable `x` is read by generated code slot-by-slot,
-//     never as a whole -- dotted names `x.1`, `x.2.1`, ... one per leaf.
-//   * For array-of-tuple variables the flat value order is "blocked AoS":
-//     enclosing-array elements are enumerated column-major (first index
-//     fastest) and each element's leaf payload is concatenated contiguously.
-//   * A tuple-slot complex leaf is stored in the windowed vals_c() layout
-//     stanc 2.39's generated reader indexes: per-enclosing-array-element
-//     windows of size 2m that are only half used (see store_complex()).
+//   * tuple variable `x` is read slot-by-slot, never as a whole -- dotted
+//     names `x.1`, `x.2.1`, ... one per leaf.
+//   * array-of-tuple values are "blocked AoS": enclosing-array elements
+//     enumerated column-major, each element's leaf payload contiguous.
+//   * a tuple-slot complex leaf uses the windowed vals_c() layout stanc
+//     2.39's reader indexes (see store_complex()).
 class r_data_context : public stan::io::var_context {
  private:
   struct value_entry {
@@ -42,11 +39,9 @@ class r_data_context : public stan::io::var_context {
     std::vector<size_t> dims;
   };
 
-  // Keep all data associated with a variable in one node.  This stores its
-  // name once instead of once per real, integer, and dimension map.
+  // One node per variable, storing its name once.
   std::map<std::string, value_entry> values_;
-  // Every top-level name in the input list; flattened tuple leaves must not
-  // collide with any of them (or with each other).
+  // Top-level names; flattened tuple leaves must not collide with them.
   std::set<std::string> reserved_names_;
 
   void add_value(const std::string& name, SEXP value);

@@ -11,29 +11,15 @@
 
 namespace stanr {
 
-/**
- * Thread-safe buffered logger for Stan callbacks.
- *
- * Buffers log messages in a mutex-protected vector so that TBB worker
- * threads can log safely without accessing R streams.  Messages are
- * flushed to the R console on the main thread via flush(), and every
- * flushed message is retained in history_ for $output() regardless of
- * show_messages_/show_exceptions_ -- a quiet run still needs to be able to
- * report its log messages after the fact, matching cmdstanr's output-file
- * behavior.
- *
- * Log-level mapping (matches stream_logger's typical usage):
- *   debug, info, warn  -> Rcpp::Rcout
- *   error, fatal       -> Rcpp::Rcerr
- *
- * Two independent print gates: show_messages_ controls progress/
- * informational output; show_exceptions_ controls "exception chatter"
- * (Metropolis proposal rejections, initial-value rejections) regardless of
- * its (often error/warn) log level. Genuine errors are never suppressed.
- */
+// Thread-safe buffered logger for Stan callbacks. Buffers messages behind a
+// mutex so TBB workers can log without touching R streams; flush() on the
+// main thread prints and retains everything in history_ for $output().
+//
+// Log levels: debug/info/warn -> Rcout, error/fatal -> Rcerr. Two gates:
+// show_messages_ (progress) and show_exceptions_ (exception chatter);
+// genuine errors are never suppressed.
 class r_logger : public stan::callbacks::logger {
  public:
-  /// Internal log level
   enum class level { debug, info, warn, error, fatal };
 
  private:
@@ -49,18 +35,10 @@ class r_logger : public stan::callbacks::logger {
   bool show_messages_;
   bool show_exceptions_;
 
-  // Counters guarded by mutex_, used to classify lines belonging to known
-  // "exception chatter" blocks (see push() below).
-  //
-  // Known limitation: in multi-chain runs, Metropolis rejection blocks from
-  // concurrent worker threads can interleave in the shared logger, and a
-  // bare e.what() line between another block's header and terminator shares
-  // the same counter -- so classification of bare lines is best-effort.
-  // Worst case a rejection line prints (or an empty line is swallowed)
-  // despite the flag; $output() is always complete regardless. cmdstanr
-  // documents the same imperfection for its implementation ("will not
-  // necessarily silence all messages").
-  int metropolis_pending_ = 0;  // open error-level blocks (multi-chain: may nest)
+  // Counters guarded by mutex_, classifying lines in known "exception
+  // chatter" blocks (see push()). Best-effort in multi-chain runs where
+  // concurrent workers interleave; $output() is always complete.
+  int metropolis_pending_ = 0;  // open error-level blocks (may nest)
   int init_pending_ = 0;        // remaining continuation lines of a warn block
 
   static bool starts_with(const std::string& msg, const std::string& prefix) {
@@ -125,16 +103,9 @@ class r_logger : public stan::callbacks::logger {
   }
 
   /**
-   * Flush all buffered messages to the R console and into history_.
-   *
-   * MUST be called from the main R thread.  Print decision per entry:
-   * exception-classified lines are gated by show_exceptions_; everything
-   * else prints when at error/fatal level (never suppressed) or when
-   * show_messages_ is true.  Stream routing is unchanged: debug/info/warn
-   * -> stdout, error/fatal -> stderr.  Every flushed message is appended
-   * to history_ regardless of what printed, so $output() can recover it
-   * later.  Clears buffer_; history_ accumulates across calls and is never
-   * cleared here.
+   * Flush buffered messages to the R console and history_. Main-thread only.
+   * Exception-classified lines are gated by show_exceptions_; everything
+   * else prints at error/fatal or when show_messages_. Clears buffer_.
    */
   void flush() {
     std::vector<entry> entries;
@@ -161,7 +132,7 @@ class r_logger : public stan::callbacks::logger {
     }
   }
 
-  /// Main-thread-only, like flush(): accumulated messages from all flush() calls.
+  /// Main-thread-only, like flush(): messages from all flush() calls.
   const std::vector<std::string>& history() const { return history_; }
 };
 

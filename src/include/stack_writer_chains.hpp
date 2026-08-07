@@ -14,14 +14,11 @@
 namespace stanr {
 
   // Stacks per-chain r_sample_writers into iterations x chains x variables R
-  // arrays (Fortran/column-major order, matching posterior::draws_array).
-  // Columns are routed into a parameter array and a diagnostics array by
-  // name membership in diagnostic_names, preserving each group's original
-  // relative column order, and the first `num_warmup_rows` iterations of
-  // each chain are split into separate warmup arrays (NULL when zero).
-  // Each chain's writer buffer is released right after its columns are
-  // copied, so peak native memory during this step is one destination copy
-  // plus one remaining source chain buffer.
+  // arrays (column-major, matching posterior::draws_array). Columns are
+  // routed into parameter/diagnostics arrays by membership in
+  // diagnostic_names; the first num_warmup_rows of each chain split into
+  // separate warmup arrays (NULL when zero). Each chain's buffer is released
+  // after copying, so peak memory is one destination plus one source chain.
   inline Rcpp::List writer_chains_to_arrays(
       std::vector<r_sample_writer>& writers,
       const std::vector<std::string>& diagnostic_names,

@@ -40,10 +40,8 @@ namespace stanr {
     const size_t num_params = model.num_params_r();
 
     if (!metric_supplied) {
-      // Build the same default unit inverse metric that the no-metric
-      // overloads of hmc_nuts_{diag,dense}_e_adapt would otherwise
-      // construct internally, so dispatch can always call the
-      // metric-taking overload.
+      // Build the same default unit metric the no-metric overloads would
+      // construct internally, so dispatch always uses the metric-taking one.
       std::shared_ptr<stan::io::var_context> default_ctx =
           metric == "diag_e"
               ? std::make_shared<stan::io::array_var_context>(
@@ -141,9 +139,9 @@ namespace stanr {
         init_list, args["init_declarations"]);
     std::vector<std::shared_ptr<stanr::r_data_context>> init_ctxs(
         num_chains, init_ctx);
-    // Base stan::callbacks::writer instances are no-ops: the unconstrained
-    // inits and the separate diagnostics stream (whose columns the sample
-    // writer already receives) are deliberately discarded.
+    // Base writers are no-ops: the unconstrained inits and the separate
+    // diagnostics stream (already received by the sample writer) are
+    // deliberately discarded.
     std::vector<stan::callbacks::writer> init_writers(num_chains);
     std::vector<stan::callbacks::writer> diag_writers(num_chains);
     std::vector<stanr::r_metric_writer> metric_writers(num_chains);
@@ -171,8 +169,8 @@ namespace stanr {
 
     // --- Dispatch: fixed_param ---
     } else if (algorithm == "fixed_param") {
-      // The multi-chain overload accepts num_chains == 1 fine, so it is
-      // always used regardless of chain count.
+      // The multi-chain overload accepts num_chains == 1 fine, so always use
+      // it regardless of chain count.
       return_code = stan::services::sample::fixed_param(
           model, static_cast<size_t>(num_chains), init_ctxs, seed, chain_id,
           init_radius, num_samples, num_thin, refresh,
@@ -194,9 +192,8 @@ namespace stanr {
               metric_writers);
 
         } else if (metric == "diag_e") {
-          // make_metric_contexts() fills metric_ctxs with a default unit
-          // metric when none was supplied, so the metric-taking overload
-          // is always used.
+          // make_metric_contexts() fills a default unit metric when none was
+          // supplied, so the metric-taking overload is always used.
           return_code = stan::services::sample::hmc_nuts_diag_e_adapt(
               model, static_cast<size_t>(num_chains), init_ctxs, metric_ctxs,
               seed, chain_id, init_radius, num_warmup, num_samples, num_thin,
@@ -236,9 +233,8 @@ namespace stanr {
           return_code = stan::services::error_codes::CONFIG;
         } else if (metric == "diag_e") {
           if (metric_supplied) {
-            // Guaranteed single-chain by the metric_supplied && multi_chain
-            // guard above; there is no metric-taking multi-chain overload
-            // for non-adaptive NUTS.
+            // Guaranteed single-chain by the guard above; there is no
+            // metric-taking multi-chain overload for non-adaptive NUTS.
             return_code = stan::services::sample::hmc_nuts_diag_e(
                 model, *init_ctxs[0], *metric_ctxs[0], seed, chain_id, init_radius,
                 num_warmup, num_samples, num_thin, save_warmup, refresh,
@@ -272,7 +268,7 @@ namespace stanr {
 
     // --- Dispatch: HMC + static ---
     } else if (algorithm == "hmc" && engine == "static") {
-      // Static HMC is single-chain only (no multi-chain overloads in Stan)
+      // Static HMC is single-chain only (no multi-chain overloads).
       if (multi_chain) {
         std::ostringstream msg;
         msg << "Static HMC only supports a single chain. Set chains = 1.";

@@ -6,11 +6,10 @@
 
 namespace stanr {
 
-// Accessors over the declaration structure produced by `model$variables()`:
-// each variable is `list(type = <t>, dimensions = <int>)`, where a tuple's
-// `type` is a data.frame with columns `type` (string, or nested data.frame
-// for a tuple-typed slot) and `dimensions` (the slot's own array-dim count).
-
+// Accessors over the declaration structure from `model$variables()`: each
+// variable is `list(type = <t>, dimensions = <int>)`, where a tuple's `type`
+// is a data.frame with columns `type` (string, or nested data.frame for a
+// tuple-typed slot) and `dimensions` (the slot's own array-dim count).
 struct slot_decl {
   bool is_tuple = false;
   std::string kind;

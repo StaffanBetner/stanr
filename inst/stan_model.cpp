@@ -4,22 +4,18 @@
 #include <Rcpp.h>
 #include <RcppEigen.h>
 
-// Compiled directly by `R CMD SHLIB` (no Rcpp attribute processing), so
-// every export is an `extern "C"` routine taking/returning SEXP. The R side
-// binds these by name via getNativeSymbolInfo() and calls them as .Call
-// routines. Each body is wrapped in BEGIN_RCPP/END_RCPP (as Rcpp's generated
-// RcppExports.cpp would) so Rcpp exceptions surface as R errors rather than
-// crashing R. Kept in sync by hand with `.stanr_model_support_exports`
-// (R/stan_model.R).
+// Compiled directly by `R CMD SHLIB` (no Rcpp attribute processing): every
+// export is an `extern "C"` SEXP routine bound by name via
+// getNativeSymbolInfo(). Bodies are wrapped in BEGIN_RCPP/END_RCPP so Rcpp
+// exceptions surface as R errors. Kept in sync with
+// `.stanr_model_support_exports` (R/stan_model.R).
 
 extern "C" {
 
 SEXP new_model(SEXP data, SEXP seed, SEXP declarations) {
   BEGIN_RCPP
   stanr::r_data_context data_context(Rcpp::as<Rcpp::List>(data), declarations);
-  // Sampling services may execute this model on a native worker thread.
-  // A generated model keeps this stream pointer, so it cannot point at an R
-  // stream even though construction itself occurs on the R thread.
+  // Model runs on a native worker thread, so the stream can't be an R stream.
   Rcpp::XPtr<stan::model::model_base> m(
       new stan_model(data_context, Rcpp::as<unsigned int>(seed),
                      &stanr::worker_safe_stream()));

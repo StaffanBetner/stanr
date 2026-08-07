@@ -53,10 +53,9 @@ SEXP columns_to_matrix(Rcpp::List columns, int n_rows, int n_columns) {
   return out;
 }
 
-// Validate that `value` is an unnamed list nested `k` levels deep (one level
-// per enclosing array dimension, outermost first) and return the array's
-// size at each level. Errors on named/non-list values and on non-rectangular
-// arrays.
+// Validate that `value` is an unnamed list nested `k` levels deep (one per
+// enclosing array dimension, outermost first) and return the array's size at
+// each level. Errors on named/non-list values and non-rectangular arrays.
 std::vector<int> tuple_array_shape(const std::string& name, SEXP value,
                                    int k) {
   if (TYPEOF(value) != VECSXP || Rf_inherits(value, "data.frame")
@@ -85,9 +84,9 @@ std::vector<int> tuple_array_shape(const std::string& name, SEXP value,
   return sizes;
 }
 
-// Flatten a nested list (already validated by tuple_array_shape(), with
-// per-level sizes `sizes`) into a flat vector of elements enumerated
-// column-major -- first (outermost) index fastest.
+// Flatten a nested list (validated by tuple_array_shape(), with per-level
+// sizes `sizes`) into a flat vector enumerated column-major (outermost
+// index fastest).
 std::vector<SEXP> enumerate_elements(SEXP value,
                                      const std::vector<int>& sizes) {
   if (sizes.empty()) return {value};

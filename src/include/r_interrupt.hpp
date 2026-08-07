@@ -9,8 +9,8 @@
 
 namespace stanr {
 
-// Must be called from R's original thread. Rcpp contains the R longjmp and
-// converts a pending interrupt into this exception.
+// Must be called from R's original thread; Rcpp converts a pending
+// interrupt into this exception.
 inline bool user_interrupt_pending() {
   try {
     Rcpp::checkUserInterrupt();
@@ -20,14 +20,8 @@ inline bool user_interrupt_pending() {
   }
 }
 
-/**
- * Stan callback::interrupt wrapper.  Worker-thread users pass an atomic
- * cancellation flag; synchronous services that execute on the R thread may
- * opt into Rcpp interrupt polling.
- *
- * Called by Stan algorithms at the top of their main loops to check
- * for user interrupts (Ctrl-C).
- */
+// Stan callback::interrupt. Worker-thread users pass an atomic cancellation
+// flag; synchronous R-thread services may opt into Rcpp interrupt polling.
 class r_interrupt : public stan::callbacks::interrupt {
  private:
   const std::atomic<bool>* cancel_requested_;
@@ -35,16 +29,14 @@ class r_interrupt : public stan::callbacks::interrupt {
   bool check_r_;
 
  public:
-  // This callback can run on a Stan/TBB worker.  It must therefore only
-  // inspect native state; the R thread detects Ctrl-C and sets this flag.
-  // `what` names the operation in the thrown message (e.g. "Sampling",
-  // "Pathfinder") and must outlive this object.
+  // May run on a Stan/TBB worker, so only inspect native state; the R
+  // thread sets the flag on Ctrl-C. `what` names the operation and must
+  // outlive this object.
   explicit r_interrupt(const std::atomic<bool>* cancel_requested = nullptr,
                         const char* what = "Sampling")
       : cancel_requested_(cancel_requested), what_(what), check_r_(false) {}
 
-  // Retained for synchronous services other than sampling.  Do not use this
-  // constructor from a worker thread.
+  // For synchronous services; do not use from a worker thread.
   explicit r_interrupt(bool check_r)
       : cancel_requested_(nullptr), what_("Sampling"), check_r_(check_r) {}
 

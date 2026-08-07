@@ -58,8 +58,8 @@ void attach_messages(RObject& result, const std::ostringstream& stream) {
 }
 
 Rcpp::XPtr<stan::rng_t> make_base_rng(unsigned int seed) {
-  // A model-method RNG is an independent stream. Chain zero is intentional:
-  // these draws do not share a stream with an inference chain.
+  // Independent stream; chain zero so these draws don't share an inference
+  // chain's stream.
   return Rcpp::XPtr<stan::rng_t>(
       new stan::rng_t(stan::services::util::create_rng(seed, 0)));
 }
@@ -288,9 +288,8 @@ namespace {
 
 // One node of the "sized structure": the declared type tree of a variable
 // (from `model$variables()`) merged with the generated model's per-leaf
-// sizes (from get_param_names()/get_dims()). A leaf's `dims` are its own
-// container dims, with every enclosing tuple-array dimension stripped off
-// and complex's trailing storage `2` dropped.
+// sizes. A leaf's `dims` are its own container dims, with enclosing
+// tuple-array dims stripped and complex's trailing storage `2` dropped.
 struct sized_node {
   bool is_tuple = false;
   bool is_complex = false;
@@ -311,9 +310,8 @@ int dims_product(const std::vector<int>& dims) {
   return std::accumulate(dims.begin(), dims.end(), 1, std::multiplies<>());
 }
 
-// The dotted name of some leaf reachable from this tuple node, descending
-// via slot 1: any leaf beneath the subtree carries the same enclosing-array
-// dims prefix at the same position, so one probe suffices.
+// Dotted name of some leaf reachable from this tuple node via slot 1: any
+// leaf beneath the subtree carries the same enclosing-array dims prefix.
 std::string first_leaf_name(const std::string& dotted, Rcpp::List type_df) {
   slot_decl slot = tuple_slot(type_df, 0);
   const std::string name = dotted + ".1";
@@ -426,8 +424,7 @@ std::vector<sized_variable> build_sized_structure(
       for (size_t d : leaf_dims) {
         variable.node.dims.push_back(static_cast<int>(d));
       }
-      // get_dims() includes complex's trailing storage dim of size two --
-      // never part of the R-facing shape.
+      // get_dims() includes complex's trailing storage dim of size two.
       if (variable.node.is_complex) variable.node.dims.pop_back();
     }
     result.push_back(std::move(variable));
@@ -458,11 +455,9 @@ SEXP reshape_column_major(Rcpp::List elements, const std::vector<int>& dims) {
   return out;
 }
 
-// Consume one node's worth of scalars from `flat` in the native constrained
-// order: plain containers column-major; complex containers column-major with
-// adjacent (real, imag) pairs; plain tuples slot-by-slot; tuple arrays
-// element-major (elements enumerated column-major, each element's slots
-// consumed in full before the next element).
+// Consume one node's worth of scalars from `flat` in native constrained
+// order: containers column-major; complex with adjacent (real, imag) pairs;
+// tuples slot-by-slot; tuple arrays element-major.
 SEXP consume_node(const sized_node& node, const Eigen::VectorXd& flat,
                   Eigen::Index& pos) {
   if (node.is_tuple) {

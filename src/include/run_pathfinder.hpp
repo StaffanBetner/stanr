@@ -40,8 +40,8 @@ namespace stanr {
     Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
 
     stanr::r_logger logger(verbose, show_exceptions);
-    // Single-path execution remains on the R thread. Multi-path execution is
-    // moved below into a coordinator thread, so it uses an atomic interrupt.
+    // Single-path stays on the R thread; multi-path uses a coordinator
+    // thread, so it uses an atomic interrupt.
     stanr::r_interrupt interrupt(num_paths <= 1);
 
     int return_code;
@@ -73,16 +73,14 @@ namespace stanr {
         Rcpp::_["output"] = output
       );
     } else {
-      // Multi-path Pathfinder runs in a coordinator std::thread. All data
-      // contexts and writers are C++ owned before that thread is launched.
-      // The immutable context is safe to share across all paths.
+      // Multi-path runs in a coordinator std::thread; all contexts/writers
+      // are C++ owned before launch. The immutable context is shared.
       const auto init_ctx = std::make_unique<stanr::r_data_context>(
           init_list, args["init_declarations"]);
       std::vector<stan::io::var_context*> init_ctxs(num_paths, init_ctx.get());
 
-      // The package returns only the PSIS-resampled draws.  Base writers are
-      // intentional no-ops: reporting them as valid would make Stan retain
-      // every per-path candidate draw even though none is exposed to R.
+      // Only the PSIS-resampled draws are returned; base writers are no-ops
+      // so Stan doesn't retain every per-path candidate draw.
       std::vector<stan::callbacks::writer> single_param_writers(num_paths);
       std::vector<stan::callbacks::structured_writer> single_diag_writers(
           num_paths);

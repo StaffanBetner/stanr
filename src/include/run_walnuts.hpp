@@ -29,8 +29,7 @@ struct walnuts_logp_grad {
 
   void operator()(const Eigen::VectorXd& x, double& logp,
                   Eigen::VectorXd& grad) const {
-    // log_prob_grad takes a mutable ref but never writes through it; the
-    // const_cast avoids a copy per gradient evaluation.
+    // log_prob_grad takes a mutable ref but never writes through it.
     logp = stan::model::log_prob_grad<true, true>(
         model, const_cast<Eigen::VectorXd&>(x), grad);
   }
@@ -38,8 +37,7 @@ struct walnuts_logp_grad {
 
 // A walnutpie ChainHandler writing constrained draws into an r_sample_writer
 // with columns [lp__, <constrained params>], the layout
-// writer_chains_to_arrays() expects. Also records the adapted step
-// size/inverse mass for $inv_metric()/$time()-style metadata.
+// writer_chains_to_arrays() expects. Also records adapted step size/inv mass.
 class r_walnuts_handler {
  public:
   r_walnuts_handler(const stan::model::model_base& model, stan::rng_t& rng,
@@ -54,8 +52,7 @@ class r_walnuts_handler {
         row_(1 + constrained_dim) {}
 
   // 0-indexed and pre-check: keeps the first iteration of each phase, then
-  // every thin_-th after, matching saved_rows()'s ceiling-division count in
-  // R/classes-model.R.
+  // every thin_-th after, matching saved_rows()'s ceiling division in R.
   void on_sample(const Eigen::VectorXd& position, double lp) {
     if (sample_iter_++ % thin_ == 0) write(position, lp);
   }
@@ -174,9 +171,8 @@ inline Rcpp::List run_walnuts(stan::model::model_base& model, Rcpp::List args) {
     sample_writers.back()(col_names);
   }
 
-  // Per-chain unconstrained initialization and RNG for the model's own
-  // constraining transform -- separate from walnutpie's own std::mt19937_64
-  // stream, which only drives the sampling dynamics.
+  // Per-chain unconstrained init and RNG for the model's own constraining
+  // transform -- separate from walnutpie's own mt19937_64 stream.
   stanr::r_data_context init_ctx(Rcpp::as<Rcpp::List>(args["init"]),
                                  args["init_declarations"]);
   std::vector<stan::rng_t> model_rngs;

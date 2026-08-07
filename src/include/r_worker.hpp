@@ -19,34 +19,13 @@
 namespace stanr {
 
 // Sampling/pathfinder block synchronously with no way to yield to R's event
-// loop, so their Stan service call runs on a native coordinator std::thread
-// while the R main thread polls every 50ms to flush the buffered logger and
-// check for Ctrl-C. Rules for the worker lambda passed to
-// run_on_worker_thread():
-//
-// 1. Never touch the R API from the worker thread -- no Rcpp:: calls, no R
-//    allocation, no Rprintf/Rcpp::stop etc. Only plain C++/Stan/Eigen/std::
-//    state. The logger buffers messages behind a mutex for this reason;
-//    flushing to the console happens only on the main thread's poll loop.
-// 2. A raw std::thread sits outside TBB's scheduler, but Stan's multi-chain
-//    services initialize chains before entering tbb::parallel_for. The
-//    lambda must construct stan::math::ChainableStack autodiff_stack; and
-//    stan::math::ad_tape_observer autodiff_observer; at its top, for the
-//    job's lifetime -- the observer installs a fresh AD tape in every TBB
-//    worker thread that ends up executing a chain.
-// 3. On Ctrl-C, the main thread sets an atomic cancellation flag and waits
-//    for the worker to finish/join (never abandoned) before raising the
-//    R-level interrupt via Rcpp::stop(...).
-// 4. Exceptions thrown in the worker must be captured via std::exception_ptr
-//    in the lambda's try/catch(...), then rethrown and converted to
-//    Rcpp::stop(...) on the main thread after join() -- never let one cross
-//    the thread boundary directly, and never call Rcpp::stop from the
-//    worker thread itself.
-//
-// fn's signature is int fn(stanr::r_interrupt& interrupt); it runs
-// entirely on the worker thread and must obey the constraints above.
-// Returns the int fn produced. `what` is used verbatim in both "<what>
-// interrupted." and "Unknown exception in <what> worker.".
+// loop, so their Stan service runs on a native coordinator std::thread while
+// the R main thread polls every 50ms to flush the logger and check Ctrl-C.
+// The worker lambda must: (1) never touch the R API; (2) construct a
+// ChainableStack + ad_tape_observer at its top; (3) on Ctrl-C the main
+// thread sets an atomic flag and joins before raising the interrupt; (4)
+// capture exceptions via std::exception_ptr and rethrow on the main thread.
+// fn is int fn(stanr::r_interrupt&); `what` names the operation.
 template <class F>
 int run_on_worker_thread(stanr::r_logger& logger, const char* what,
                           F&& fn) {
@@ -60,7 +39,7 @@ int run_on_worker_thread(stanr::r_logger& logger, const char* what,
   int return_code = stan::services::error_codes::CONFIG;
 
   std::thread worker([&] {
-    // Rule 2 above: explicit AD stack plus tape observer for this job.
+    // AD stack plus tape observer for this job.
     stan::math::ChainableStack autodiff_stack;
     stan::math::ad_tape_observer autodiff_observer;
     try {
@@ -72,8 +51,7 @@ int run_on_worker_thread(stanr::r_logger& logger, const char* what,
     completion_cv.notify_one();
   });
 
-  // Keep the original R thread responsive for console output and Ctrl-C.
-  // Rcpp protects this interrupt probe from R's longjmp; on Ctrl-C we first
+  // Keep the R thread responsive for console output and Ctrl-C; on Ctrl-C
   // cancel and join the worker before propagating the interrupt to R.
   bool interrupted = false;
   while (!finished.load(std::memory_order_acquire)) {

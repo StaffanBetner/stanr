@@ -7,10 +7,8 @@
 
 namespace stanr {
 
-// Captures the "stepsize"/"inv_metric" pair written by
-// base_hmc::write_sampler_state_struct() once per chain after warmup.  Runs
-// on the worker thread — must not touch the R API (no Rcpp calls, no R
-// allocations), only plain C++/Eigen state.
+// Captures the stepsize/inv_metric pair written once per chain after warmup.
+// Runs on the worker thread -- no R API, only plain C++/Eigen state.
 class r_metric_writer : public stan::callbacks::structured_writer {
  public:
   void write(const std::string& key, double value) override {

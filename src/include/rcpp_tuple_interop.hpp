@@ -1,12 +1,11 @@
 #ifndef STANR_RCPP_TUPLE_INTEROP_HPP
 #define STANR_RCPP_TUPLE_INTEROP_HPP
 
-// R list <-> std::tuple marshalling for exposed Stan functions.
-// Adapted from cmdstanr's inst/include/rcpp_tuple_interop.hpp with two
-// changes: C++17 std::apply replaces stan::math::apply (no Stan dependency),
-// and a wrap() overload for tuple-containing std::vector nestings -- Rcpp's
-// generic dispatcher cannot find the tuple wrap for nested elements
-// (std::tuple has no ADL association with namespace Rcpp).
+// R list <-> std::tuple marshalling for exposed Stan functions. Adapted
+// from cmdstanr's rcpp_tuple_interop.hpp with two changes: C++17 std::apply
+// replaces stan::math::apply, and a wrap() overload for tuple-containing
+// std::vector nestings (Rcpp's generic dispatcher can't find the tuple wrap
+// for nested elements).
 
 #include <Rcpp.h>
 #include <tuple>
@@ -24,8 +23,7 @@ struct contains_tuple<std::vector<T>> : contains_tuple<T> {};
 }  // namespace stanr
 
 namespace Rcpp {
-// Declarations first: each definition must see both so that
-// tuple-inside-array-inside-tuple nestings resolve.
+// Declarations first so tuple-inside-array-inside-tuple nestings resolve.
 template <typename... T> SEXP wrap(const std::tuple<T...>& x);
 template <typename T, typename std::enable_if_t<
     stanr::contains_tuple<T>::value, bool> = true>
