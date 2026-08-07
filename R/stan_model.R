@@ -175,10 +175,10 @@
     sym <- getNativeSymbolInfo(name, dll)
     env[[name]] <- local({
       addr <- sym$address
-      function(...) .Call(addr, ...)
+      function(...) do.call(".Call", list(addr, ...))
     })
   }
-  .Call(getNativeSymbolInfo("stanr_build_key", dll)$address)
+  do.call(".Call", list(getNativeSymbolInfo("stanr_build_key", dll)$address))
 }
 
 # Each attempt dyn.loads a private copy so recompiles never touch a live fit.
