@@ -1,13 +1,9 @@
 # Precompiled Stan model header support ---------------------------------------
 
-# Appended via `+=` so these win last-flag-wins over Makeconf's own
-# CXXFLAGS. Shared between the model TU compile (R/stan_model.R) and the PCH
-# build below -- GCC/clang reject a PCH built under mismatched flags.
 .stanr_opt_flags <- function() {
   flags <- "-O3 -g0 -w"
 
-  # Floating-point contraction handling can cause numerical inaccuracies
-  # at double-precision on ARM64
+  # Avoid FP-contraction inaccuracies at double precision on ARM64.
   if (R.version$arch == "aarch64") {
     flags <- paste(flags, "-ffp-contract=off")
   }
@@ -16,16 +12,11 @@
 }
 
 
-# Wrapper around `system2()`: a seam so tests can count/mock subprocess
-# invocations via `testthat::local_mocked_bindings()`.
+# Seams for testthat::local_mocked_bindings().
 .stanr_system2 <- function(...) system2(...)
-
-# Same seam for `tools::Rcmd()`, which shells out via `system2()` internally
-# but not through `.stanr_system2()`.
 .stanr_rcmd <- function(...) tools::Rcmd(...)
 
-# `R CMD config <variable>`, run through `.stanr_rcmd()` so Windows'
-# `Rcmd.exe` front-end is used.
+# `R CMD config <variable>` via `.stanr_rcmd()` (Windows Rcmd.exe).
 .stanr_r_config <- function(variable) {
   output <- tryCatch(
     .stanr_rcmd(c("config", variable), stdout = TRUE, stderr = FALSE),
@@ -35,8 +26,7 @@
   paste(output, collapse = "\n")
 }
 
-# Locate R's `Makeconf`. Windows keeps it under an arch subdirectory
-# (`etc/x64/Makeconf`); falls back to the unsuffixed location if absent.
+# R's Makeconf; arch-suffixed on Windows.
 .stanr_makeconf <- function() {
   if (nzchar(.Platform$r_arch)) {
     arch_makeconf <- file.path(R.home("etc"), .Platform$r_arch, "Makeconf")
@@ -47,9 +37,8 @@
   file.path(R.home("etc"), "Makeconf")
 }
 
-# Compiler flags injected by sourceCpp's dependency attributes (Rcpp,
-# RcppEigen, BH, RcppParallel). RcppParallel's flags vary by TBB usage, so
-# they're extracted via `RcppParallel::CxxFlags()`.
+# Rcpp/RcppEigen/BH/RcppParallel include flags. RcppParallel's vary by TBB
+# usage, so they come from `RcppParallel::CxxFlags()`.
 .stanr_dependency_cppflags <- function() {
   rcpp_parallel_flags <- tryCatch(
     utils::capture.output(RcppParallel::CxxFlags()),
@@ -73,9 +62,8 @@
   )
 }
 
-# Identity string for the active C++ compiler. Used to pick clang-vs-gcc
-# PCH flags, and folded into `model_hash` so an in-place toolchain upgrade
-# doesn't keep reloading a stale `.so`.
+# C++ compiler identity (from `--version`), for clang-vs-gcc PCH flags and
+# the model cache key.
 .stanr_compiler_identity <- function() {
   cxx20 <- .stanr_r_config("CXX20")
   if (!nzchar(cxx20)) {
@@ -94,18 +82,9 @@
   paste(output, collapse = "\n")
 }
 
-# The on-disk path of the PCH memoized for `cppflags`, or `NA_character_`.
-# Shares `.stanr_pch_flags()`'s memo key so the staleness check in
-# `.stanr_compile_with_pch_retry()` needn't duplicate its construction.
-# Returns flags that make sourceCpp use a cached model PCH, precompiling
-# `stanr/model_pch.hpp` (the full cold-compile preamble of a model TU) if
-# needed. The on-disk PCH is keyed by a fingerprint of the compiler/flags,
-# so a memo hit is unnecessary -- the same inputs resolve to the same path.
-#
-# clang and GCC discover the PCH differently: clang's `-include-pch <pch>`
-# names the `.gch` directly, but GCC's `-include <file>` only picks up a
-# PCH from a sibling `<file>.gch`, so GCC needs a stand-in for the header
-# (symlink, or a plain copy on Windows) staged inside the cache dir.
+# Flags making the model compile use a cached PCH, building it first if
+# needed. clang names the `.gch` via `-include-pch`; GCC needs a stand-in
+# header (symlink, or copy on Windows) staged next to its `.gch`.
 .stanr_pch_flags <- function(cppflags, verbose = FALSE, rebuild = FALSE) {
   header <- system.file(
     "include",
@@ -146,9 +125,7 @@
 
   pch_build_cxxflags <- .stanr_opt_flags()
   if (compiler_type == "clang") {
-    # Instantiate templates used by the header at PCH build time, so model
-    # TUs consuming the PCH skip re-instantiating them. Clang-only; benign
-    # for consumers (they don't need the flag).
+    # Instantiate the header's templates at PCH build time (clang-only).
     pch_build_cxxflags <- paste(
       pch_build_cxxflags,
       "-fpch-instantiate-templates"
@@ -170,8 +147,6 @@
       ),
       cppflags = pch_cppflags,
       opt_flags = pch_build_cxxflags,
-      # md5 of model_pch.hpp alone is sufficient: its transitive includes
-      # only change with the package or dependency versions hashed here.
       header = unname(tools::md5sum(header)),
       dependencies = vapply(
         c("Rcpp", "RcppEigen", "BH", "RcppParallel"),
@@ -196,15 +171,10 @@
   }
 
   if (!file.exists(pch)) {
-    # The make recipe deliberately has no `mkdir` step, so the output
-    # directory is created here.
     dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
     if (compiler_type == "gcc" && !file.exists(cache_header)) {
-      # Windows has no usable symlinks here -- `file.symlink()` requires
-      # Developer Mode or an elevated process and fails outright on non-NTFS
-      # volumes -- so stage a plain copy instead. The copy cannot drift from
-      # the original: `model_pch.hpp`'s md5 is part of `fingerprint` above,
-      # so any edit to it resolves to a different `cache_dir` entirely.
+      # Windows lacks usable symlinks; copy instead. The copy can't drift:
+      # header md5 is in the fingerprint, so edits get a fresh cache dir.
       staged <- if (.Platform$OS.type == "windows") {
         file.copy(header, cache_header, overwrite = TRUE)
       } else {
@@ -221,9 +191,7 @@
     if (verbose) {
       message("[stanr] Compiling precompiled model header...")
     }
-    # `MAKEFILES` makes make read R's Makeconf first, so the recipe's
-    # $(CXX20)/$(CXX20STD)/$(ALL_CPPFLAGS)/$(CXX20FLAGS)/$(CXX20PICFLAGS)
-    # are all defined.
+    # MAKEFILES pulls in R's Makeconf, defining the recipe's CXX20* vars.
     output <- tryCatch(
       withr::with_envvar(
         c(MAKEFILES = .stanr_makeconf()),
@@ -260,10 +228,8 @@
   if (compiler_type == "clang") {
     paste("-include-pch", shQuote(pch))
   } else {
-    # `-include` makes GCC process `cache_header` as if it were `#include`d
-    # first; the extra `-I` keeps the TU's own (now-redundant, header-guard
-    # no-op) `#include <stanr/...>` / `#include <stan/model/...>` lines
-    # resolving normally on the include path regardless.
+    # `-include` makes GCC use the sibling .gch; the extra -I keeps the
+    # TU's own (now no-op) includes resolving.
     paste(
       "-include",
       shQuote(cache_header),
@@ -273,9 +239,7 @@
 }
 
 # Compiles with a PCH, retrying once with a rebuilt PCH when the compiler
-# reports a stale/mismatched PCH. Shared by both compile paths. `compile_fn`
-# is `function(compilation_cppflags)`, performing the actual compile; its
-# error message carries the compiler's stderr.
+# reports a stale/mismatched one.
 .stanr_compile_with_pch_retry <- function(
   compile_fn,
   cppflags,

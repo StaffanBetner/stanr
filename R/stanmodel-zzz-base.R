@@ -222,9 +222,8 @@ StanModel <- R6Class(
         compile_standalone,
         "compile_standalone"
       )
-      # Incremented before compilation runs, so it always reflects "a compile
-      # was attempted" even if the call below throws partway through -- fits
-      # use `$compile_generation()` to detect a possibly-stale native pointer.
+      # Incremented first so it reflects "a compile was attempted" even if
+      # the call below throws.
       private$compile_generation_ <- private$compile_generation_ + 1L
       private$compiled_env_ <- .compile_stan_model_environment(
         code = private$resolved_code(),
@@ -238,11 +237,7 @@ StanModel <- R6Class(
         cpp_options = private$cpp_options_
       )
       if (compile_standalone) {
-        # cmdstanr parity: exposes without a separate $expose_stan_functions()
-        # call, via the same sourceCpp-based functions path. Runs on every
-        # $compile(), not just the first, so a force_recompile rebuilds from
-        # the fresh env instead of leaving function objects pointing at
-        # stale/freed symbols.
+        # cmdstanr parity: expose functions without a separate call.
         private$functions_compiled_env_ <- .compile_standalone_functions_environment(
           code = private$resolved_code(),
           stan_file = private$stan_file_,
@@ -336,7 +331,7 @@ StanModel <- R6Class(
             message("[stanr] Old version of the model stored to ", backup_file)
           }
         }
-        # `formatted` already ends in "\n"; writeLines() would add a second one.
+        # `formatted` already ends in "\n"; writeLines() would add another.
         writeLines(formatted, private$stan_file_, sep = "")
       }
 
@@ -350,9 +345,7 @@ StanModel <- R6Class(
       verbose <- .stanr_flag(verbose, "verbose")
 
       if (is.null(private$functions_compiled_env_)) {
-        # Not routed through `private$ensure_compiled()`/`self$native_function()`:
-        # both would trigger a full `self$compile()`, but exposing functions
-        # must work on a `compile = FALSE` model without compiling it.
+        # Must work on a compile = FALSE model without compiling it.
         private$functions_compiled_env_ <- .compile_standalone_functions_environment(
           code = private$resolved_code(),
           stan_file = private$stan_file_,

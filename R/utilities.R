@@ -21,11 +21,9 @@
   as.integer(x)
 }
 
-# Parses `cpp_options` into an ordered list of `list(name, op, value)`
-# assignments; see `stan_model()`'s `@param cpp_options` for the supported
-# forms. Returned in input order (not deduplicated by name) since a later
-# assignment to the same name must take effect after an earlier one, as
-# with repeated lines in a Makevars file.
+# Parses `cpp_options` into ordered `list(name, op, value)` assignments;
+# see `stan_model()`'s `@param cpp_options`. Input order preserved so a
+# later assignment to the same name takes effect.
 .stanr_parse_cpp_options <- function(cpp_options) {
   if (!is.list(cpp_options)) {
     stop("`cpp_options` must be a list.", call. = FALSE)
@@ -88,11 +86,8 @@
   })
 }
 
-# Shared by every service method that takes `show_messages`/`show_exceptions`/
-# `opencl_ids` (all but `$diagnose()`): normalizes those flags, engages the
-# requested OpenCL device (if any), and -- when passed -- normalizes
-# `num_threads`/`refresh` too. Read via `missing()` rather than a `NULL`
-# default since `NULL` is itself a valid `num_threads` override.
+# Normalizes service flags, engages OpenCL if requested. Read via
+# `missing()` since NULL is a valid `num_threads` override.
 .stanr_common_service_flags <- function(
   show_messages,
   show_exceptions,
@@ -137,8 +132,7 @@
 }
 
 
-# Shared execution path for all StanModel service methods: seed resolution,
-# native model construction, service dispatch, timing, and payload assembly.
+# Shared execution path for all StanModel service methods.
 .stanr_run_service <- function(
   self,
   data,
@@ -150,10 +144,8 @@
   started <- proc.time()[["elapsed"]]
   seed <- .stanr_seed(seed)
   resolved_init <- resolve_init(init)
-  # Tuple-typed data/init values (bare unnamed R lists) are flattened inside
-  # the native `r_data_context`, which needs the declared structure.
-  # `self$variables()` pays the stanc-info cost, so gate it behind a cheap
-  # check for any list-valued entry.
+  # Tuple-typed values are flattened in r_data_context, which needs the
+  # declared structure; only pay the stanc-info cost for list-valued input.
   has_list <- function(x) any(vapply(x, is.list, logical(1)))
   data_declarations <- init_declarations <- NULL
   if (has_list(data) || has_list(resolved_init$values)) {
@@ -163,8 +155,7 @@
   }
   model <- self$new_model(data, seed, data_declarations)
   native_args <- native_args_fn(seed, resolved_init, model)
-  # `[<- list(...)` keeps the element present even when NULL; `$<- NULL`
-  # would drop it, and the native side reads it unconditionally.
+  # `[<- list(...)` keeps NULL present; `$<- NULL` would drop it.
   native_args["init_declarations"] <- list(init_declarations)
   result <- self$run_model(model, native_args)
   payload <- c(
@@ -183,8 +174,7 @@
   )
 }
 
-# Returns the bundled Stan library version. Memoized for the session: the
-# bundled header cannot change within a session.
+# Bundled Stan library version, memoized (headers can't change mid-session).
 .stanr_stan_version <- function() {
   cached <- .stanr_memo$stan_version
   if (!is.null(cached)) {
@@ -258,10 +248,8 @@
 }
 
 .stanr_xptr_is_null <- function(ptr) {
-  # An Rcpp `XPtr`'s underlying C++ address does not survive
-  # `serialize()`/`readRDS()`: the restored pointer's address is written
-  # back as null, so native calls made through it fail loudly (rather than
-  # silently) after a restore.
+  # XPtr addresses don't survive serialize()/readRDS(); the restored one is
+  # null, so native calls fail loudly rather than silently.
   is.null(ptr) || .Call(stanr_xptr_is_null, ptr)
 }
 
@@ -280,13 +268,6 @@
   }
   x
 }
-
-# Shared normalization layer for CmdStanR-aligned API.
-#
-# This module holds normalization helpers shared across StanModel service
-# methods that aren't part of the single shared execution path in
-# `.stanr_run_service()` (see R/classes-model.R). Bundled Stan defaults
-# live directly in each service method's own signature.
 
 # Validate and resolve chain count/IDs for sampling
 .stanr_validate_chains <- function(chains, chain_ids) {
@@ -315,10 +296,8 @@
   list(chains = chains, chain_ids = chain_ids)
 }
 
-# Validate and normalize inv_metric for sampling
-#
 # Wraps a single metric in a list (recycled across chains) or validates
-# a per-chain list. Issues a warning if inv_metric is supplied with unit_e.
+# a per-chain list.
 .stanr_normalize_inv_metric <- function(
   inv_metric,
   metric,
@@ -349,12 +328,9 @@
   inv_metric
 }
 
-# Normalize the public initialization forms to the radius/values pair consumed
-# by the native var_context adapter, where `NULL` selects the default radius.
-# A scalar is the CmdStan initialization radius; a list or named numeric
-# vector supplies constrained parameter values (with a default radius of 2,
-# matching CmdStan's default `init` behavior for perturbing any parameters
-# not covered by the supplied values).
+# Normalizes init to the radius/values pair the native adapter consumes.
+# A scalar is the CmdStan radius; a list/named vector supplies constrained
+# values (default radius 2, matching CmdStan).
 resolve_init <- function(init) {
   if (is.null(init)) {
     return(list(radius = 2, values = list()))
@@ -402,8 +378,7 @@ resolve_init <- function(init) {
   )
 }
 
-# Keep service results small: data, initialization values, draws, and metrics can
-# be large and are inputs rather than service configuration.
+# Keep service results small: drop large inputs (data, init, draws, metrics).
 service_args <- function(args) {
   args[setdiff(
     names(args),

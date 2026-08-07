@@ -1,6 +1,5 @@
-# The (lazily created) QuickJSR context hosting `stanc.js`. Sourcing it is
-# expensive (a 3.1 MB script) and only needed by sessions that actually call
-# into stanc, so it's created on first use, then memoized for the session.
+# Lazily created QuickJSR context hosting `stanc.js` (3.1 MB, so only
+# created on first use), memoized for the session.
 stanc_ctx <- function() {
   if (is.null(.stanr_memo$stanc_context)) {
     ctx <- QuickJSR::JSContext$new()
@@ -10,9 +9,8 @@ stanc_ctx <- function() {
   .stanr_memo$stanc_context
 }
 
-# Resolves Stan `#include` directives, replacing each with the contents of
-# the matching file from `include_directories` (searched in order).
-# `include_stack` tracks paths already included, to catch circular includes.
+# Resolves Stan `#include` directives from `include_directories` (searched
+# in order). `include_stack` catches circular includes.
 resolve_stan_includes <- function(
   model_code,
   include_directories,
@@ -92,9 +90,7 @@ resolve_stan_includes <- function(
   paste(lines, collapse = "\n")
 }
 
-# Validates `external_cpp` paths and reads their contents (one element per
-# path, in order; `character()` if `paths` is `NULL`). Shared by `stanc()`
-# and `.compile_stan_model_environment()` so both validate/read identically.
+# Reads `external_cpp` file contents (one per path, in order).
 .stanr_external_cpp_contents <- function(paths) {
   if (is.null(paths)) {
     return(character())
@@ -224,10 +220,7 @@ stanc <- function(
   }
 }
 
-# Extracts variable metadata from Stan code using stanc's info output.
-# Returns a named list with elements `data`, `parameters`,
-# `transformed_parameters`, and `generated_quantities`, each a named list of
-# variables with `type` and `dimensions`.
+# Variable metadata from stanc's info output.
 model_variables <- function(
   model_code,
   include_directories = character(),
@@ -266,8 +259,7 @@ model_variables <- function(
   )]
 }
 
-# Reformats Stan code (must not contain unresolved `#include` directives)
-# using stanc's auto-formatter, returning the result as a single string.
+# Reformats Stan code via stanc's auto-formatter.
 stanc_format <- function(
   model_code,
   canonicalize = FALSE,

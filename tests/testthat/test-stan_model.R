@@ -236,7 +236,7 @@ test_that("restoring a warm on-disk cache skips stanc() even without an in-memor
 
   # Forget the in-session memo, so the next compile must go through the
   # on-disk cache file rather than the in-memory shortcut.
-  memo <- stanr:::.stanr_env_memo()
+  memo <- stanr:::.stanr_memo$compiled_envs
   rm(list = ls(memo, all.names = TRUE), envir = memo)
 
   call_count <- 0

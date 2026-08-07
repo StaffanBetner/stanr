@@ -4,6 +4,15 @@ init_test_cache("model-methods")
 
 .stanr_model_method_state <- new.env(parent = emptyenv())
 
+loaded_dll_paths <- function() {
+  vapply(
+    getLoadedDLLs(),
+    function(dll) normalizePath(dll[["path"]], winslash = "/", mustWork = FALSE),
+    character(1),
+    USE.NAMES = FALSE
+  )
+}
+
 .stanr_model_method_data <- function(double = FALSE) {
   y <- c(1L, 1L, 1L, 0L)
   if (double) {
@@ -462,7 +471,7 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
 
   fit_private <- fit$.__enclos_env__$private
   superseded_ptr <- fit_private$model_ptr_
-  loaded_before <- stanr:::.stanr_loaded_dll_paths()
+  loaded_before <- loaded_dll_paths()
 
   # Directly recompile the fit's underlying model while the fit is still
   # alive and holding a `model_ptr_` built against the *old* compiled
@@ -475,7 +484,7 @@ test_that("log_prob still succeeds after mod$compile(force_recompile = TRUE) on 
   # dir -- see `.stanr_build_scratch_dir()`, R/stan_model.R): it may load an
   # additional shared library, but never unloads one.
   expect_identical(
-    setdiff(loaded_before, stanr:::.stanr_loaded_dll_paths()),
+    setdiff(loaded_before, loaded_dll_paths()),
     character()
   )
 

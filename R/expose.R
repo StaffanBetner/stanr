@@ -1,12 +1,8 @@
-# Post-processes standalone-functions C++ (from
-# `stanc(code, standalone_functions = TRUE)`) into an `Rcpp::sourceCpp()`
-# unit: rewrites each `// [[stan::function]]` wrapper to `// [[Rcpp::export]]`,
-# strips the `pstream__`/`base_rng__` params (replaced by file-static
-# variables), and appends a function registry so the exposed set can be
-# discovered on a cache hit without rerunning stanc. A name colliding with
-# `reserved_names` is an error, not a skip. Returns a list: `full_code` (the whole
-# TU), `wrapper_section` (just the prelude + wrappers, for appending after a
-# model's own generated C++), and `functions` (a `name`/`is_rng` data frame).
+# Post-processes standalone-functions C++ into an `Rcpp::sourceCpp()` unit:
+# rewrites `// [[stan::function]]` wrappers to `// [[Rcpp::export]]`, strips
+# `pstream__`/`base_rng__` params (replaced by file-static vars), and appends
+# a registry. A name colliding with `reserved_names` is an error. Returns
+# `full_code`, `wrapper_section`, and `functions` (name/is_rng).
 .stanr_process_standalone_cpp <- function(cpp_code, reserved_names) {
   lines <- strsplit(cpp_code, "\n", fixed = TRUE)[[1]]
   marker_idx <- which(trimws(lines) == "// [[stan::function]]")
@@ -90,10 +86,8 @@
       )
     }
 
-    # base_rng__ is stripped before pstream__: it always sits immediately
-    # before pstream__, so removing it first (with its own optional leading
-    # comma) leaves pstream__'s comma handling correct whether or not other
-    # arguments precede it.
+    # base_rng__ sits immediately before pstream__; strip it first so its
+    # optional leading comma leaves pstream__'s handling correct.
     is_rng <- grepl(",?\\s*stan::rng_t&\\s*base_rng__", signature)
     signature <- sub(",?\\s*stan::rng_t&\\s*base_rng__", "", signature)
     signature <- sub(
@@ -135,21 +129,9 @@
     character(1)
   )
 
-  # 1234/0 are placeholder seed/chain: the real per-session seed is set from
-  # R via stanr_rng_set_seed() once the compiled functions are exposed.
-  # RcppEigen.h (not plain Rcpp.h) is required here: wrappers with
-  # vector/matrix/row_vector args or returns are exported as
-  # `Eigen::Matrix<...>`, and only RcppEigen.h provides the `Rcpp::as()`/
-  # `Rcpp::wrap()` specializations that marshal those to/from SEXP.
-  # stanr/rcpp_tuple_interop.hpp adds the Rcpp::wrap()/Exporter overloads
-  # for std::tuple (and std::vector<tuple> nestings) that Stan's tuple
-  # wrappers need; it must come after RcppEigen.h/Rcpp.h (both TU modes
-  # satisfy this).
-  # The `Rcpp::depends` attributes (matching inst/stan_model.cpp's own) are
-  # inert -- stanr resolves RcppEigen/BH/RcppParallel flags itself
-  # (`.stanr_dependency_cppflags()`, R/pch.R) rather than through them -- but
-  # harmless if this ends up appended after inst/stan_model.cpp (combined-TU
-  # mode), which already declares the same three.
+  # 1234/0 are placeholder seed/chain; the real seed is set from R via
+  # stanr_rng_set_seed(). RcppEigen.h is required for Eigen-typed exports;
+  # rcpp_tuple_interop.hpp adds std::tuple wrap/as overloads.
   prelude <- paste(
     c(
       "#include <RcppEigen.h>",
@@ -205,11 +187,7 @@
   )
 }
 
-# Compiles a Stan program's `functions` block into its own translation
-# unit via `Rcpp::sourceCpp()`, which handles compilation, loading, and
-# binding. `code` is already `#include`-resolved by the caller. Returns an
-# environment populated with `stanr_exposed_functions`,
-# `stanr_rng_set_seed`, and one R function per exposed Stan function.
+# Compiles a Stan program's `functions` block via `Rcpp::sourceCpp()`.
 .compile_standalone_functions_environment <- function(
   code,
   stan_file = NULL,
@@ -220,9 +198,6 @@
 ) {
   .stanr_require_compile_packages()
 
-  # Only ever used for this separate-TU path; the combined-TU call site in
-  # `.compile_stan_model_environment()` builds its own larger
-  # reserved_names set.
   reserved_names <- c("stanr_exposed_functions", "stanr_rng_set_seed")
 
   stanc_out <- stanc(
@@ -232,12 +207,8 @@
   )
   processed <- .stanr_process_standalone_cpp(stanc_out, reserved_names)
 
-  # An external_cpp definition sits at file scope, before `model_namespace`
-  # opens, so a wrapper's qualified `model_namespace::<fn>(...)` call to it
-  # would fail to link. A function's first occurrence in `full_code` tells
-  # the two apart (before vs. inside the namespace); unqualifying is safe
-  # either way, since the model's own generated code already calls these
-  # functions unqualified too.
+  # external_cpp sits at file scope, before `model_namespace`, so unqualify
+  # wrappers' `model_namespace::<fn>(...)` calls to it.
   if (length(external_cpp) > 0) {
     full_code <- processed$full_code
     namespace_pos <- regexpr(
@@ -301,11 +272,7 @@
   compiled_env
 }
 
-# Wraps a compiled `_rng` export (`fn`) with an explicit `seed` argument.
-# `fn`'s formals are exactly the user-facing Stan args (pstream__/
-# base_rng__ already stripped by `.stanr_process_standalone_cpp()`), and are
-# copied onto the wrapper -- rather than writing `function(..., seed =
-# NULL)` -- so `args()`/autocomplete shows the real parameter names.
+# Wraps a compiled `_rng` export with an explicit `seed` argument.
 .stanr_rng_wrapper <- function(fn, compiled_env) {
   base_formals <- formals(fn)
   arg_names <- names(base_formals) %||% character()
@@ -319,11 +286,8 @@
   wrapper
 }
 
-# Populates a target environment (e.g. a model's `$functions` env) from a
-# compiled functions environment. Shared by both expose paths: reads the
-# function registry off `compiled_env`, wraps `_rng` exports with
-# `.stanr_rng_wrapper()`, and assigns everything into `target_env` (and, if
-# `global`, also into `global_env`). Returns `target_env`, invisibly.
+# Populates a target env from a compiled functions env, wrapping `_rng`
+# exports with `.stanr_rng_wrapper()`.
 .stanr_build_functions_env <- function(
   compiled_env,
   target_env,
@@ -332,8 +296,7 @@
 ) {
   registry <- compiled_env$stanr_exposed_functions()
 
-  # Cleared first so re-exposing after a model recompile (functions block
-  # changed) doesn't leave stale bindings from the previous compile.
+  # Clear stale bindings from a previous build.
   rm(list = ls(target_env), envir = target_env)
 
   if (any(registry$is_rng)) {

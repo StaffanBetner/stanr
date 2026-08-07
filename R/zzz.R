@@ -1,8 +1,5 @@
-# Suppresses R CMD check NOTES for R6 `self`/`private`, used in standalone
-# method definitions assigned by reference into R6Class().
+# Suppresses R CMD check NOTES for R6 `self`/`private`.
 private <- self <- NULL
 
-# Session-lifetime memo cache, keyed only on session-stable inputs (package
-# versions, toolchain identity, etc.) -- never on anything that can change
-# mid-session.
+# Session memo: compiled model envs, stanc context, stan version.
 .stanr_memo <- new.env(parent = emptyenv())

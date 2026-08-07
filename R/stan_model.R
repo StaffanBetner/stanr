@@ -1,7 +1,3 @@
-# Applies `list(name, op, value)` assignments to a Makevars vector ("="
-# replaces, "+=" appends). Folded one at a time rather than pre-merged into
-# a flat vector: `withr::with_makevars()` drops duplicate names if the
-# caller has a personal Makevars file on disk.
 .stanr_apply_makevars <- function(base, assignments) {
   for (a in assignments) {
     if (identical(a$op, "+=") && a$name %in% names(base)) {
@@ -13,9 +9,6 @@
   base
 }
 
-# Appends a plain C entry point returning the cache key, so a compiled .so
-# is self-describing (no sidecar file). Reachable only via
-# getNativeSymbolInfo("stanr_build_key", dll).
 .stanr_append_build_key <- function(cpp_file, key_hash) {
   cat(
     "\nextern \"C\" SEXP stanr_build_key(void) {\n",
@@ -27,9 +20,6 @@
   )
 }
 
-# R CMD SHLIB on the model TU, run from its own directory with a
-# relative filename (mirroring sourceCpp()): GNU make chokes on paths with
-# spaces (e.g. a Windows user profile), which an absolute path risks.
 .stanr_compile_shlib <- function(cpp_file, verbose) {
   lib_name <- paste0(
     tools::file_path_sans_ext(basename(cpp_file)),
@@ -48,7 +38,6 @@
   )
   lib_file <- file.path(dirname(cpp_file), lib_name)
   if (!file.exists(lib_file)) {
-    # Carries the compiler's actual diagnostics, unlike sourceCpp()'s generic error.
     stop(paste(output, collapse = "\n"), call. = FALSE)
   }
   if (verbose) {
@@ -57,10 +46,7 @@
   lib_file
 }
 
-# Shared by both compile paths. `assignment = "+="` appends after
-# Makeconf's own CXX20FLAGS, so -O3 -g0 wins last-flag-wins precedence over
-# Makeconf's -g -O2. With `USE_CXX20=1`, `R CMD SHLIB` uses CXX20FLAGS (not
-# CXXFLAGS), so that's the only flag override needed.
+# With USE_CXX20=1, R CMD SHLIB uses CXX20FLAGS (not CXXFLAGS).
 .stanr_compile <- function(
   cpp_file,
   cppflags,
@@ -106,10 +92,7 @@
   tbb_libs
 }
 
-# Shared by every compile path (model TU, functions-only TU): both need
-# RcppEigen/BH on top of base R's compiler toolchain. Rcpp is loaded too:
-# the model TU uses Rcpp types (XPtr, List, ...) whose callables are only
-# registered once the Rcpp namespace is loaded.
+# Rcpp must be loaded for its callables (XPtr, List, ...) to be registered.
 .stanr_require_compile_packages <- function() {
   for (pkg in c("RcppEigen", "BH")) {
     if (!nzchar(system.file(package = pkg))) {
@@ -124,8 +107,6 @@
   loadNamespace("Rcpp")
 }
 
-# Non-OpenCL cppflags shared by every compile path; a model compile appends
-# OpenCL-specific flags on top of this when `use_opencl = TRUE`.
 .stanr_base_cppflags <- function() {
   paste(
     paste0(
@@ -136,9 +117,7 @@
   )
 }
 
-# A `cpp_options` assignment to a compiler-facing Makevars variable changes
-# flags the PCH wasn't built with -- GCC quietly falls back to the plain
-# header, clang can reject the PCH outright -- so PCH is skipped for those.
+# PCH is skipped when cpp_options overrides compiler flags.
 .stanr_cpp_options_block_pch <- function(assignments) {
   compiler_vars <- c(
     "CPPFLAGS",
@@ -158,50 +137,12 @@
   ))
 }
 
-# Stable sort by name: reordering unrelated `cpp_options` entries must not
-# change the hash; reordering two assignments to the *same* name must.
-.stanr_cpp_options_hash_component <- function(assignments) {
-  if (length(assignments)) {
-    assignment_names <- vapply(assignments, `[[`, character(1), "name")
-    ord <- order(assignment_names)
-    vapply(
-      assignments[ord],
-      function(a) paste(a$name, a$op, a$value),
-      character(1)
-    )
-  } else {
-    character()
-  }
-}
-
-# Normalized paths of every shared library currently mapped into this session.
-.stanr_loaded_dll_paths <- function() {
-  vapply(
-    getLoadedDLLs(),
-    function(dll) {
-      normalizePath(dll[["path"]], winslash = "/", mustWork = FALSE)
-    },
-    character(1),
-    USE.NAMES = FALSE
-  )
-}
-
-# Always a fresh, unique scratch dir (`tempfile()`), never shared/reused: a
-# forced recompile can then never overwrite a `.so` a live fit still holds
-# pointers into.
 .stanr_build_scratch_dir <- function() {
   dir <- tempfile("stanr_build_")
   dir.create(dir)
   dir
 }
 
-# Persistent cache path for a translation unit's compiled build. Lives next
-# to `stan_file`, named from its basename + `suffix` only (never the hash) --
-# so there's one cache file per source, invalidated by content hash rather
-# than filename -- or under `tempdir()` (named by `key_hash`) when there's no
-# source path or its directory isn't writable. The cache file *is* the
-# compiled library; its own hash lives inside it (see
-# `.stanr_append_build_key()`).
 .stanr_build_cache_file <- function(stan_file, key_hash, suffix = "") {
   if (length(stan_file)) {
     dir <- dirname(stan_file)
@@ -213,8 +154,6 @@
   file.path(tempdir(), paste0("stanr_", key_hash, suffix, .Platform$dynlib.ext))
 }
 
-# Copies a completed build to the persistent cache file. Failures are
-# swallowed: caching failure isn't a compile failure.
 .stanr_write_build_cache <- function(cache_file, lib_file) {
   tryCatch(
     {
@@ -230,9 +169,6 @@
   )
 }
 
-# dyn.load()s `so_file`, reads the embedded build key (see
-# `.stanr_append_build_key()`), and binds its exports into `env`. Any
-# error propagates -- `.stanr_restore_build_cache()` treats it as a miss.
 .stanr_load_build <- function(so_file, env) {
   dll <- dyn.load(so_file)
   for (name in .stanr_model_support_exports) {
@@ -245,12 +181,7 @@
   .Call(getNativeSymbolInfo("stanr_build_key", dll)$address)
 }
 
-# Restores the cached library into a fresh location and binds its exports.
-# Never dyn.load()s `cache_file` directly -- each attempt gets a private
-# copy, so a later recompile that overwrites `cache_file` never touches a
-# library a live fit still holds pointers into (Windows locks a loaded DLL
-# against that; POSIX is unsafe too). Returns TRUE on a hash-matching
-# restore, FALSE on any kind of miss -- never errors.
+# Each attempt dyn.loads a private copy so recompiles never touch a live fit.
 .stanr_restore_build_cache <- function(cache_file, key_hash, env) {
   if (!file.exists(cache_file)) {
     return(FALSE)
@@ -270,19 +201,6 @@
   FALSE
 }
 
-# Per-session memo of the `env` already compiled/restored for a given hash,
-# so repeat compiles of an unchanged model reuse the same loaded library
-# instead of `dyn.load()`ing a fresh copy from the on-disk archive.
-.stanr_env_memo <- function() {
-  if (is.null(.stanr_memo$compiled_envs)) {
-    .stanr_memo$compiled_envs <- new.env(parent = emptyenv())
-  }
-  .stanr_memo$compiled_envs
-}
-
-# Kept in sync by hand with the `extern "C"` function names in
-# inst/stan_model.cpp -- reserved so a combined-TU expose can't silently
-# shadow one of them.
 .stanr_model_support_exports <- c(
   "new_model",
   "run_model",
@@ -317,19 +235,24 @@
 ) {
   .stanr_require_compile_packages()
 
-  # stanc() is the expensive step, so its inputs are hashed (with the same
-  # discriminating power as hashing its output) to let a warm cache skip it.
   model_support <- readLines(
     system.file("stan_model.cpp", package = "stanr", mustWork = TRUE)
   )
-  # external_cpp is hashed by content, not path: stanc splices file contents
-  # into the generated C++, so the hash must depend on content, not location.
+  # external_cpp is hashed by content, not path.
   external_cpp_contents <- .stanr_external_cpp_contents(external_cpp)
-  cpp_option_assignments <- .stanr_parse_cpp_options(cpp_options)
-  extra_assignments <- cpp_option_assignments
-  # R.version$platform and compiler identity are included so an in-place
-  # toolchain upgrade still produces a new cache entry, rather than reusing
-  # a .so built by a compiler no longer on this machine.
+  extra_assignments <- .stanr_parse_cpp_options(cpp_options)
+  # Stable sort so reordering unrelated cpp_options doesn't change the hash.
+  if (length(extra_assignments)) {
+    assignment_names <- vapply(extra_assignments, `[[`, character(1), "name")
+    ord <- order(assignment_names)
+    hash_component <- vapply(
+      extra_assignments[ord],
+      function(a) paste(a$name, a$op, a$value),
+      character(1)
+    )
+  } else {
+    hash_component <- character()
+  }
   model_hash <- digest::digest(
     c(
       code,
@@ -340,12 +263,16 @@
       R.version$platform,
       .stanr_compiler_identity(),
       as.character(use_opencl),
-      .stanr_cpp_options_hash_component(extra_assignments)
+      hash_component
     ),
     algo = "xxhash64"
   )
 
-  memo <- .stanr_env_memo()
+  memo <- if (is.null(.stanr_memo$compiled_envs)) {
+    .stanr_memo$compiled_envs <- new.env(parent = emptyenv())
+  } else {
+    .stanr_memo$compiled_envs
+  }
   if (!force_recompile && !is.null(memo[[model_hash]])) {
     return(memo[[model_hash]])
   }
@@ -375,10 +302,7 @@
 
   cppflags <- .stanr_base_cppflags()
   if (use_opencl) {
-    # Platform/device are pinned to 0/0 at compile time only to satisfy
-    # opencl_context.hpp's `#error`-style guards -- they don't constrain
-    # which device is used at runtime; real selection happens later, via
-    # `select_opencl_device()`, so one cached binary serves any device.
+    # Pinned to 0/0; real device selection happens at runtime.
     cppflags <- paste(
       cppflags,
       "-DSTAN_OPENCL -DOPENCL_PLATFORM_ID=0 -DOPENCL_DEVICE_ID=0",
@@ -409,9 +333,8 @@
 
   tbb_libs <- .stanr_tbb_libs()
 
-  # libstanr_runner.a is always compiled without STAN_OPENCL, while an
-  # OpenCL-enabled model TU defines it; safe only as long as services touch
-  # the model solely through the stan::model::model_base virtual interface.
+  # libstanr_runner.a is built without STAN_OPENCL; safe because services
+  # touch the model only through the model_base virtual interface.
   libs <- paste(shQuote(runtime_archive), tbb_libs)
   if (use_opencl) {
     opencl_default <- if (Sys.info()[["sysname"]] == "Darwin") {
