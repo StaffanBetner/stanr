@@ -1,5 +1,5 @@
-#include "include/r_data_context.hpp"
-#include "include/tuple_declarations.hpp"
+#include <stanr/r_data_context.hpp>
+#include <stanr/tuple_declarations.hpp>
 
 #include <numeric>
 

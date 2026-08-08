@@ -11,7 +11,7 @@ compile_commands.json
 .cache
 libs
 lib
-inst/include
+^tools/cmdstan-*
 src/sundials
 **.stanrc
 .posit

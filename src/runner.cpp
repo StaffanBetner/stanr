@@ -5,14 +5,14 @@
 
 #include <stan/model/model_base.hpp>
 
-#include "include/run_advi.hpp"
-#include "include/run_diagnose.hpp"
-#include "include/run_optimizing.hpp"
-#include "include/run_pathfinder.hpp"
-#include "include/run_laplace.hpp"
-#include "include/run_sampling.hpp"
-#include "include/run_standalone_gqs.hpp"
-#include "stanr/r_data_context.hpp"
+#include <stanr/run_advi.hpp>
+#include <stanr/run_diagnose.hpp>
+#include <stanr/run_optimizing.hpp>
+#include <stanr/run_pathfinder.hpp>
+#include <stanr/run_laplace.hpp>
+#include <stanr/run_sampling.hpp>
+#include <stanr/run_standalone_gqs.hpp>
+#include <stanr/r_data_context.hpp>
 
 namespace stanr {
 

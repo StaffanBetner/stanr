@@ -15,46 +15,17 @@ endif
 
 PKG_LIBS += $(TBB_LIBS)
 
-SUNDIALS_CVODES := \
-	$(wildcard math/lib/sundials_*/src/cvodes/*.c) \
-	$(wildcard math/lib/sundials_*/src/sundials/*.c) \
-	$(wildcard math/lib/sundials_*/src/sunmatrix/band/[^f]*.c) \
-	$(wildcard math/lib/sundials_*/src/sunmatrix/dense/[^f]*.c) \
-	$(wildcard math/lib/sundials_*/src/sunlinsol/band/[^f]*.c) \
-	$(wildcard math/lib/sundials_*/src/sunlinsol/dense/[^f]*.c) \
-	$(wildcard math/lib/sundials_*/src/sunnonlinsol/newton/[^f]*.c) \
-	$(wildcard math/lib/sundials_*/src/sunnonlinsol/fixedpoint/[^f]*.c)
-
-SUNDIALS_IDAS := \
-	$(wildcard math/lib/sundials_*/src/idas/*.c)
-
-SUNDIALS_KINSOL := \
-	$(wildcard math/lib/sundials_*/src/kinsol/*.c)
-
-SUNDIALS_NVECSERIAL := \
-	$(wildcard math/lib/sundials_*/src/nvector/serial/nvector_serial.c)
-
-SUNDIALS_SOURCES = $(SUNDIALS_CVODES) $(SUNDIALS_IDAS) $(SUNDIALS_KINSOL) $(SUNDIALS_NVECSERIAL)
+SUNDIALS_SOURCES = $(wildcard sundials/*.c)
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
-STANR_HEADERS = $(wildcard include/*.hpp)
 
 RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o
 OBJECTS = init.o xptr.o
 
 $(SHLIB): static
-$(OBJECTS) $(RUNNER_OBJECTS): $(STANR_HEADERS) | package
+$(OBJECTS) $(RUNNER_OBJECTS): package
 $(SUNDIALS_OBJECTS): | package
 
 package:
-	@../cleanup
-	@mkdir -p ../inst/include
-	@cp -Rf stan/src/stan ../inst/include/stan
-	@cp -Rf math/stan/. ../inst/include/stan
-	@cp -Rf math/lib/opencl_*/CL ../inst/include/
-	@cp -Rf math/lib/sundials_*/include/* ../inst/include/
-	@cp -Rf math/lib/sundials_*/src/sundials .
-	@rm -rf ../inst/include/stanr
-	@cp -Rf include/. ../inst/include/stanr
 	@cp -Rf walnutpie/include/. ../inst/include/
 
 static: $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
@@ -65,5 +36,3 @@ static: $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 clean:
 	rm -rf ../inst/lib
 	rm -f $(OBJECTS) $(RUNNER_OBJECTS)
-	rm -rf ../inst/include/
-	rm -rf sundials
