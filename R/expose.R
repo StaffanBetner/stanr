@@ -139,6 +139,7 @@
       "// [[Rcpp::depends(BH)]]",
       "// [[Rcpp::depends(RcppEigen)]]",
       "// [[Rcpp::depends(RcppParallel)]]",
+      "// [[Rcpp::plugins(cpp20)]]",
       "static stan::rng_t base_rng__ = stan::services::util::create_rng(1234, 0);",
       "static std::ostream* pstream__ = &Rcpp::Rcout;",
       "// [[Rcpp::export]]",
