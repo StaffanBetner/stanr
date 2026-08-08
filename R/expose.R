@@ -136,7 +136,6 @@
     c(
       "#include <RcppEigen.h>",
       "#include <stanr/rcpp_tuple_interop.hpp>",
-      "// [[Rcpp::depends(BH)]]",
       "// [[Rcpp::depends(RcppEigen)]]",
       "// [[Rcpp::depends(RcppParallel)]]",
       "// [[Rcpp::plugins(cpp20)]]",

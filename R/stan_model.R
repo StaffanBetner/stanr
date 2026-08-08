@@ -94,7 +94,7 @@
 
 # Rcpp must be loaded for its callables (XPtr, List, ...) to be registered.
 .stanr_require_compile_packages <- function() {
-  for (pkg in c("RcppEigen", "BH")) {
+  for (pkg in c("RcppEigen")) {
     if (!nzchar(system.file(package = pkg))) {
       stop(
         "Package `",

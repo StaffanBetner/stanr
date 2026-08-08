@@ -56,7 +56,7 @@
   )
 }
 
-# Rcpp/RcppEigen/BH/RcppParallel include flags. RcppParallel's vary by TBB
+# Rcpp/RcppEigen/RcppParallel include flags. RcppParallel's vary by TBB
 # usage, so they come from `RcppParallel::CxxFlags()`.
 .stanr_dependency_cppflags <- function() {
   rcpp_parallel_flags <- tryCatch(
@@ -72,10 +72,6 @@
     paste0(
       "-I",
       shQuote(system.file("include", package = "RcppEigen", mustWork = TRUE))
-    ),
-    paste0(
-      "-I",
-      shQuote(system.file("include", package = "BH", mustWork = TRUE))
     ),
     trimws(paste(rcpp_parallel_flags, collapse = " "))
   )
@@ -168,7 +164,7 @@
       opt_flags = pch_build_cxxflags,
       header = unname(tools::md5sum(header)),
       dependencies = vapply(
-        c("Rcpp", "RcppEigen", "BH", "RcppParallel"),
+        c("Rcpp", "RcppEigen", "RcppParallel"),
         function(package) as.character(utils::packageVersion(package)),
         character(1)
       )

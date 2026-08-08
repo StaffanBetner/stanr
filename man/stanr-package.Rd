@@ -7,7 +7,7 @@
 \title{The stanr package.}
 \description{
 A modern, simpler R interface for Stan. Bundles all required
-Stan headers internally, depending only on BH (Boost), RcppEigen
+Stan headers internally, RcppEigen
 (Eigen), and RcppParallel (TBB) for external dependencies.
 }
 \seealso{
