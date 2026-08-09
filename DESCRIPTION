@@ -25,8 +25,7 @@ Imports:
     RcppParallel,
     QuickJSR,
     posterior,
-    withr,
-    jsonlite
+    withr
 LinkingTo:
     Rcpp,
     RcppParallel

@@ -2,9 +2,9 @@
 
 export(stan_model)
 export(stanc)
+importFrom(QuickJSR,from_json)
 importFrom(R6,R6Class)
 importFrom(RcppParallel,RcppParallelLibs)
-importFrom(jsonlite,fromJSON)
 importFrom(posterior,as_draws_df)
 importFrom(posterior,subset_draws)
 importFrom(withr,with_makevars)

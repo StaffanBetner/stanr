@@ -220,6 +220,30 @@ stanc <- function(
   }
 }
 
+# Collapses a tuple's `{type, dimensions}` slot array (QuickJSR::from_json
+# parses it as a plain nested list) into the type/dimensions data.frame
+# `src/r_data_context.cpp` expects.
+.stanr_normalize_type <- function(type) {
+  if (!is.list(type)) {
+    return(type)
+  }
+  dims <- vapply(type, function(slot) as.integer(slot$dimensions), integer(1))
+  types <- lapply(type, function(slot) .stanr_normalize_type(slot$type))
+  if (any(vapply(types, is.list, logical(1)))) {
+    out <- data.frame(dimensions = dims)
+    out$type <- types
+    return(out[c("type", "dimensions")])
+  }
+  data.frame(type = unlist(types), dimensions = dims, stringsAsFactors = FALSE)
+}
+
+.stanr_normalize_variables <- function(vars) {
+  lapply(vars, function(v) {
+    v$type <- .stanr_normalize_type(v$type)
+    v
+  })
+}
+
 # Variable metadata from stanc's info output.
 model_variables <- function(
   model_code,
@@ -244,19 +268,21 @@ model_variables <- function(
     stop(paste(res$errors, collapse = "\n"), call. = FALSE)
   }
 
-  variables <- jsonlite::fromJSON(res$result)
+  variables <- QuickJSR::from_json(res$result)
   variables$data <- variables$inputs
   variables$inputs <- NULL
   variables$transformed_parameters <- variables[["transformed parameters"]]
   variables[["transformed parameters"]] <- NULL
   variables$generated_quantities <- variables[["generated quantities"]]
   variables[["generated quantities"]] <- NULL
-  variables[c(
+  groups <- c(
     "data",
     "parameters",
     "transformed_parameters",
     "generated_quantities"
-  )]
+  )
+  variables[groups] <- lapply(variables[groups], .stanr_normalize_variables)
+  variables[groups]
 }
 
 # Reformats Stan code via stanc's auto-formatter.
