@@ -2,7 +2,7 @@
 #include <stanr/r_data_context.hpp>
 #include <stanr/model_methods.hpp>
 #include <Rcpp.h>
-#include <RcppEigen.h>
+#include <stanr/rcpp_eigen_interop.hpp>
 
 // Compiled directly by `R CMD SHLIB` (no Rcpp attribute processing): every
 // export is an `extern "C"` SEXP routine bound by name via

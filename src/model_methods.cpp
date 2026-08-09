@@ -8,7 +8,7 @@
 #include <stan/model/model_base.hpp>
 #include <stan/services/util/create_rng.hpp>
 
-#include <RcppEigen.h>
+#include <stanr/rcpp_eigen_interop.hpp>
 
 #include <cmath>
 #include <cstddef>

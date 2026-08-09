@@ -311,7 +311,7 @@ functions {
   expect_equal(env$cmat_id(cm), cm)
 
   # complex_row_vector round-trips as a 1xn matrix -- the same shape
-  # RcppEigen already uses for a plain (real) row_vector.
+  # the Eigen interop already uses for a plain (real) row_vector.
   crv <- c(1 + 1i, 2 + 2i)
   expect_equal(env$crv_id(crv), matrix(crv, nrow = 1))
 

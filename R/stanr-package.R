@@ -1,8 +1,8 @@
 #' The stanr package.
 #'
 #' @description A modern, simpler R interface for Stan. Bundles all required
-#'   Stan headers internally, RcppEigen
-#'   (Eigen), and RcppParallel (TBB) for external dependencies.
+#'   Stan and Eigen headers internally, and RcppParallel (TBB) for external
+#'   dependencies.
 #'
 #' @docType package
 #' @name stanr-package

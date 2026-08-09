@@ -130,13 +130,12 @@
   )
 
   # 1234/0 are placeholder seed/chain; the real seed is set from R via
-  # stanr_rng_set_seed(). RcppEigen.h is required for Eigen-typed exports;
-  # rcpp_tuple_interop.hpp adds std::tuple wrap/as overloads.
+  # stanr_rng_set_seed(). rcpp_eigen_interop.hpp provides Eigen-typed
+  # exports; rcpp_tuple_interop.hpp adds std::tuple wrap/as overloads.
   prelude <- paste(
     c(
-      "#include <RcppEigen.h>",
+      "#include <stanr/rcpp_eigen_interop.hpp>",
       "#include <stanr/rcpp_tuple_interop.hpp>",
-      "// [[Rcpp::depends(RcppEigen)]]",
       "// [[Rcpp::depends(RcppParallel)]]",
       "// [[Rcpp::plugins(cpp20)]]",
       "static stan::rng_t base_rng__ = stan::services::util::create_rng(1234, 0);",

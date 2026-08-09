@@ -56,8 +56,9 @@
   )
 }
 
-# Rcpp/RcppEigen/RcppParallel include flags. RcppParallel's vary by TBB
-# usage, so they come from `RcppParallel::CxxFlags()`.
+# Rcpp/RcppParallel include flags. RcppParallel's vary by TBB usage, so they
+# come from `RcppParallel::CxxFlags()`. Eigen is vendored under
+# inst/include, so it needs no external include flag.
 .stanr_dependency_cppflags <- function() {
   rcpp_parallel_flags <- tryCatch(
     utils::capture.output(RcppParallel::CxxFlags()),
@@ -68,10 +69,6 @@
     paste0(
       "-I",
       shQuote(system.file("include", package = "Rcpp", mustWork = TRUE))
-    ),
-    paste0(
-      "-I",
-      shQuote(system.file("include", package = "RcppEigen", mustWork = TRUE))
     ),
     trimws(paste(rcpp_parallel_flags, collapse = " "))
   )
@@ -164,7 +161,7 @@
       opt_flags = pch_build_cxxflags,
       header = unname(tools::md5sum(header)),
       dependencies = vapply(
-        c("Rcpp", "RcppEigen", "RcppParallel"),
+        c("Rcpp", "RcppParallel"),
         function(package) as.character(utils::packageVersion(package)),
         character(1)
       )

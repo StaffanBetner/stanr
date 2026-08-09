@@ -1,7 +1,7 @@
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <tbb/global_control.h>
 #include <Rcpp.h>
-#include <RcppEigen.h>
+#include <stanr/rcpp_eigen_interop.hpp>
 
 #include <stan/model/model_base.hpp>
 

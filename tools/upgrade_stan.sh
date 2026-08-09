@@ -73,7 +73,14 @@ sed -i.bak \
 rm -f "$INC/boost/math/special_functions/hypergeometric_1F1.hpp.bak"
 
 rm -rf "$INC/Eigen"
+rm -rf "$INC/unsupported"
 cp -Rf "$MATH_SRC"/lib/eigen_*/Eigen "$INC/"
+# Create the destination first so `cp -Rf` copies the `Eigen` directory
+# *into* it (yielding $INC/unsupported/Eigen/...). Without it, cp flattens
+# the source's contents directly into $INC/unsupported, breaking the
+# `<unsupported/Eigen/...>` include paths Stan relies on.
+mkdir -p "$INC/unsupported"
+cp -Rf "$MATH_SRC"/lib/eigen_*/unsupported/Eigen "$INC/unsupported/"
 
 # --- 8. Strip diagnostic pragmas from vendored headers ---------------------
 # R CMD check's pragma scan is textual, not compiler-aware, and flags

@@ -30,12 +30,10 @@ Imports:
     jsonlite
 LinkingTo:
     Rcpp,
-    RcppEigen,
     RcppParallel
 Suggests:
     testthat (>= 3.0.0),
-    loo,
-    RcppEigen
+    loo
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 NeedsCompilation: yes
