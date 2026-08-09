@@ -19,7 +19,7 @@ SUNDIALS_SOURCES = $(wildcard sundials/*.c)
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
 
 RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o
-OBJECTS = init.o xptr.o
+OBJECTS = init.o xptr.o hash.o
 
 $(SHLIB): static
 

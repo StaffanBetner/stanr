@@ -144,7 +144,7 @@
     )
   }
 
-  fingerprint <- digest::digest(
+  fingerprint <- .stanr_hash(
     list(
       stanr = as.character(utils::packageVersion("stanr")),
       r = R.version$version.string,
@@ -165,8 +165,7 @@
         function(package) as.character(utils::packageVersion(package)),
         character(1)
       )
-    ),
-    algo = "xxhash64"
+    )
   )
   cache_dir <- file.path(
     getOption(

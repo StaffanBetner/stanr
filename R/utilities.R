@@ -253,6 +253,12 @@
   is.null(ptr) || .Call(stanr_xptr_is_null, ptr)
 }
 
+# Cache-key fingerprint for a set of strings. Only needs to be a stable,
+# well-distributed hash for uniqueness, not cryptographically secure.
+.stanr_hash <- function(x) {
+  .Call(stanr_hash_strings, unlist(x, use.names = FALSE))
+}
+
 .stanr_rename_draw_columns <- function(x) {
   if (is.null(x)) {
     return(NULL)

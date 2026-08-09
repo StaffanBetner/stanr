@@ -243,7 +243,7 @@
   } else {
     hash_component <- character()
   }
-  model_hash <- digest::digest(
+  model_hash <- .stanr_hash(
     c(
       code,
       external_cpp_contents,
@@ -254,8 +254,7 @@
       .stanr_compiler_identity(),
       as.character(use_opencl),
       hash_component
-    ),
-    algo = "xxhash64"
+    )
   )
 
   memo <- if (is.null(.stanr_memo$compiled_envs)) {
