@@ -22,11 +22,7 @@ RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o
 OBJECTS = init.o xptr.o
 
 $(SHLIB): static
-$(OBJECTS) $(RUNNER_OBJECTS): package
-$(SUNDIALS_OBJECTS): | package
 
-package:
-	@cp -Rf walnutpie/include/. ../inst/include/
 
 static: $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 	@mkdir -p ../inst/lib/$(R_ARCH)
