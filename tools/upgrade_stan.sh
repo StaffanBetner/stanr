@@ -61,16 +61,60 @@ fi
 rm -rf "$INC/boost"
 mkdir -p "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/math "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/numeric "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/serialization "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/preprocessor "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/mpl "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/utility "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/type_traits "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/typeof "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/units "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/integer "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/fusion "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/range "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/iterator "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/concept "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/function_types "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/multi_array "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/random "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/optional "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/io "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/circular_buffer "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/*.hpp "$INC/boost"
+
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/lexical_cast "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/config "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/exception "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/assert "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/detail "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/core "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/container "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/move "$INC/boost"
 
 # Trim filename for CRAN 100-character limit
 mv "$INC/boost/math/special_functions/detail/hypergeometric_1F1_small_a_negative_b_by_ratio.hpp" \
   "$INC/boost/math/special_functions/detail/hypergeometric_1F1_small_a_neg_b_by_r.hpp"
+mv "$INC/boost/numeric/odeint/stepper/generation/generation_controlled_adams_bashforth_moulton.hpp" \
+  "$INC/boost/numeric/odeint/stepper/generation/generation_controlled_a_b_m.hpp"
+mv "$INC/boost/numeric/odeint/stepper/generation/generation_runge_kutta_cash_karp54_classic.hpp" \
+  "$INC/boost/numeric/odeint/stepper/generation/generation_runge_k_c_k_c.hpp"
 
 # Update includes for renamed header
 sed -i.bak \
   -e 's/hypergeometric_1F1_small_a_negative_b_by_ratio\.hpp/hypergeometric_1F1_small_a_neg_b_by_r.hpp/' \
   "$INC/boost/math/special_functions/hypergeometric_1F1.hpp"
 rm -f "$INC/boost/math/special_functions/hypergeometric_1F1.hpp.bak"
+
+
+sed -i.bak \
+  -e 's/generation\/generation_controlled_adams_bashforth_moulton\.hpp/generation\/generation_controlled_a_b_m.hpp/' \
+  "$INC/boost/numeric/odeint/stepper/generation.hpp"
+rm -f "$INC/boost/numeric/odeint/stepper/generation.hpp.bak"
+
+sed -i.bak \
+  -e 's/generation\/generation_runge_kutta_cash_karp54_classic\.hpp/generation\/generation_runge_k_c_k_c.hpp/' \
+  "$INC/boost/numeric/odeint/stepper/generation.hpp"
+rm -f "$INC/boost/numeric/odeint/stepper/generation.hpp.bak"
 
 rm -rf "$INC/Eigen"
 rm -rf "$INC/unsupported"
