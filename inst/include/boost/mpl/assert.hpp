@@ -186,8 +186,6 @@ template< typename P > struct assert_arg_pred_not
 
 #if BOOST_WORKAROUND(BOOST_GCC_VERSION, >= 80000)
 #define BOOST_MPL_IGNORE_PARENTHESES_WARNING
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wparentheses"
 #endif
 
 template< typename Pred >
@@ -202,7 +200,6 @@ failed ************ (boost::mpl::not_<Pred>::************
 
 #ifdef BOOST_MPL_IGNORE_PARENTHESES_WARNING
 #undef BOOST_MPL_IGNORE_PARENTHESES_WARNING
-#pragma GCC diagnostic pop
 #endif
 
 template< typename Pred >

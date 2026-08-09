@@ -160,8 +160,6 @@ struct node
    {}
 
    #if defined(BOOST_GCC) && (BOOST_GCC >= 40600) && (BOOST_GCC < 80000)
-      #pragma GCC diagnostic push
-      #pragma GCC diagnostic ignored "-Wstrict-aliasing"
       #define BOOST_CONTAINER_DISABLE_ALIASING_WARNING
    #  endif
 
@@ -181,7 +179,6 @@ struct node
    {  boost::move_detail::launder_cast<T*>(&this->m_storage)->~T();   }
 
    #if defined(BOOST_CONTAINER_DISABLE_ALIASING_WARNING)
-      #pragma GCC diagnostic pop
       #undef BOOST_CONTAINER_DISABLE_ALIASING_WARNING
    #  endif
 

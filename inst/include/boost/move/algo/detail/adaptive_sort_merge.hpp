@@ -58,9 +58,6 @@
 #include <limits.h>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#pragma GCC diagnostic ignored "-Wconversion"
 #endif
 
 #ifndef BOOST_MOVE_ADAPTIVE_SORT_STATS_LEVEL
@@ -1515,7 +1512,6 @@ typename iter_size<RandIt>::type
 }  //namespace boost {
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 #include <boost/move/detail/config_end.hpp>

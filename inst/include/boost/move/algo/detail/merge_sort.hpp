@@ -35,8 +35,6 @@
 #include <cassert>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 
 namespace boost {
@@ -208,7 +206,6 @@ void stable_sort_adaptive_ONlogN2(BidirectionalIterator first,
 }} //namespace boost {  namespace movelib{
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 #include <boost/move/detail/config_end.hpp>

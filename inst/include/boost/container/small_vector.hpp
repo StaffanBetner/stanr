@@ -481,9 +481,6 @@ inline std::size_t get_small_vector_storage_offset()
 }
 
 #if defined(BOOST_GCC) && (BOOST_GCC >= 40600)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-align"
-#pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 
 //Internal storage hack
@@ -514,7 +511,6 @@ inline typename small_vector_allocator<T, VoidAlloc, Options>::pointer
 }
 
 #if defined(BOOST_GCC) && (BOOST_GCC >= 40600)
-#pragma GCC diagnostic pop
 #endif
 
 #endif   //#ifndef BOOST_CONTAINER_DOXYGEN_INVOKED

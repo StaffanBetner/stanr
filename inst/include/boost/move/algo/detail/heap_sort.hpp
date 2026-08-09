@@ -31,8 +31,6 @@
 #include <cassert>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 
 namespace boost {  namespace movelib{
@@ -114,7 +112,6 @@ inline void heap_sort(RandomAccessIterator first, RandomAccessIterator last, Com
 }} //namespace boost {  namespace movelib{
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 #include <boost/move/detail/config_end.hpp>

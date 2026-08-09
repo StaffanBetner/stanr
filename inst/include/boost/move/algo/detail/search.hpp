@@ -14,8 +14,6 @@
 #include <boost/move/detail/iterator_traits.hpp>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 
 namespace boost {
@@ -73,7 +71,6 @@ RandIt upper_bound
 }  //namespace boost {
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 #endif   //#define BOOST_MOVE_DETAIL_SEARCH_HPP

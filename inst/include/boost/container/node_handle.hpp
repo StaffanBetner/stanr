@@ -35,8 +35,6 @@
 
 //GCC 12 is confused about maybe uninitialized allocators
 #if defined(BOOST_GCC) && (BOOST_GCC >= 120000) && (BOOST_GCC < 130000)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
 
@@ -448,7 +446,6 @@ struct insert_return_type_base
 }  //namespace boost {
 
 #if defined(BOOST_GCC) && (BOOST_GCC >= 120000) && (BOOST_GCC < 130000)
-#pragma GCC diagnostic pop
 #endif
 
 #include <boost/container/detail/config_end.hpp>

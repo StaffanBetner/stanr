@@ -16,8 +16,6 @@
 #include <boost/move/utility_core.hpp>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 
 namespace boost {
@@ -204,7 +202,6 @@ ForwardOutputIt1 inplace_set_unique_difference
 }
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 }  //namespace movelib {

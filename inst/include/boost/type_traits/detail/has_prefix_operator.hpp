@@ -19,8 +19,6 @@
 #include <utility>
 
 #ifdef BOOST_GCC
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated"
 #endif
 #if defined(BOOST_MSVC)
 #   pragma warning ( push )
@@ -68,7 +66,6 @@ namespace boost
 }
 
 #ifdef BOOST_GCC
-#pragma GCC diagnostic pop
 #endif
 #if defined(BOOST_MSVC)
 #   pragma warning ( pop )

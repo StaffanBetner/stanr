@@ -18,9 +18,6 @@
 #include <cassert>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#pragma GCC diagnostic ignored "-Wconversion"
 #endif
 
 namespace boost {
@@ -649,7 +646,6 @@ void adaptive_sort( RandIt first, RandIt last, Compare comp)
 #include <boost/move/detail/config_end.hpp>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 #endif   //#define BOOST_MOVE_ADAPTIVE_SORT_HPP

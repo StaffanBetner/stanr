@@ -18,7 +18,10 @@ MATH_SRC="$CMDSTAN_DIR/stan/lib/stan_math"
 INC=../inst/include
 
 # --- 1. Download and extract the CmdStan release ---------------------------
-wget https://github.com/stan-dev/cmdstan/releases/download/v$CMDSTAN_VER/cmdstan-$CMDSTAN_VER.tar.gz
+if [ ! -f "cmdstan-$CMDSTAN_VER.tar.gz" ]; then
+  wget https://github.com/stan-dev/cmdstan/releases/download/v$CMDSTAN_VER/cmdstan-$CMDSTAN_VER.tar.gz
+fi
+rm -rf "$CMDSTAN_DIR"
 tar -xf cmdstan-$CMDSTAN_VER.tar.gz
 
 # --- 2. Vendor the `stan` headers ------------------------------------------
@@ -43,20 +46,6 @@ cp -Rf "$MATH_SRC"/lib/sundials_*/include/* "$INC/"
 # Makevars: cp -Rf math/lib/sundials_*/src/sundials .
 rm -rf ../src/sundials
 cp -Rf "$MATH_SRC"/lib/sundials_*/src/sundials ../src/sundials
-
-# --- 7. Strip diagnostic-suppression pragmas from the bundled OpenCL header -
-# Mirrors the `cleanup` script run by Makevars' `package:` target, so the
-# vendored header is already clean for R CMD check.
-CL_HEADER="$INC/CL/cl_platform.h"
-if [ -f "$CL_HEADER" ]; then
-  sed -i.bak \
-    -e '/#pragma clang diagnostic/d' \
-    -e '/#pragma warning( *push *)/d' \
-    -e '/#pragma warning( *disable *:/d' \
-    -e '/#pragma warning( *pop *)/d' \
-    "$CL_HEADER"
-  rm -f "$CL_HEADER.bak"
-fi
 
 rm -rf "$INC/boost"
 mkdir -p "$INC/boost"
@@ -126,30 +115,54 @@ cp -Rf "$MATH_SRC"/lib/eigen_*/Eigen "$INC/"
 mkdir -p "$INC/unsupported"
 cp -Rf "$MATH_SRC"/lib/eigen_*/unsupported/Eigen "$INC/unsupported/"
 
-# --- 8. Strip diagnostic pragmas from vendored headers ---------------------
-# R CMD check's pragma scan is textual, not compiler-aware, and flags
-# "#pragma clang/warning/GCC diagnostic ..." wherever it appears regardless
-# of the surrounding #ifdef guard. Strip them from the vendored headers.
-EIGEN_WARN="$INC/Eigen/src/Core/util/DisableStupidWarnings.h"
-if [ -f "$EIGEN_WARN" ]; then
-  sed -i.bak \
-    -e '/#pragma clang diagnostic/d' \
-    -e '/#pragma GCC diagnostic/d' \
-    -e '/#pragma warning( *push *)/d' \
-    -e '/#pragma warning( *disable *:/d' \
-    -e '/#pragma warning( *pop *)/d' \
-    -e '/#pragma warning push/d' \
-    -e '/#pragma warning disable/d' \
-    "$EIGEN_WARN"
-  rm -f "$EIGEN_WARN.bak"
-fi
 
-BOOST_ISINF="$INC/boost/math/ccmath/isinf.hpp"
-if [ -f "$BOOST_ISINF" ]; then
-  sed -i.bak \
-    -e '/#pragma clang diagnostic/d' \
-    "$BOOST_ISINF"
-  rm -f "$BOOST_ISINF.bak"
-fi
+files_list=(
+  "$INC/CL/cl_platform.h"
+  "$INC/Eigen/src/Core/util/DisableStupidWarnings.h"
+  "$INC/boost/math/ccmath/isinf.hpp"
+  "$INC/boost/container/allocator_traits.hpp"
+  "$INC/boost/container/string.hpp"
+  "$INC/boost/container/detail/config_begin.hpp"
+  "$INC/boost/container/detail/flat_tree.hpp"
+  "$INC/boost/container/detail/is_container.hpp"
+  "$INC/boost/container/detail/is_contiguous_container.hpp"
+  "$INC/boost/container/detail/node_alloc_holder.hpp"
+  "$INC/boost/container/node_handle.hpp"
+  "$INC/boost/container/small_vector.hpp"
+  "$INC/boost/container/stable_vector.hpp"
+  "$INC/boost/get_pointer.hpp"
+  "$INC/boost/iterator/advance.hpp"
+  "$INC/boost/move/algo/adaptive_merge.hpp"
+  "$INC/boost/move/algo/adaptive_sort.hpp"
+  "$INC/boost/move/algo/detail/adaptive_sort_merge.hpp"
+  "$INC/boost/move/algo/detail/heap_sort.hpp"
+  "$INC/boost/move/algo/detail/insertion_sort.hpp"
+  "$INC/boost/move/algo/detail/merge_sort.hpp"
+  "$INC/boost/move/algo/detail/merge.hpp"
+  "$INC/boost/move/algo/detail/pdqsort.hpp"
+  "$INC/boost/move/algo/detail/search.hpp"
+  "$INC/boost/move/algo/detail/set_difference.hpp"
+  "$INC/boost/move/detail/std_ns_begin.hpp"
+  "$INC/boost/mpl/assert.hpp"
+  "$INC/boost/random/detail/disable_warnings.hpp"
+  "$INC/boost/range/adaptor/indexed.hpp"
+  "$INC/boost/type_traits/detail/has_prefix_operator.hpp"
+  "$INC/boost/type_traits/has_logical_not.hpp"
+)
+
+for file in "${files_list[@]}"; do
+  if [ -f "$file" ]; then
+    sed -i.bak \
+      -e '/#pragma clang diagnostic/d' \
+      -e '/#pragma GCC diagnostic/d' \
+      -e '/#pragma warning( *push *)/d' \
+      -e '/#pragma warning( *disable *:/d' \
+      -e '/#pragma warning( *pop *)/d' \
+      -e '/#pragma warning push/d' \
+      -e '/#pragma warning disable/d' \
+      "$file"
+    rm -f "$file.bak"
+  fi
+done
 
 echo "Done. Vendored stan and math headers into inst/include from CmdStan $CMDSTAN_VER."

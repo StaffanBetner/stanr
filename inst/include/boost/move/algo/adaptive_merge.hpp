@@ -17,9 +17,6 @@
 #include <cassert>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#pragma GCC diagnostic ignored "-Wconversion"
 #endif
 
 namespace boost {
@@ -357,7 +354,6 @@ void adaptive_merge( RandIt first, RandIt middle, RandIt last, Compare comp
 }  //namespace boost {
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 #include <boost/move/detail/config_end.hpp>

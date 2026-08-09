@@ -58,8 +58,6 @@
 #include <cstddef>
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-conversion"
 #endif
 
 namespace boost {
@@ -337,7 +335,6 @@ void pdqsort(Iter begin, Iter end, Compare comp)
 }  //namespace boost {
 
 #if defined(BOOST_CLANG) || (defined(BOOST_GCC) && (BOOST_GCC >= 40600))
-#pragma GCC diagnostic pop
 #endif
 
 #include <boost/move/detail/config_end.hpp>
