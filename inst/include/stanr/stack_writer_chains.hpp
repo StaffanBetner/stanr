@@ -4,7 +4,6 @@
 #include <Rcpp.h>
 #include <Eigen/Dense>
 #include <algorithm>
-#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -88,32 +87,34 @@ namespace stanr {
       warmup_diagnostics = make_array(n_warmup, n_diagnostics, diag_names);
     }
 
-    // Column layout is iteration-major within a chain buffer, so the warmup
-    // rows are a contiguous prefix of each source column.
-    const auto copy_column = [&](Rcpp::NumericVector& post,
-                                 Rcpp::NumericVector& warmup,
-                                 const double* source, int chain, int group) {
-      if (n_warmup > 0) {
-        std::memcpy(
-            REAL(warmup) +
-                (static_cast<size_t>(group) * num_chains + chain) * n_warmup,
-            source, static_cast<size_t>(n_warmup) * sizeof(double));
-      }
-      std::memcpy(
-          REAL(post) +
-              (static_cast<size_t>(group) * num_chains + chain) * n_post,
-          source + n_warmup, static_cast<size_t>(n_post) * sizeof(double));
-    };
+    Eigen::Map<Eigen::MatrixXd> samples_map(
+        REAL(samples), n_post, num_chains * n_params);
+    Eigen::Map<Eigen::MatrixXd> diagnostics_map(
+        REAL(diagnostics), n_post, num_chains * n_diagnostics);
+    Eigen::Map<Eigen::MatrixXd> warmup_samples_map(
+        n_warmup > 0 ? REAL(warmup_samples) : nullptr, n_warmup,
+        n_warmup > 0 ? num_chains * n_params : 0);
+    Eigen::Map<Eigen::MatrixXd> warmup_diagnostics_map(
+        n_warmup > 0 ? REAL(warmup_diagnostics) : nullptr, n_warmup,
+        n_warmup > 0 ? num_chains * n_diagnostics : 0);
 
     if (n_iterations > 0) {
       for (int i = 0; i < num_chains; ++i) {
         for (int g = 0; g < n_params; ++g) {
-          copy_column(samples, warmup_samples,
-                      writers[i].column_ptr(param_cols[g]), i, g);
+          Eigen::Map<const Eigen::VectorXd> col(
+              writers[i].column_ptr(param_cols[g]), n_iterations);
+          int idx = g * num_chains + i;
+          if (n_warmup > 0) warmup_samples_map.col(idx) = col.head(n_warmup);
+          samples_map.col(idx) = col.tail(n_post);
         }
         for (int g = 0; g < n_diagnostics; ++g) {
-          copy_column(diagnostics, warmup_diagnostics,
-                      writers[i].column_ptr(diag_cols[g]), i, g);
+          Eigen::Map<const Eigen::VectorXd> col(
+              writers[i].column_ptr(diag_cols[g]), n_iterations);
+          int idx = g * num_chains + i;
+          if (n_warmup > 0) {
+            warmup_diagnostics_map.col(idx) = col.head(n_warmup);
+          }
+          diagnostics_map.col(idx) = col.tail(n_post);
         }
         writers[i].release();
       }
