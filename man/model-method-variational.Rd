@@ -70,7 +70,7 @@ or \code{"fullrank"}.}
 \item{draws}{(integer) The number of draws from the variational approximation.}
 
 \item{num_threads}{(integer) The total number of threads to use. Defaults
-to \code{RcppParallel::defaultNumThreads()} (all available threads).}
+to all available threads.}
 
 \item{show_messages}{(logical) When \code{TRUE} (the default), print progress
 and informational output (e.g. iteration and timing messages) to the

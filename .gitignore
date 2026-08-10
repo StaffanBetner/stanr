@@ -10,7 +10,9 @@ compile_commands.json
 .cache
 libs
 lib
-^tools/cmdstan-*
+tools/cmdstan-*
 **.stanrc
 .posit
 **.DS_Store
+*.Rcheck/
+*.tar.gz

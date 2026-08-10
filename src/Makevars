@@ -1,17 +1,65 @@
-.PHONY: static package
+.PHONY: all static package
 CXX_STD = CXX20
 
+# Must stay the first rule: make's default goal is the first rule seen.
+all: $(SHLIB)
+
 PKG_CPPFLAGS = -I"../inst/include" -I"sundials" -include stan_sundials_printf_override.hpp -D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
-PKG_CPPFLAGS += $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::CxxFlags()" | tail -n 1)
+PKG_CPPFLAGS += -I"../inst/tbb/include"
 
-TBB_LIBS = $(shell "${R_HOME}/bin/Rscript" -e "RcppParallel::RcppParallelLibs()" | tail -n 1)
+TBB_SRC = ../inst/tbb
+TBB_BUILD_DIR = ../inst/tbb-build
+TBB_LIB_DIR = ../inst/lib/$(R_ARCH)
 
-ifeq ($(OS),Windows_NT)
-    TBB_CHECK = $(shell "${R_HOME}/bin/Rscript" -e "cat(utils::packageVersion('RcppParallel') >= '6.0.0')")
-	ifeq ($(TBB_CHECK),TRUE)
-		TBB_LIBS = -ltbb12 -ltbbmalloc
-	endif
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  TBB_LIB_NAMES = libtbb.dylib libtbbmalloc.dylib
+  TBB_LIB_GLOBS = libtbb.dylib libtbbmalloc.dylib
+  TBB_CXX_TYPE = $(shell echo "$(CXX)" | grep -qi clang && echo clang || echo gcc)
+  TBB_MAKE_CXX = $(CXX)
+  TBB_MAKE_CC = $(CC)
+else ifeq ($(UNAME_S),Linux)
+  # libtbb.so is a linker script needing libtbb.so.2 alongside it.
+  TBB_LIB_NAMES = libtbb.so.2 libtbbmalloc.so.2
+  TBB_LIB_GLOBS = libtbb.so* libtbbmalloc.so*
+  TBB_CXX_TYPE = $(shell echo "$(CXX)" | grep -qi clang && echo clang || echo gcc)
+  TBB_MAKE_CXX = $(CXX)
+  TBB_MAKE_CC = $(CC)
+else
+  # TBB has no Windows+clang config; ARM64 Rtools' g++/gcc are clang shims
+  # but must still be invoked by those names.
+  TBB_LIB_NAMES = tbb.dll tbbmalloc.dll
+  TBB_LIB_GLOBS = tbb.dll tbbmalloc.dll
+  TBB_CXX_TYPE = gcc
+  TBB_MAKE_CXX = g++
+  TBB_MAKE_CC = gcc
+  # TBB's Windows makefiles choke on paths with parentheses (e.g. Program Files (x86)).
+  MAKE_ESCAPED := ${subst ),,${subst (,,$(lastword $(MAKE))}}
+  ifneq ($(MAKE),$(MAKE_ESCAPED))
+    $(error The build toolchain (Rtools) is installed in a path containing parentheses, e.g. under "Program Files (x86)". TBB cannot build there -- please reinstall Rtools to a plain path such as C:/rtools45)
+  endif
 endif
+
+TBB_LIBS = -L"$(TBB_LIB_DIR)" -Wl,-rpath,@loader_path/../lib -ltbb -ltbbmalloc
+
+ifeq ($(TBB_CXX_TYPE),clang)
+  TBB_CXXFLAGS = -Wno-unknown-warning-option -Wno-deprecated-copy
+else
+  TBB_CXXFLAGS = -Wno-unknown-warning-option -Wno-deprecated-copy -Wno-missing-attributes -Wno-class-memaccess -Wno-sized-deallocation
+endif
+
+$(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)):
+	@mkdir -p $(TBB_BUILD_DIR) $(TBB_LIB_DIR)
+	cd $(TBB_BUILD_DIR) && \
+	CXX="$(TBB_MAKE_CXX)" CC="$(TBB_MAKE_CC)" $(MAKE) -r -f $(abspath $(TBB_SRC))/build/Makefile.tbb \
+	  tbb_root=$(abspath $(TBB_SRC)) compiler=$(TBB_CXX_TYPE) cfg=release stdver=c++17 stdlib= \
+	  CXXFLAGS="$(TBB_CXXFLAGS)"
+	cd $(TBB_BUILD_DIR) && \
+	CXX="$(TBB_MAKE_CXX)" CC="$(TBB_MAKE_CC)" $(MAKE) -r -f $(abspath $(TBB_SRC))/build/Makefile.tbbmalloc \
+	  tbb_root=$(abspath $(TBB_SRC)) compiler=$(TBB_CXX_TYPE) cfg=release stdver=c++17 stdlib= \
+	  CXXFLAGS="$(TBB_CXXFLAGS)" malloc_dll
+	cp -f $(addprefix $(TBB_BUILD_DIR)/,$(TBB_LIB_GLOBS)) $(TBB_LIB_DIR)/
+	rm -rf $(TBB_BUILD_DIR)
 
 PKG_LIBS += $(TBB_LIBS)
 
@@ -24,11 +72,11 @@ OBJECTS = init.o xptr.o hash.o
 $(SHLIB): static
 
 
-static: $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
+static: $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)) $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 	@mkdir -p ../inst/lib/$(R_ARCH)
 	$(AR) -rs ../inst/lib/$(R_ARCH)/libstanr_runner.a $(SUNDIALS_OBJECTS) $(RUNNER_OBJECTS)
-	@strip --strip-debug ../inst/lib/$(R_ARCH)/libstanr_runner.a || true
+	@strip -S ../inst/lib/$(R_ARCH)/libstanr_runner.a || true
 
 clean:
-	rm -rf ../inst/lib
+	rm -rf ../inst/lib ../inst/tbb-build
 	rm -f $(OBJECTS) $(RUNNER_OBJECTS)

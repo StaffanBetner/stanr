@@ -39,7 +39,7 @@ stan_model_laplace_impl <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  num_threads = RcppParallel::defaultNumThreads(),
+  num_threads = .stanr_default_num_threads(),
   opencl_ids = NULL,
   mode = NULL,
   opt_args = NULL,

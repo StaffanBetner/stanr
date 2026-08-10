@@ -12,7 +12,9 @@
 .stanr_append_build_key <- function(cpp_file, key_hash) {
   cat(
     "\nextern \"C\" SEXP stanr_build_key(void) {\n",
-    "  return Rf_ScalarString(Rf_mkChar(\"", key_hash, "\"));\n",
+    "  return Rf_ScalarString(Rf_mkChar(\"",
+    key_hash,
+    "\"));\n",
     "}\n",
     file = cpp_file,
     append = TRUE,
@@ -75,21 +77,19 @@
 }
 
 .stanr_tbb_libs <- function() {
-  tbb_libs <- utils::tail(
-    utils::capture.output(RcppParallel::RcppParallelLibs()),
-    1
+  tbb_lib_dir <- system.file(
+    "lib",
+    .Platform$r_arch,
+    package = "stanr",
+    mustWork = TRUE
   )
-  if (!length(tbb_libs)) {
-    tbb_libs <- ""
-  }
-  if (
-    .Platform$OS.type == "windows" &&
-      utils::packageVersion("RcppParallel") >= '6.0.0' &&
-      utils::packageVersion("RcppParallel") < '6.2.0'
-  ) {
-    tbb_libs <- "-ltbb12 -ltbbmalloc"
-  }
-  tbb_libs
+  paste0(
+    "-L",
+    shQuote(tbb_lib_dir),
+    " -Wl,-rpath,",
+    shQuote(tbb_lib_dir),
+    " -ltbb -ltbbmalloc"
+  )
 }
 
 # Rcpp must be loaded for its callables to register.
@@ -161,10 +161,12 @@
 
 # Bind exposed standalone functions (`_sexp` wrappers + registry) from a dll.
 .stanr_bind_exposed_functions <- function(dll, env) {
-  if (is.null(tryCatch(
-    getNativeSymbolInfo("stanr_exposed_functions", dll),
-    error = function(e) NULL
-  ))) {
+  if (
+    is.null(tryCatch(
+      getNativeSymbolInfo("stanr_exposed_functions", dll),
+      error = function(e) NULL
+    ))
+  ) {
     return(invisible(FALSE))
   }
   registry_fun <- local({

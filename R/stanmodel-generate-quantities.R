@@ -30,7 +30,7 @@ stan_model_generate_quantities_impl <- function(
   fitted_params,
   data = list(),
   seed = NULL,
-  num_threads = RcppParallel::defaultNumThreads(),
+  num_threads = .stanr_default_num_threads(),
   opencl_ids = NULL,
   show_messages = TRUE,
   show_exceptions = TRUE

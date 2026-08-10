@@ -1,5 +1,9 @@
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
+.stanr_default_num_threads <- function() {
+  parallel::detectCores()
+}
+
 .stanr_flag <- function(x, name) {
   if (!is.logical(x) || length(x) != 1L || is.na(x)) {
     stop("`", name, "` must be TRUE or FALSE.", call. = FALSE)

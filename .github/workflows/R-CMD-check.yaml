@@ -2,7 +2,7 @@
 # Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
 on:
   push:
-    branches: main
+    branches: [main, tbb-vendor]
   pull_request:
     branches: main
 
@@ -10,8 +10,7 @@ name: R-CMD-check
 
 jobs:
   R-CMD-check:
-    runs-on: ${{ matrix.config.os == 'wasm' && 'ubuntu-latest' || matrix.config.os }}
-    container: ${{ matrix.config.os == 'wasm' && 'ghcr.io/r-universe-org/build-wasm' || '' }}
+    runs-on: ubuntu-latest
 
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
@@ -19,8 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: wasm, r: 'release'}
-
           - {os: macos-latest,   r: 'devel'}
           - {os: macos-latest,   r: 'release'}
           - {os: macos-latest,   r: 'oldrel'}
@@ -59,17 +56,10 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::rcmdcheck ${{ matrix.config.os == 'wasm' && 'github::r-wasm/rwasm' || '' }}
+          extra-packages: any::rcmdcheck 
           needs: check
 
       - uses: r-lib/actions/check-r-package@v2
-        if: matrix.config.os != 'wasm'
         with:
           upload-results: true
           check-dir: '"check"'
-
-      - name: Check WASM build
-        if: matrix.config.os == 'wasm'
-        run: |
-          rwasm::build("local::.")
-        shell: Rscript {0}

@@ -7,8 +7,7 @@
 \title{The stanr package.}
 \description{
 A modern, simpler R interface for Stan. Bundles all required
-Stan and Eigen headers internally, and RcppParallel (TBB) for external
-dependencies.
+Stan, Eigen, and TBB headers internally.
 }
 \seealso{
 Useful links:
@@ -31,6 +30,7 @@ Other contributors:
   \item Stan Development Team (Stan sources and headers) [copyright holder]
   \item Walnutpie Developers (Walnutpie sources and headers) [copyright holder]
   \item Lawrence Livermore National Security (SUNDIALS sources and headers) [copyright holder]
+  \item Intel Corporation (TBB sources and headers) [copyright holder]
 }
 
 }

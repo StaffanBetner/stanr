@@ -42,7 +42,7 @@ a plain (non-container) \code{complex} -- for anything else (e.g. a
 \item{seed}{(integer) The random seed for reproducibility.}
 
 \item{num_threads}{(integer) The total number of threads to use. Defaults
-to \code{RcppParallel::defaultNumThreads()} (all available threads).}
+to all available threads.}
 
 \item{show_messages}{(logical) When \code{TRUE} (the default), print progress
 and informational output (e.g. iteration and timing messages) to the

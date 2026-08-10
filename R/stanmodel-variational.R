@@ -42,7 +42,7 @@ stan_model_variational_impl <- function(
   refresh = 100L,
   init = 2,
   save_latent_dynamics = FALSE,
-  num_threads = RcppParallel::defaultNumThreads(),
+  num_threads = .stanr_default_num_threads(),
   opencl_ids = NULL,
   algorithm = "meanfield",
   iter = 10000L,

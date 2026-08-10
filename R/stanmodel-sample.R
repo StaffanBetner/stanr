@@ -94,7 +94,7 @@ stan_model_sample_impl <- function(
   save_latent_dynamics = FALSE,
   chains = 4,
   chain_ids = seq_len(chains),
-  num_threads = RcppParallel::defaultNumThreads(),
+  num_threads = .stanr_default_num_threads(),
   opencl_ids = NULL,
   iter_warmup = 1000L,
   iter_sampling = 1000L,

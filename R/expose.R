@@ -290,7 +290,6 @@
     "#include <Rcpp.h>",
     "#include <stanr/rcpp_eigen_interop.hpp>",
     "#include <stanr/rcpp_tuple_interop.hpp>",
-    "// [[Rcpp::depends(RcppParallel)]]",
     "// [[Rcpp::plugins(cpp20)]]",
     "static std::ostream* pstream__ = &Rcpp::Rcout;"
   )

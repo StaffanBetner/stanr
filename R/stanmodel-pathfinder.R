@@ -39,7 +39,7 @@ stan_model_pathfinder_impl <- function(
   seed = NULL,
   refresh = 100L,
   init = 2,
-  num_threads = RcppParallel::defaultNumThreads(),
+  num_threads = .stanr_default_num_threads(),
   opencl_ids = NULL,
   init_alpha = 0.001,
   tol_obj = 1e-12,

@@ -47,6 +47,21 @@ cp -Rf "$MATH_SRC"/lib/sundials_*/include/* "$INC/"
 rm -rf ../src/sundials
 cp -Rf "$MATH_SRC"/lib/sundials_*/src/sundials ../src/sundials
 
+# --- 7. Vendor the TBB sources and headers ----------------------------------
+rm -rf ../inst/tbb
+mkdir -p ../inst/tbb
+cp -Rf "$MATH_SRC"/lib/tbb_*/include ../inst/tbb/
+cp -Rf "$MATH_SRC"/lib/tbb_*/src ../inst/tbb/
+cp -Rf "$MATH_SRC"/lib/tbb_*/build ../inst/tbb/
+cp -Rf "$MATH_SRC"/lib/tbb_*/LICENSE ../inst/tbb/
+cp -Rf "$MATH_SRC"/lib/tbb_*/README* ../inst/tbb/
+
+# R CMD build silently drops any dir named "*old" (undocumented, not
+# .Rbuildignore-able) -- rename TBB's legacy-API src/old/ to dodge it.
+mv ../inst/tbb/src/old ../inst/tbb/src/legacy
+sed -i.bak 's#\$(tbb_root)/src/old#$(tbb_root)/src/legacy#' ../inst/tbb/build/Makefile.tbb
+rm -f ../inst/tbb/build/Makefile.tbb.bak
+
 rm -rf "$INC/boost"
 mkdir -p "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/math "$INC/boost"
@@ -165,4 +180,4 @@ for file in "${files_list[@]}"; do
   fi
 done
 
-echo "Done. Vendored stan and math headers into inst/include from CmdStan $CMDSTAN_VER."
+echo "Done. Vendored stan and math headers into inst/include and TBB into inst/tbb from CmdStan $CMDSTAN_VER."

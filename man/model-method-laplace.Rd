@@ -64,7 +64,7 @@ abs-determinant of the Jacobian of the inverse transformation?}
 approximation be calculated?}
 
 \item{num_threads}{(integer) The total number of threads to use. Defaults
-to \code{RcppParallel::defaultNumThreads()} (all available threads).}
+to all available threads.}
 
 \item{show_messages}{(logical) When \code{TRUE} (the default), print progress
 and informational output (e.g. iteration and timing messages) to the

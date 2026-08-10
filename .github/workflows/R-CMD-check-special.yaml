@@ -1,6 +1,6 @@
 on:
   push:
-    branches: main
+    branches: [main, tbb-vendor]
   pull_request:
     branches: main
 
@@ -37,7 +37,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           job-config: ${{ toJson(matrix.config) }}
-          extra-packages: cran::RcppParallel?source=true
       - uses: r-hub/actions/run-check@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

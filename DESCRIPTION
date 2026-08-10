@@ -11,7 +11,9 @@ Authors@R:
     person("Walnutpie Developers", role = "cph",
             comment = "Walnutpie sources and headers"),
     person("Lawrence Livermore National Security", role = "cph",
-            comment = "SUNDIALS sources and headers")
+            comment = "SUNDIALS sources and headers"),
+    person("Intel Corporation", role = "cph",
+            comment = "TBB sources and headers")
   )
 Description: A modern, simpler R interface for Stan.
 License: BSD_3_clause + file LICENSE
@@ -22,13 +24,11 @@ Depends:
 Imports:
     R6,
     Rcpp (>= 1.0.0),
-    RcppParallel,
     QuickJSR,
     posterior,
     withr
 LinkingTo:
-    Rcpp,
-    RcppParallel
+    Rcpp
 Suggests:
     testthat (>= 3.0.0),
     loo

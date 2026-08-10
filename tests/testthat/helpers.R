@@ -89,6 +89,6 @@ test_threads <- function() {
   if (utils::getFromNamespace("on_cran", "testthat")()) {
     1
   } else {
-    RcppParallel::defaultNumThreads()
+    parallel::detectCores()
   }
 }
