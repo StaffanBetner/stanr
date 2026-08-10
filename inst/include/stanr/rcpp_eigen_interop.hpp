@@ -72,8 +72,8 @@ namespace Rcpp {
     };
   } // traits
 
-  // Rcpp is hardcoded to assume that Eigen types will be wrapped using the
-  //   eigen_wrap function in the RcppEigen package
+  // Rcpp is hardcoded to assume Eigen types are wrapped via the
+  // eigen_wrap function in the RcppEigen package
   namespace RcppEigen {
     template <typename T>
     SEXP eigen_wrap(const T& x) {

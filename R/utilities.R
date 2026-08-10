@@ -22,8 +22,8 @@
 }
 
 # Parses `cpp_options` into ordered `list(name, op, value)` assignments;
-# see `stan_model()`'s `@param cpp_options`. Input order preserved so a
-# later assignment to the same name takes effect.
+# see `stan_model()`'s `@param cpp_options`. Order preserved so a later
+# assignment to the same name takes effect.
 .stanr_parse_cpp_options <- function(cpp_options) {
   if (!is.list(cpp_options)) {
     stop("`cpp_options` must be a list.", call. = FALSE)
@@ -253,8 +253,8 @@
   is.null(ptr) || .Call(stanr_xptr_is_null, ptr)
 }
 
-# Cache-key fingerprint for a set of strings. Only needs to be a stable,
-# well-distributed hash for uniqueness, not cryptographically secure.
+# Cache-key fingerprint for a set of strings. Stable, well-distributed hash
+# for uniqueness, not cryptographically secure.
 .stanr_hash <- function(x) {
   .Call(stanr_hash_strings, unlist(x, use.names = FALSE))
 }

@@ -1,4 +1,4 @@
-# StanMLE class ----------------------------------------------------------------
+# StanMLE class
 
 #' StanMLE objects
 #'
@@ -100,8 +100,7 @@ StanMLE <- R6Class(
   cloneable = FALSE
 )
 
-# StanMLE method documentation -------------------------------------------------
-
+# StanMLE method documentation
 #' Extract point estimate
 #'
 #' @name fit-method-mle

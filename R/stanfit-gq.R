@@ -1,4 +1,4 @@
-# StanGQ class -----------------------------------------------------------------
+# StanGQ class
 
 #' StanGQ objects
 #'
@@ -51,8 +51,7 @@ StanGQ <- R6Class(
   cloneable = FALSE
 )
 
-# StanGQ method documentation --------------------------------------------------
-
+# StanGQ method documentation
 #' Generated quantities chain count
 #'
 #' @name fit-method-gq

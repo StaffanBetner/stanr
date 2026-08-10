@@ -247,8 +247,8 @@ model {
   expect_gt(calls_after_plain, 0L)
 
   # Same Stan code, `compile_standalone = TRUE`: the model TU is identical
-  # (a cache hit), but the functions block is compiled separately via
-  # sourceCpp, which runs its own stanc() call.
+  # (a cache hit), but generating the wrappers runs its own stanc(debug-ast)
+  # call.
   mod_standalone <- stan_model(
     code = code,
     compile_standalone = TRUE,

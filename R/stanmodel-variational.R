@@ -1,5 +1,4 @@
-# StanModel $variational() method ----------------------------------------------
-
+# StanModel $variational() method
 #' Run variational inference (ADVI)
 #'
 #' @name model-method-variational

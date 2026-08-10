@@ -1,4 +1,4 @@
-# StanModel class definition ---------------------------------------------------
+# StanModel class definition
 
 #' StanModel objects
 #'
@@ -139,9 +139,7 @@ StanModel <- R6Class(
       if (length(include_paths)) {
         include_paths <- normalizePath(include_paths, mustWork = TRUE)
       }
-      # Validated up front so a malformed entry fails fast at construction
-      # rather than at compile time; re-derived from the raw list later in
-      # `.compile_stan_model_environment()`.
+      # Validate up front so a malformed entry fails fast at construction.
       .stanr_parse_cpp_options(cpp_options)
       if (!is.list(stanc_options)) {
         stop("`stanc_options` must be a list.", call. = FALSE)
@@ -152,11 +150,9 @@ StanModel <- R6Class(
           call. = FALSE
         )
       }
+      # `user_header` is a legacy alias for `external_cpp`.
       if (!is.null(user_header)) {
-        stop(
-          "`user_header` is not yet supported; use `external_cpp`.",
-          call. = FALSE
-        )
+        external_cpp <- c(external_cpp, user_header)
       }
 
       private$stan_file_ <- stan_file
@@ -178,8 +174,7 @@ StanModel <- R6Class(
       invisible(self)
     },
 
-    # ---- Information methods ----
-
+    # ---- Information methods
     stan_file = function() private$stan_file_ %||% character(),
     has_stan_file = function() !is.null(private$stan_file_),
     code = function() private$code_,
@@ -196,8 +191,7 @@ StanModel <- R6Class(
     stanc_options = function() private$stanc_options_,
     use_opencl = function() private$use_opencl_,
 
-    # ---- Variables method ----
-
+    # ---- Variables method
     variables = function() {
       if (is.null(private$variables_)) {
         private$variables_ <- model_variables(
@@ -209,8 +203,7 @@ StanModel <- R6Class(
       private$variables_
     },
 
-    # ---- Compilation methods ----
-
+    # ---- Compilation methods
     compile = function(
       force_recompile = private$force_recompile_,
       quiet = private$quiet_,
@@ -222,8 +215,7 @@ StanModel <- R6Class(
         compile_standalone,
         "compile_standalone"
       )
-      # Incremented first so it reflects "a compile was attempted" even if
-      # the call below throws.
+      # Increment first so it reflects "a compile was attempted" even on throw.
       private$compile_generation_ <- private$compile_generation_ + 1L
       private$compiled_env_ <- .compile_stan_model_environment(
         code = private$resolved_code(),
@@ -234,18 +226,12 @@ StanModel <- R6Class(
         precompiled_headers = private$precompiled_headers_,
         force_recompile = force_recompile,
         use_opencl = private$use_opencl_,
-        cpp_options = private$cpp_options_
+        cpp_options = private$cpp_options_,
+        compile_standalone = compile_standalone
       )
       if (compile_standalone) {
         # cmdstanr parity: expose functions without a separate call.
-        private$functions_compiled_env_ <- .compile_standalone_functions_environment(
-          code = private$resolved_code(),
-          stan_file = private$stan_file_,
-          external_cpp = private$external_cpp_,
-          cpp_options = private$cpp_options_,
-          verbose = !quiet,
-          precompiled_headers = private$precompiled_headers_
-        )
+        private$functions_compiled_env_ <- private$compiled_env_
         .stanr_build_functions_env(
           private$functions_compiled_env_,
           self$functions,
@@ -338,8 +324,7 @@ StanModel <- R6Class(
       formatted
     },
 
-    # ---- Function exposure methods ----
-
+    # ---- Function exposure methods
     expose_stan_functions = function(global = FALSE, verbose = FALSE) {
       global <- .stanr_flag(global, "global")
       verbose <- .stanr_flag(verbose, "verbose")
@@ -367,8 +352,7 @@ StanModel <- R6Class(
       self$expose_stan_functions(global = global, verbose = verbose)
     },
 
-    # ---- Fitting methods (defined in stanmodel-*.R files) ----
-
+    # ---- Fitting methods (defined in stanmodel-*.R files)
     sample = stan_model_sample_impl,
     optimize = stan_model_optimize_impl,
     laplace = stan_model_laplace_impl,
@@ -377,9 +361,8 @@ StanModel <- R6Class(
     generate_quantities = stan_model_generate_quantities_impl,
     diagnose = stan_model_diagnose_impl,
 
-    # ---- Internal native entry points ----
-    # These remain public because sourceCpp functions live in a model-specific
-    # environment. They are not the user-facing API.
+    # ---- Internal native entry points
+    # Public because sourceCpp functions live in a model-specific env.
 
     new_model = function(data, seed, declarations = NULL) {
       private$ensure_compiled()
@@ -431,10 +414,9 @@ StanModel <- R6Class(
       }
       invisible(NULL)
     },
-    # `code_` is immutable after `initialize()`, so no invalidation logic is
-    # needed: once resolved it's valid for the object's whole lifetime.
-    # Shared by `$compile()` and `$variables()` so `#include` resolution (a
-    # recursive file-system walk) happens at most once per model.
+    # `code_` is immutable after `initialize()`, so no invalidation needed.
+    # Shared by `$compile()` and `$variables()` so `#include` resolution
+    # happens at most once per model.
     resolved_code = function() {
       if (is.null(private$resolved_code_)) {
         private$resolved_code_ <- resolve_stan_includes(
@@ -444,8 +426,7 @@ StanModel <- R6Class(
       }
       private$resolved_code_
     },
-    # Selects the OpenCL platform/device for the model's native computations.
-    # Triggers lazy compilation via `native_function()` if needed.
+    # Selects the OpenCL platform/device; triggers lazy compile if needed.
     select_opencl = function(opencl_ids) {
       ids <- as.integer(opencl_ids)
       if (length(ids) != 2L || anyNA(ids) || any(ids < 0L)) {
@@ -458,8 +439,7 @@ StanModel <- R6Class(
   cloneable = FALSE
 )
 
-# StanModel information method documentation -----------------------------------
-
+# StanModel information method documentation
 #' Access information from a `StanModel` object
 #'
 #' @name model-method-model-info
@@ -505,8 +485,7 @@ StanModel <- R6Class(
 #'
 NULL
 
-# StanModel variables method documentation -------------------------------------
-
+# StanModel variables method documentation
 #' Input and output variables of a Stan program
 #'
 #' @name model-method-variables
@@ -557,8 +536,7 @@ NULL
 #'
 NULL
 
-# StanModel compilation method documentation -----------------------------------
-
+# StanModel compilation method documentation
 #' Compile a Stan program
 #'
 #' @name model-method-compile
@@ -642,8 +620,7 @@ NULL
 #'
 NULL
 
-# StanModel function-exposure method documentation -----------------------------
-
+# StanModel function-exposure method documentation
 #' Expose Stan functions as R functions
 #'
 #' @name model-method-expose-stan-functions

@@ -275,12 +275,11 @@ void r_data_context::store_numeric(const std::string& name,
                                     std::move(dims)});
 }
 
-// `dims` excludes the trailing complex storage dimension of size two, which
-// is appended here. `enclosing_dims` is the count of enclosing array dims
-// (SIZE_MAX for a top-level variable, stored dense): stanc 2.39's generated
-// reader consumes vals_c() for a tuple-slot complex leaf in
-// per-enclosing-array-element windows of size 2m that are only half used,
-// so that windowed layout is built here.
+// `dims` excludes the trailing complex storage dim of size two, appended
+// here. `enclosing_dims` is the count of enclosing array dims (SIZE_MAX for
+// a top-level variable, stored dense): stanc 2.39's reader consumes vals_c()
+// for a tuple-slot complex leaf in per-enclosing-array-element windows of
+// size 2m that are only half used, so that windowed layout is built here.
 void r_data_context::store_complex(const std::string& name,
                                    std::vector<std::complex<double>> values,
                                    std::vector<size_t> dims,

@@ -1,5 +1,4 @@
-# StanModel $sample() method ---------------------------------------------------
-
+# StanModel $sample() method
 #' Run MCMC sampling
 #'
 #' @name model-method-sample
@@ -215,8 +214,7 @@ stan_model_sample_impl <- function(
   iter_warmup <- .stanr_int(iter_warmup, "iter_warmup")
   iter_sampling <- .stanr_int(iter_sampling, "iter_sampling")
   thin <- .stanr_int(thin, "thin", min = 1L)
-  # Calculate in double precision so adding two valid integer iteration counts
-  # cannot overflow to NA before the explicit R-size guard below.
+  # Double precision so valid int iteration counts can't overflow to NA.
   num_saved_draws <- ceiling(as.double(iter_sampling) / as.double(thin))
   if (save_warmup) {
     num_saved_draws <- num_saved_draws +
@@ -313,10 +311,7 @@ stan_model_sample_impl <- function(
       list(draws = NULL, diagnostics = NULL)
     } else {
       draws <- result$samples
-      # walnuts collects no sampler diagnostics; a zero-variable array keeps
-      # the diagnostic checks honestly silent. Other engines that emit no
-      # diagnostic columns keep the all-NA placeholder (see
-      # `$diagnostic_summary()`).
+      # walnuts collects no sampler diagnostics; keep checks honestly silent.
       diagnostics <- if (
         engine == "walnuts" || dim(result$diagnostics)[3] > 0
       ) {

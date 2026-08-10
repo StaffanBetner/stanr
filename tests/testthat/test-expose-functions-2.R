@@ -17,7 +17,6 @@ functions {
   env <- stanr:::.compile_standalone_functions_environment(code)
 
   expect_true(is.function(env$stanr_exposed_functions))
-  expect_true(is.function(env$stanr_rng_set_seed))
   expect_true(is.function(env$my_add))
   expect_true(is.function(env$my_add_rng))
   expect_true(is.function(env$vec_add))
@@ -98,10 +97,8 @@ functions {
   expect_equal(env$deep_id(deep_in), deep_in)
 
   # `_rng` function taking complex: reproducible with an explicit seed.
-  env$stanr_rng_set_seed(1L)
-  v1 <- env$czmul_rng(2 + 0i)
-  env$stanr_rng_set_seed(1L)
-  v2 <- env$czmul_rng(2 + 0i)
+  v1 <- env$czmul_rng(2 + 0i, seed = 1L)
+  v2 <- env$czmul_rng(2 + 0i, seed = 1L)
   expect_equal(v1, v2)
 })
 
@@ -138,9 +135,9 @@ functions {
   rng_fn <- target_env$build_env_add_rng
   expect_true(is.function(rng_fn))
   # explicit formals copied from the compiled export: real argument names,
-  # not `...`, plus a trailing seed = NULL.
+  # not `...`, plus a trailing seed argument defaulting to the current R seed.
   expect_equal(names(formals(rng_fn)), c("a", "b", "seed"))
-  expect_null(formals(rng_fn)$seed)
+  expect_false(identical(formals(rng_fn)$seed, quote(expr = )))
 
   # same explicit seed on two separate calls -> identical draws
   expect_equal(rng_fn(1, 2, seed = 42), rng_fn(1, 2, seed = 42))

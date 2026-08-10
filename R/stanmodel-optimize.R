@@ -1,5 +1,4 @@
-# StanModel $optimize() method -------------------------------------------------
-
+# StanModel $optimize() method
 #' Run optimization
 #'
 #' @name model-method-optimize

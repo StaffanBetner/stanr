@@ -1,4 +1,4 @@
-# StanDiagnose class -----------------------------------------------------------
+# StanDiagnose class
 
 #' StanDiagnose objects
 #'
@@ -66,8 +66,7 @@ StanDiagnose <- R6Class(
   cloneable = FALSE
 )
 
-# StanDiagnose method documentation --------------------------------------------
-
+# StanDiagnose method documentation
 #' Gradient diagnostic results
 #'
 #' @name fit-method-diagnose

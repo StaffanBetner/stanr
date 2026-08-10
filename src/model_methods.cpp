@@ -58,8 +58,7 @@ void attach_messages(RObject& result, const std::ostringstream& stream) {
 }
 
 Rcpp::XPtr<stan::rng_t> make_base_rng(unsigned int seed) {
-  // Independent stream; chain zero so these draws don't share an inference
-  // chain's stream.
+  // Independent stream; chain zero so these draws don't share a chain's stream.
   return Rcpp::XPtr<stan::rng_t>(
       new stan::rng_t(stan::services::util::create_rng(seed, 0)));
 }

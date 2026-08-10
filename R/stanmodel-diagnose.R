@@ -1,5 +1,4 @@
-# StanModel $diagnose() method -------------------------------------------------
-
+# StanModel $diagnose() method
 #' Run gradient diagnostics
 #'
 #' @name model-method-diagnose

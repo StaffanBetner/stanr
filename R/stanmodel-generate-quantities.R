@@ -1,5 +1,4 @@
-# StanModel $generate_quantities() method --------------------------------------
-
+# StanModel $generate_quantities() method
 #' Run generated quantities
 #'
 #' @name model-method-generate-quantities

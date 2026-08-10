@@ -1,4 +1,4 @@
-# StanFit class definition -----------------------------------------------------
+# StanFit class definition
 
 #' StanFit objects
 #'
@@ -447,8 +447,7 @@ StanFit <- R6Class(
   cloneable = FALSE
 )
 
-# StanFit method documentation -------------------------------------------------
-
+# StanFit method documentation
 #' Extract posterior draws
 #'
 #' @name fit-method-draws

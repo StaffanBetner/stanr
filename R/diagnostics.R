@@ -1,7 +1,6 @@
 # Warns about a count of problem transitions after MCMC sampling. Shared by
 # `.stanr_check_divergences()` and `.stanr_check_max_treedepth()`, which
-# differ only in `description` (completes "... transitions `description`.").
-# `count` is per-chain, all-`NA` if not collected.
+# differ only in `description`. `count` is per-chain, all-`NA` if not collected.
 .stanr_check_transitions <- function(count, num_draws, description) {
   if (anyNA(count)) {
     return(invisible(NULL))
@@ -44,12 +43,9 @@
   )
 }
 
-# Computes E-BFMI per chain and warns about problems. Unlike the
-# divergence/treedepth checks, a chain that can't be computed at all (too
-# few iterations, or missing/NA energy) is reported via `warning()` -- not
-# suppressed by `quiet` -- since that's a different kind of problem than
-# "computed fine but the value is bad". `draws` must already contain
-# `energy__`.
+# Computes E-BFMI per chain and warns about problems. A chain that can't be
+# computed at all (too few iterations, or missing/NA energy) is reported via
+# `warning()` -- not suppressed by `quiet`. `draws` must contain `energy__`.
 .stanr_check_ebfmi <- function(draws, n_chains, quiet, threshold = 0.3) {
   n_iter <- posterior::niterations(draws)
   if (n_iter < 3) {

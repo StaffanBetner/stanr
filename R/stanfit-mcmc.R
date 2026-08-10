@@ -1,4 +1,4 @@
-# StanMCMC class ---------------------------------------------------------------
+# StanMCMC class
 
 #' StanMCMC objects
 #'
@@ -257,8 +257,7 @@ StanMCMC <- R6Class(
   cloneable = FALSE
 )
 
-# StanMCMC method documentation ------------------------------------------------
-
+# StanMCMC method documentation
 #' MCMC-specific methods
 #'
 #' @name fit-method-mcmc

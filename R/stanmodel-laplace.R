@@ -1,5 +1,4 @@
-# StanModel $laplace() method --------------------------------------------------
-
+# StanModel $laplace() method
 #' Run Laplace approximation
 #'
 #' @name model-method-laplace
@@ -79,8 +78,7 @@ stan_model_laplace_impl <- function(
   show_exceptions <- common$show_exceptions
   num_threads <- common$num_threads
   refresh <- common$refresh
-  # Seed is resolved once so the internal mode-finding optimize() run (if
-  # any) and the laplace run itself share it.
+  # Seed resolved once so the internal optimize() run and laplace share it.
   resolved_seed <- .stanr_seed(seed)
 
   mode_fit <- NULL
@@ -144,9 +142,7 @@ stan_model_laplace_impl <- function(
     list(draws = posterior::as_draws_matrix(result$draws))
   }
 
-  # `init` is not part of laplace's native args (the Laplace approximation is
-  # centered at `mode`, not resolved via init), so the resolved default is
-  # simply unused here.
+  # `init` isn't part of laplace's native args (centered at `mode`), so unused.
   res <- .stanr_run_service(
     self = self,
     data = data,

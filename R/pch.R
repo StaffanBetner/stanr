@@ -1,4 +1,4 @@
-# Precompiled Stan model header support ---------------------------------------
+# Precompiled Stan model header support
 
 .stanr_opt_flags <- function() {
   flags <- "-O3 -g0 -w"
@@ -37,11 +37,10 @@
   file.path(R.home("etc"), "Makeconf")
 }
 
-# The makefiles vector that `R CMD SHLIB` passes to make (see
-# tools:::.shlib_internal() in src/library/tools/R/install.R): Makeconf, the
-# site Makevars, the platform shlib makefile, and the user Makevars. Passing
-# the user Makevars is essential so the PCH is built with the same CXX20*
-# flags (e.g. -march=native) as the model translation unit.
+# The makefiles vector `R CMD SHLIB` passes to make (see
+# tools:::.shlib_internal()): Makeconf, site Makevars, platform shlib
+# makefile, user Makevars. Passing the user Makevars is essential so the PCH
+# is built with the same CXX20* flags (e.g. -march=native) as the model TU.
 .stanr_makefiles <- function() {
   rarch <- if (nzchar(.Platform$r_arch)) paste0("/", .Platform$r_arch) else ""
   c(
@@ -56,9 +55,8 @@
   )
 }
 
-# Rcpp/RcppParallel include flags. RcppParallel's vary by TBB usage, so they
-# come from `RcppParallel::CxxFlags()`. Eigen is vendored under
-# inst/include, so it needs no external include flag.
+# Rcpp/RcppParallel include flags (vary by TBB usage, so from CxxFlags()).
+# Eigen is vendored under inst/include, so needs no external include flag.
 .stanr_dependency_cppflags <- function() {
   rcpp_parallel_flags <- tryCatch(
     utils::capture.output(RcppParallel::CxxFlags()),
@@ -150,8 +148,8 @@
       r = R.version$version.string,
       arch = R.version$arch,
       compiler = compiler,
-      # The CXX20* family, matching the variables the PCH recipe
-      # (`inst/pch.mk`) and the model TU compile both resolve to.
+      # The CXX20* family, matching what the PCH recipe (`inst/pch.mk`)
+      # and the model TU compile both resolve to.
       makeconf = vapply(
         c("CXX20", "CXX20STD", "CXX20FLAGS", "CXX20PICFLAGS", "CPPFLAGS"),
         .stanr_r_config,
@@ -184,8 +182,8 @@
   if (!file.exists(pch)) {
     dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
     if (compiler_type == "gcc" && !file.exists(cache_header)) {
-      # Windows lacks usable symlinks; copy instead. The copy can't drift:
-      # header md5 is in the fingerprint, so edits get a fresh cache dir.
+      # Windows lacks usable symlinks; copy instead. Header md5 is in the
+      # fingerprint, so edits get a fresh cache dir.
       staged <- if (.Platform$OS.type == "windows") {
         file.copy(header, cache_header, overwrite = TRUE)
       } else {
@@ -202,10 +200,8 @@
     if (verbose) {
       message("[stanr] Compiling precompiled model header...")
     }
-    # Pass the same makefiles vector as `R CMD SHLIB` (Makeconf, site
-    # Makevars, platform shlib makefile, user Makevars) via -f so the PCH is
-    # built with the same CXX20* flags (e.g. -march=native) as the model
-    # translation unit.
+    # Pass the same makefiles vector as `R CMD SHLIB` via -f so the PCH is
+    # built with the same CXX20* flags (e.g. -march=native) as the model TU.
     output <- tryCatch(
       .stanr_system2(
         make,

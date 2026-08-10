@@ -39,7 +39,9 @@ or set to \code{"model"}.}
 \item{include_paths}{(character vector) Paths to directories where Stan
 should look for files specified in \verb{#include} directives.}
 
-\item{user_header}{(string) Not yet supported. Use \code{external_cpp} instead.}
+\item{user_header}{(string) A path to a single C++ header file to prepend to
+the generated model code. A legacy alias for \code{external_cpp}; supplied
+headers are appended to \code{external_cpp} and treated identically.}
 
 \item{cpp_options}{(list) C++ compilation options, merged into the
 Makevars flags used to compile the model. Each element is either:

@@ -1,192 +1,321 @@
-# Post-processes standalone-functions C++ into an `Rcpp::sourceCpp()` unit:
-# rewrites `// [[stan::function]]` wrappers to `// [[Rcpp::export]]`, strips
-# `pstream__`/`base_rng__` params (replaced by file-static vars), and appends
-# a registry. A name colliding with `reserved_names` is an error. Returns
-# `full_code`, `wrapper_section`, and `functions` (name/is_rng).
-.stanr_process_standalone_cpp <- function(cpp_code, reserved_names) {
-  lines <- strsplit(cpp_code, "\n", fixed = TRUE)[[1]]
-  marker_idx <- which(trimws(lines) == "// [[stan::function]]")
-  if (length(marker_idx) == 0L) {
-    stop(
-      "Stan program has no functions that can be exposed as R functions.",
-      call. = FALSE
-    )
+# Generates R->C++ SEXP wrappers for a Stan `functions` block from stanc's
+# debug-ast output. Returns list(code, functions): `code` is the generated C++
+# (one `extern "C" SEXP <fn>_sexp(...)` per function + a registry) and
+# `functions` is data.frame(name, is_rng, args, arg_types, returntype).
+#
+# Wrappers use Rcpp::as/wrap (and vendored interop specializations), so they
+# compile with plain `R CMD SHLIB` (no Rcpp attribute processor). RNG fns are
+# detected by scanning each body for a `_rng` call; their wrappers take an
+# extra `seed` arg. Wrappers call `model_namespace::<fn>`; callers rewrite to
+# unqualified for external_cpp.
+.stanr_functions_to_cpp_wrappers <- function(model_code) {
+  if (!is.character(model_code) || length(model_code) != 1 || is.na(model_code)) {
+    stop("model_code must be a single, non-missing string.", call. = FALSE)
   }
 
-  preamble <- if (marker_idx[[1]] > 1L) {
-    lines[seq_len(marker_idx[[1]] - 1L)]
-  } else {
-    character()
+  # 1. Run stanc with debug-ast
+  ctx <- stanc_ctx()
+  res <- ctx$call("stanc", "model", model_code, as.array("debug-ast"))
+  if (!is.null(res$errors)) {
+    stop(paste(res$errors, collapse = "\n"), call. = FALSE)
   }
+  ast <- res$result
 
-  wrappers <- list()
-
-  for (i in seq_along(marker_idx)) {
-    start <- marker_idx[[i]] + 1L
-    end <- if (i < length(marker_idx)) {
-      marker_idx[[i + 1L]] - 1L
-    } else {
-      length(lines)
-    }
-    block <- lines[start:end]
-
-    right_trimmed <- sub("\\s+$", "", block)
-    last_char <- substr(
-      right_trimmed,
-      nchar(right_trimmed),
-      nchar(right_trimmed)
-    )
-    sig_end <- which(last_char == "{")
-    if (!length(sig_end)) {
-      stop(
-        "Malformed stanc standalone-functions output: no wrapper signature ",
-        "found after a `// [[stan::function]]` marker.",
-        call. = FALSE
-      )
-    }
-    sig_end <- sig_end[[1]]
-
-    signature <- gsub(
-      "\\s+",
-      " ",
-      paste(trimws(block[seq_len(sig_end)]), collapse = " ")
-    )
-
-    depth <- 1L
-    body_end <- NA_integer_
-    for (j in seq(sig_end + 1L, length(block))) {
-      depth <- depth +
-        nchar(gsub("[^{]", "", block[[j]])) -
-        nchar(gsub("[^}]", "", block[[j]]))
+  # 2. Extract the `functionblock` (first top-level node)
+  start <- regexpr("(functionblock", ast, fixed = TRUE)[[1]]
+  if (start < 0L) {
+    return(list(code = character(), functions = NULL))
+  }
+  chars <- strsplit(substr(ast, start, nchar(ast)), "", fixed = TRUE)[[1]]
+  depth <- 0L
+  fb_end <- NA_integer_
+  for (i in seq_along(chars)) {
+    if (chars[i] == "(") {
+      depth <- depth + 1L
+    } else if (chars[i] == ")") {
+      depth <- depth - 1L
       if (depth == 0L) {
-        body_end <- j
+        fb_end <- i
         break
       }
     }
-    if (is.na(body_end)) {
-      stop(
-        "Malformed stanc standalone-functions output: unterminated wrapper ",
-        "body after a `// [[stan::function]]` marker.",
-        call. = FALSE
-      )
-    }
-    body <- block[seq(sig_end + 1L, body_end)]
+  }
+  fb <- substr(ast, start, start + fb_end - 1L)
 
-    paren_pos <- regexpr("(", signature, fixed = TRUE)[[1]]
-    before_paren <- trimws(substr(signature, 1L, paren_pos - 1L))
-    name <- regmatches(before_paren, regexpr("[A-Za-z0-9_]+$", before_paren))
-
-    if (name %in% reserved_names) {
-      stop(
-        "Stan function `",
-        name,
-        "` collides with a reserved/internal stanr export name; rename ",
-        "the Stan function to expose it.",
-        call. = FALSE
-      )
-    }
-
-    # base_rng__ sits immediately before pstream__; strip it first so its
-    # optional leading comma leaves pstream__'s handling correct.
-    is_rng <- grepl(",?\\s*stan::rng_t&\\s*base_rng__", signature)
-    signature <- sub(",?\\s*stan::rng_t&\\s*base_rng__", "", signature)
-    signature <- sub(
-      ",?\\s*std::ostream\\s*\\*\\s*pstream__\\s*=\\s*nullptr",
-      "",
-      signature
-    )
-
-    wrappers[[length(wrappers) + 1L]] <- list(
-      name = name,
-      is_rng = is_rng,
-      signature = signature,
-      body = body
-    )
+  # 3. For each FunDef, keep the signature (up to `(body`) and the body
+  sig_starts <- gregexpr("(FunDef", fb, fixed = TRUE)[[1]]
+  body_pos <- gregexpr("(body", fb, fixed = TRUE)[[1]]
+  if (sig_starts[[1]] < 0L) {
+    return(list(code = character(), functions = NULL))
   }
 
-  names_vec <- vapply(wrappers, `[[`, character(1), "name")
-  is_dup <- duplicated(names_vec)
-  dropped_duplicate <- unique(names_vec[is_dup])
-  wrappers <- wrappers[!is_dup]
+  signatures <- character()
+  bodies <- character()
+  for (k in seq_along(sig_starts)) {
+    s <- sig_starts[[k]]
+    b <- body_pos[body_pos > s][1]
+    e <- if (k < length(sig_starts)) sig_starts[[k + 1L]] else nchar(fb) + 1L
+    # Signature: everything before `(body`, missing the FunDef's own closing
+    # paren (which comes after the body); append it to balance.
+    signatures <- c(signatures, paste0(substr(fb, s, b - 1L), ")"))
+    bodies <- c(bodies, substr(fb, b, e - 1L))
+  }
 
-  if (length(dropped_duplicate)) {
-    warning(
-      "Stan function(s) with duplicate name(s) after overload resolution; ",
-      "only the first overload of each is exposed: ",
-      paste(dropped_duplicate, collapse = ", "),
+  # 4. Parse each FunDef signature into a named list with C++ types
+  parse_fundef <- function(sig) {
+    tokens <- regmatches(
+      sig, gregexpr("\\(|\\)|[^()[:space:]]+", sig, perl = TRUE)
+    )[[1]]
+    i <- 1L
+
+    scalar_cpp <- function(tag) {
+      switch(tag,
+        UInt = "int",
+        UReal = "double",
+        UComplex = "std::complex<double>",
+        UVector = "Eigen::Matrix<double,-1,1>",
+        URowVector = "Eigen::Matrix<double,1,-1>",
+        UMatrix = "Eigen::Matrix<double,-1,-1>",
+        UComplexVector = "Eigen::Matrix<std::complex<double>,-1,1>",
+        UComplexRowVector = "Eigen::Matrix<std::complex<double>,1,-1>",
+        UComplexMatrix = "Eigen::Matrix<std::complex<double>,-1,-1>",
+        stop("Unknown AST type: ", tag, call. = FALSE)
+      )
+    }
+
+    parse_type <- function() {
+      if (tokens[i] == "(") {
+        i <<- i + 1L
+        tag <- tokens[i]
+        i <<- i + 1L
+        if (tag == "UArray") {
+          elem <- parse_type()
+          i <<- i + 1L  # ")"
+          paste0("std::vector<", elem, ">")
+        } else if (tag == "UTuple") {
+          i <<- i + 1L  # "(" of element list
+          elems <- character()
+          while (tokens[i] != ")") elems <- c(elems, parse_type())
+          i <<- i + 1L  # ")" of element list
+          i <<- i + 1L  # ")" of UTuple
+          paste0("std::tuple<", paste(elems, collapse = ", "), ">")
+        } else {
+          cpp <- scalar_cpp(tag)
+          i <<- i + 1L
+          cpp
+        }
+      } else {
+        cpp <- scalar_cpp(tokens[i])
+        i <<- i + 1L
+        cpp
+      }
+    }
+
+    parse_name <- function() {
+      i <<- i + 1L  # "(" of outer list
+      i <<- i + 1L  # "(" of (name X)
+      stopifnot(tokens[i] == "name")
+      i <<- i + 1L
+      nm <- tokens[i]
+      i <<- i + 1L  # X
+      i <<- i + 1L  # ")" of (name X)
+      while (tokens[i] != ")") i <<- i + 1L  # skip (id_loc ...)
+      i <<- i + 1L  # ")" of outer list
+      nm
+    }
+
+    # --- FunDef ---
+    i <- i + 1L  # "(" of FunDef
+    stopifnot(tokens[i] == "FunDef")
+    i <- i + 1L
+
+    # returntype: (returntype (ReturnType X)) or (returntype Void)
+    i <- i + 1L  # "(" of returntype
+    stopifnot(tokens[i] == "returntype")
+    i <- i + 1L
+    if (tokens[i] == "(") {
+      i <- i + 1L  # "(" of ReturnType
+      stopifnot(tokens[i] == "ReturnType")
+      i <- i + 1L
+      returntype <- parse_type()
+      i <- i + 1L  # ")" of ReturnType
+    } else {
+      stopifnot(tokens[i] == "Void")
+      returntype <- "void"
+      i <- i + 1L
+    }
+    i <- i + 1L  # ")" of returntype
+
+    # funname: (funname ((name X) (id_loc ...)))
+    i <- i + 1L  # "(" of funname
+    stopifnot(tokens[i] == "funname")
+    i <- i + 1L
+    name <- parse_name()
+    i <- i + 1L  # ")" of funname
+
+    # arguments: (arguments ((AutoDiffable TYPE (name X) (id_loc ...)) ...))
+    i <- i + 1L  # "(" of arguments
+    i <- i + 1L  # arguments tag
+    stopifnot(tokens[i] == "arguments")
+    i <- i + 1L  # "(" of argument list
+    i <- i + 1L  # first arg (or ")" if empty)
+    args <- character()
+    arg_types <- character()
+    while (tokens[i] == "(") {
+      i <- i + 1L  # "(" of the arg
+      # Skip the AD marker (AutoDiffable, DataOnly, ...).
+      i <- i + 1L
+      arg_types <- c(arg_types, parse_type())
+      args <- c(args, parse_name())
+      i <- i + 1L  # ")" of the arg
+      i <- i + 1L  # next arg (or ")" if done)
+    }
+    i <- i + 1L  # ")" of argument list
+    i <- i + 1L  # ")" of arguments
+
+    list(returntype = returntype, name = name, args = args, arg_types = arg_types)
+  }
+
+  fdecls <- lapply(signatures, parse_fundef)
+
+  # 5. Detect RNG functions by scanning each body for a `_rng` call
+  for (k in seq_along(fdecls)) {
+    fdecls[[k]]$is_rng <- grepl("[A-Za-z0-9_]_rng\\b", bodies[[k]])
+  }
+
+  # 6. Build one SEXP wrapper per function
+  # Function lives in `model_namespace` (model TU) or at file scope
+  # (standalone-only); default to `model_namespace::`, callers rewrite it.
+  build_wrapper <- function(info) {
+    ret <- info$returntype
+    name <- info$name
+    arg_names <- info$args
+    arg_types <- info$arg_types
+
+    sexp_params <- if (length(arg_names)) {
+      paste0("SEXP ", arg_names, "_sexp")
+    } else {
+      character()
+    }
+    get_lines <- if (length(arg_names)) {
+      paste0(
+        "  const auto ", arg_names, " = Rcpp::as<", arg_types,
+        ">(", arg_names, "_sexp);"
+      )
+    } else {
+      character()
+    }
+    call_args <- if (info$is_rng) {
+      paste(c(arg_names, "base_rng__", "pstream__"), collapse = ", ")
+    } else {
+      paste(c(arg_names, "pstream__"), collapse = ", ")
+    }
+
+    if (ret == "void") {
+      body <- c(
+        paste0("  model_namespace::", name, "(", call_args, ");"),
+        "  return R_NilValue;"
+      )
+    } else {
+      body <- paste0(
+        "  return Rcpp::wrap(model_namespace::", name, "(", call_args, "));"
+      )
+    }
+
+    if (info$is_rng) {
+      wrapper <- c(
+        paste0("extern \"C\" SEXP ", name, "_sexp(",
+               paste(c(sexp_params, "SEXP seed_sexp"), collapse = ", "), ") {"),
+        "  BEGIN_RCPP",
+        "  stan::rng_t base_rng__ = stan::services::util::create_rng(",
+        "      static_cast<unsigned int>(Rcpp::as<int>(seed_sexp)), 0);",
+        get_lines,
+        body,
+        "  END_RCPP",
+        "}"
+      )
+    } else {
+      wrapper <- c(
+        paste0("extern \"C\" SEXP ", name, "_sexp(",
+               paste(sexp_params, collapse = ", "), ") {"),
+        "  BEGIN_RCPP",
+        get_lines,
+        body,
+        "  END_RCPP",
+        "}"
+      )
+    }
+
+    paste(wrapper, collapse = "\n")
+  }
+
+  wrappers <- vapply(fdecls, build_wrapper, character(1))
+
+  # 7. Registry
+  names_vec <- vapply(fdecls, `[[`, character(1), "name")
+  is_rng_vec <- vapply(fdecls, `[[`, logical(1), "is_rng")
+  args_vec <- vapply(fdecls, function(f) paste(f$args, collapse = ","), character(1))
+
+  # A name colliding with the registry symbol would be a C++ redefinition.
+  reserved <- "stanr_exposed_functions"
+  if (reserved %in% names_vec) {
+    stop(
+      "Stan function `", reserved,
+      "` collides with a reserved/internal stanr export name; rename ",
+      "the Stan function to expose it.",
       call. = FALSE
     )
   }
 
-  surv_names <- vapply(wrappers, `[[`, character(1), "name")
-  surv_is_rng <- vapply(wrappers, `[[`, logical(1), "is_rng")
-
-  wrapper_blocks <- vapply(
-    wrappers,
-    function(w) {
-      paste(c("// [[Rcpp::export]]", w$signature, w$body), collapse = "\n")
-    },
-    character(1)
+  reg_lines <- c(
+    "extern \"C\" SEXP stanr_exposed_functions(void) {",
+    "  BEGIN_RCPP",
+    "  Rcpp::CharacterVector names = Rcpp::CharacterVector::create(",
+    paste0("    ", paste(sprintf('"%s"', names_vec), collapse = ", "), ");"),
+    "  Rcpp::LogicalVector is_rng = Rcpp::LogicalVector::create(",
+    paste0("    ", paste(ifelse(is_rng_vec, "true", "false"), collapse = ", "), ");"),
+    "  Rcpp::CharacterVector args = Rcpp::CharacterVector::create(",
+    paste0("    ", paste(sprintf('"%s"', args_vec), collapse = ", "), ");"),
+    "  return Rcpp::List::create(",
+    "    Rcpp::Named(\"name\") = names,",
+    "    Rcpp::Named(\"is_rng\") = is_rng,",
+    "    Rcpp::Named(\"args\") = args",
+    "  );",
+    "  END_RCPP",
+    "}"
   )
 
-  # 1234/0 are placeholder seed/chain; the real seed is set from R via
-  # stanr_rng_set_seed(). rcpp_eigen_interop.hpp provides Eigen-typed
-  # exports; rcpp_tuple_interop.hpp adds std::tuple wrap/as overloads.
-  prelude <- paste(
-    c(
-      "#include <stanr/rcpp_eigen_interop.hpp>",
-      "#include <stanr/rcpp_tuple_interop.hpp>",
-      "// [[Rcpp::depends(RcppParallel)]]",
-      "// [[Rcpp::plugins(cpp20)]]",
-      "static stan::rng_t base_rng__ = stan::services::util::create_rng(1234, 0);",
-      "static std::ostream* pstream__ = &Rcpp::Rcout;",
-      "// [[Rcpp::export]]",
-      "void stanr_rng_set_seed(int seed) {",
-      "  base_rng__ = stan::services::util::create_rng(static_cast<unsigned int>(seed), 0);",
-      "}"
-    ),
-    collapse = "\n"
+  header <- c(
+    "#include <stan/model/model_header.hpp>",
+    "#include <Rcpp.h>",
+    "#include <stanr/rcpp_eigen_interop.hpp>",
+    "#include <stanr/rcpp_tuple_interop.hpp>",
+    "// [[Rcpp::depends(RcppParallel)]]",
+    "// [[Rcpp::plugins(cpp20)]]",
+    "static std::ostream* pstream__ = &Rcpp::Rcout;"
   )
 
-  registry <- paste(
-    c(
-      "// [[Rcpp::export]]",
-      "Rcpp::List stanr_exposed_functions() {",
-      "  return Rcpp::List::create(",
-      paste0(
-        '    Rcpp::Named("name") = Rcpp::CharacterVector::create(',
-        paste(sprintf('"%s"', surv_names), collapse = ", "),
-        "),"
-      ),
-      paste0(
-        '    Rcpp::Named("is_rng") = Rcpp::LogicalVector::create(',
-        paste(ifelse(surv_is_rng, "true", "false"), collapse = ", "),
-        ")"
-      ),
-      "  );",
-      "}"
-    ),
-    collapse = "\n"
+  code <- paste(c(header, wrappers, paste(reg_lines, collapse = "\n")),
+                collapse = "\n\n")
+
+  functions_df <- data.frame(
+    name = names_vec,
+    is_rng = is_rng_vec,
+    args = args_vec,
+    arg_types = vapply(fdecls, function(f) {
+      paste(f$arg_types, collapse = ",")
+    }, character(1)),
+    returntype = vapply(fdecls, `[[`, character(1), "returntype"),
+    stringsAsFactors = FALSE
   )
 
-  wrapper_section <- paste(
-    c(prelude, wrapper_blocks, registry),
-    collapse = "\n"
-  )
-  full_code <- paste(
-    paste(preamble, collapse = "\n"),
-    wrapper_section,
-    sep = "\n"
-  )
-
-  list(
-    full_code = full_code,
-    wrapper_section = wrapper_section,
-    functions = data.frame(name = surv_names, is_rng = surv_is_rng)
-  )
+  list(code = code, functions = functions_df)
 }
 
-# Compiles a Stan program's `functions` block via `Rcpp::sourceCpp()`.
+# Compiles a Stan `functions` block into a callable env via `R CMD SHLIB`
+# (no Rcpp::sourceCpp): stanc -> standalone C++ + generated SEXP wrappers,
+# then dyn.load. Wrappers call `model_namespace::<fn>`, which the standalone
+# TU defines.
 .compile_standalone_functions_environment <- function(
   code,
   stan_file = NULL,
@@ -197,44 +326,53 @@
 ) {
   .stanr_require_compile_packages()
 
-  reserved_names <- c("stanr_exposed_functions", "stanr_rng_set_seed")
-
   stanc_out <- stanc(
     code,
     standalone_functions = TRUE,
     external_cpp = external_cpp
   )
-  processed <- .stanr_process_standalone_cpp(stanc_out, reserved_names)
+  # Keep only the model_namespace impl, dropping the `// [[stan::function]]`
+  # wrapper stubs (unused now).
+  impl <- sub(
+    "\\n// \\[\\[stan::function\\]\\].*$",
+    "",
+    stanc_out,
+    perl = TRUE
+  )
 
-  # external_cpp sits at file scope, before `model_namespace`, so unqualify
-  # wrappers' `model_namespace::<fn>(...)` calls to it.
+  gen <- .stanr_functions_to_cpp_wrappers(code)
+  wrapper_section <- gen$code
+
+  # external_cpp is at file scope before `model_namespace`; unqualify calls.
   if (length(external_cpp) > 0) {
-    full_code <- processed$full_code
     namespace_pos <- regexpr(
       "namespace model_namespace",
-      full_code,
+      impl,
       fixed = TRUE
     )[[1]]
-    for (fn_name in processed$functions$name) {
-      first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), full_code)[[1]]
+    for (fn_name in gen$functions$name) {
+      first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), impl)[[1]]
       if (first_pos > 0 && first_pos < namespace_pos) {
-        full_code <- gsub(
+        wrapper_section <- gsub(
           paste0("model_namespace::", fn_name, "("),
           paste0(fn_name, "("),
-          full_code,
+          wrapper_section,
           fixed = TRUE
         )
       }
     }
-    processed$full_code <- full_code
   }
+
+  # Wrappers include <stan/model/model_header.hpp>; the standalone impl
+  # already includes it, so the include guard dedupes.
+  full_code <- paste(impl, wrapper_section, sep = "\n")
 
   cpp_option_assignments <- .stanr_parse_cpp_options(cpp_options)
   extra_assignments <- cpp_option_assignments
 
-  tmp_file <- tempfile(fileext = ".cpp")
-  on.exit(unlink(tmp_file))
-  writeLines(processed$full_code, tmp_file)
+  build_dir <- .stanr_build_scratch_dir()
+  cpp_file <- file.path(build_dir, "stanr_functions.cpp")
+  writeLines(full_code, cpp_file)
 
   base_cppflags <- .stanr_base_cppflags()
   if (
@@ -251,42 +389,22 @@
   if (verbose) {
     message("[stanr] Compiling Stan functions...")
   }
-  compiled_env <- new.env()
-  withr::with_makevars(
-    .stanr_apply_makevars(
-      c(
-        PKG_CPPFLAGS = paste(c(cppflags, .stanr_dependency_cppflags()), collapse = " "),
-        PKG_LIBS = .stanr_tbb_libs()
-      ),
-      extra_assignments
-    ),
-    assignment = "+=",
-    Rcpp::sourceCpp(
-      file = tmp_file,
-      env = compiled_env,
-      verbose = verbose
-    )
+  lib_file <- .stanr_compile(
+    cpp_file = cpp_file,
+    cppflags = cppflags,
+    libs = .stanr_tbb_libs(),
+    extra_assignments = extra_assignments,
+    verbose = verbose
   )
 
+  compiled_env <- new.env()
+  .stanr_load_functions_build(lib_file, compiled_env)
   compiled_env
 }
 
-# Wraps a compiled `_rng` export with an explicit `seed` argument.
-.stanr_rng_wrapper <- function(fn, compiled_env) {
-  base_formals <- formals(fn)
-  arg_names <- names(base_formals) %||% character()
-  wrapper <- function(seed = NULL) {
-    if (!is.null(seed)) {
-      compiled_env$stanr_rng_set_seed(seed)
-    }
-    do.call(fn, mget(arg_names, envir = environment()))
-  }
-  formals(wrapper) <- c(base_formals, alist(seed = NULL))
-  wrapper
-}
-
-# Populates a target env from a compiled functions env, wrapping `_rng`
-# exports with `.stanr_rng_wrapper()`.
+# Populates a target env from a compiled functions env. The env already has
+# each exposed fn bound as a .Call wrapper (explicit formals, trailing `seed`
+# for `_rng` fns) plus `stanr_exposed_functions`.
 .stanr_build_functions_env <- function(
   compiled_env,
   target_env,
@@ -298,21 +416,12 @@
   # Clear stale bindings from a previous build.
   rm(list = ls(target_env), envir = target_env)
 
-  if (any(registry$is_rng)) {
-    compiled_env$stanr_rng_set_seed(sample.int(.Machine$integer.max, 1))
-  }
-
-  for (i in seq_along(registry$name)) {
-    name <- registry$name[[i]]
+  for (i in seq_along(registry[["name"]])) {
+    name <- registry[["name"]][[i]]
     fn <- compiled_env[[name]]
-    value <- if (registry$is_rng[[i]]) {
-      .stanr_rng_wrapper(fn, compiled_env)
-    } else {
-      fn
-    }
-    assign(name, value, envir = target_env)
+    assign(name, fn, envir = target_env)
     if (global) {
-      assign(name, value, envir = global_env)
+      assign(name, fn, envir = global_env)
     }
   }
 

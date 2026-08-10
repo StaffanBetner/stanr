@@ -46,7 +46,7 @@
   lib_file
 }
 
-# With USE_CXX20=1, R CMD SHLIB uses CXX20FLAGS (not CXXFLAGS).
+# USE_CXX20=1 -> SHLIB uses CXX20FLAGS, not CXXFLAGS.
 .stanr_compile <- function(
   cpp_file,
   cppflags,
@@ -92,7 +92,7 @@
   tbb_libs
 }
 
-# Rcpp must be loaded for its callables (XPtr, List, ...) to be registered.
+# Rcpp must be loaded for its callables to register.
 .stanr_require_compile_packages <- function() {
   loadNamespace("Rcpp")
 }
@@ -107,7 +107,7 @@
   )
 }
 
-# PCH is skipped when cpp_options overrides compiler flags.
+# PCH skipped when cpp_options overrides compiler flags.
 .stanr_cpp_options_block_pch <- function(assignments) {
   compiler_vars <- c(
     "CPPFLAGS",
@@ -150,13 +150,57 @@
       dir.create(dirname(cache_file), recursive = TRUE, showWarnings = FALSE)
       tmp_out <- paste0(cache_file, ".tmp", Sys.getpid())
       file.copy(lib_file, tmp_out, overwrite = TRUE)
-      # file.rename() will not replace an existing file on Windows.
+      # file.rename() won't replace an existing file on Windows.
       unlink(cache_file)
       file.rename(tmp_out, cache_file)
       invisible(NULL)
     },
     error = function(e) invisible(NULL)
   )
+}
+
+# Bind exposed standalone functions (`_sexp` wrappers + registry) from a dll.
+.stanr_bind_exposed_functions <- function(dll, env) {
+  if (is.null(tryCatch(
+    getNativeSymbolInfo("stanr_exposed_functions", dll),
+    error = function(e) NULL
+  ))) {
+    return(invisible(FALSE))
+  }
+  registry_fun <- local({
+    addr <- getNativeSymbolInfo("stanr_exposed_functions", dll)$address
+    function(...) do.call(".Call", list(addr, ...))
+  })
+  registry <- registry_fun()
+  env[["stanr_exposed_functions"]] <- registry_fun
+  for (i in seq_along(registry[["name"]])) {
+    name <- registry[["name"]][[i]]
+    arg_names <- strsplit(registry[["args"]][[i]], ",", fixed = TRUE)[[1]]
+    is_rng <- isTRUE(registry[["is_rng"]][[i]])
+    if (is_rng) {
+      arg_names <- c(arg_names, "seed")
+    }
+    sym <- getNativeSymbolInfo(paste0(name, "_sexp"), dll)
+    addr <- sym$address
+    # Explicit formals forwarding to .Call; RNG `seed` defaults to session seed.
+    formals_list <- stats::setNames(
+      rep(list(quote(expr = )), length(arg_names)),
+      arg_names
+    )
+    if (is_rng) {
+      formals_list[["seed"]] <- quote(sample.int(.Machine$integer.max, 1))
+    }
+    fn <- eval(call(
+      "function",
+      as.pairlist(formals_list),
+      as.call(c(
+        list(quote(.Call), addr),
+        lapply(arg_names, as.name)
+      ))
+    ))
+    env[[name]] <- fn
+  }
+  invisible(TRUE)
 }
 
 .stanr_load_build <- function(so_file, env) {
@@ -168,10 +212,19 @@
       function(...) do.call(".Call", list(addr, ...))
     })
   }
+  # Bind exposed standalone functions if present.
+  .stanr_bind_exposed_functions(dll, env)
   do.call(".Call", list(getNativeSymbolInfo("stanr_build_key", dll)$address))
 }
 
-# Each attempt dyn.loads a private copy so recompiles never touch a live fit.
+# Loads a standalone-functions-only .so (no model exports): bind exposed fns.
+.stanr_load_functions_build <- function(so_file, env) {
+  dll <- dyn.load(so_file)
+  .stanr_bind_exposed_functions(dll, env)
+  invisible(env)
+}
+
+# dyn.load a private copy so recompiles never touch a live fit.
 .stanr_restore_build_cache <- function(cache_file, key_hash, env) {
   if (!file.exists(cache_file)) {
     return(FALSE)
@@ -221,17 +274,18 @@
   precompiled_headers = TRUE,
   force_recompile = FALSE,
   use_opencl = FALSE,
-  cpp_options = list()
+  cpp_options = list(),
+  compile_standalone = FALSE
 ) {
   .stanr_require_compile_packages()
 
   model_support <- readLines(
     system.file("stan_model.cpp", package = "stanr", mustWork = TRUE)
   )
-  # external_cpp is hashed by content, not path.
+  # external_cpp hashed by content, not path.
   external_cpp_contents <- .stanr_external_cpp_contents(external_cpp)
   extra_assignments <- .stanr_parse_cpp_options(cpp_options)
-  # Stable sort so reordering unrelated cpp_options doesn't change the hash.
+  # Stable sort so reordering cpp_options doesn't change the hash.
   if (length(extra_assignments)) {
     assignment_names <- vapply(extra_assignments, `[[`, character(1), "name")
     ord <- order(assignment_names)
@@ -253,6 +307,7 @@
       R.version$platform,
       .stanr_compiler_identity(),
       as.character(use_opencl),
+      as.character(compile_standalone),
       hash_component
     )
   )
@@ -285,13 +340,38 @@
     external_cpp = external_cpp,
     use_opencl = use_opencl
   )
+  if (compile_standalone) {
+    # Generate R->C++ SEXP wrappers from the AST (no Rcpp::sourceCpp).
+    gen <- .stanr_functions_to_cpp_wrappers(code)
+    wrapper_section <- gen$code
+    # external_cpp is at file scope before `model_namespace`; unqualify calls.
+    if (length(external_cpp) > 0) {
+      namespace_pos <- regexpr(
+        "namespace model_namespace",
+        cpp_code,
+        fixed = TRUE
+      )[[1]]
+      for (fn_name in gen$functions$name) {
+        first_pos <- regexpr(paste0("\\b", fn_name, "\\b"), cpp_code)[[1]]
+        if (first_pos > 0 && first_pos < namespace_pos) {
+          wrapper_section <- gsub(
+            paste0("model_namespace::", fn_name, "("),
+            paste0(fn_name, "("),
+            wrapper_section,
+            fixed = TRUE
+          )
+        }
+      }
+    }
+    cpp_code <- c(cpp_code, wrapper_section)
+  }
   writeLines(c(cpp_code, model_support), cpp_file)
 
   .stanr_append_build_key(cpp_file, model_hash)
 
   cppflags <- .stanr_base_cppflags()
   if (use_opencl) {
-    # Pinned to 0/0; real device selection happens at runtime.
+    # Pinned to 0/0; real device selection at runtime.
     cppflags <- paste(
       cppflags,
       "-DSTAN_OPENCL -DOPENCL_PLATFORM_ID=0 -DOPENCL_DEVICE_ID=0",
@@ -322,8 +402,7 @@
 
   tbb_libs <- .stanr_tbb_libs()
 
-  # libstanr_runner.a is built without STAN_OPENCL; safe because services
-  # touch the model only through the model_base virtual interface.
+  # runner.a built without STAN_OPENCL; services touch model via virtual iface.
   libs <- paste(shQuote(runtime_archive), tbb_libs)
   if (use_opencl) {
     opencl_default <- if (Sys.info()[["sysname"]] == "Darwin") {
@@ -388,7 +467,9 @@
 #'   or set to `"model"`.
 #' @param include_paths (character vector) Paths to directories where Stan
 #'   should look for files specified in `#include` directives.
-#' @param user_header (string) Not yet supported. Use `external_cpp` instead.
+#' @param user_header (string) A path to a single C++ header file to prepend to
+#'   the generated model code. A legacy alias for `external_cpp`; supplied
+#'   headers are appended to `external_cpp` and treated identically.
 #' @param cpp_options (list) C++ compilation options, merged into the
 #'   Makevars flags used to compile the model. Each element is either:
 #'   * A named element, e.g. `list(CXX = "g++")`. This *overrides* any value

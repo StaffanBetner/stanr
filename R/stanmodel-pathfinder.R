@@ -1,5 +1,4 @@
-# StanModel $pathfinder() method -----------------------------------------------
-
+# StanModel $pathfinder() method
 #' Run Pathfinder
 #'
 #' @name model-method-pathfinder

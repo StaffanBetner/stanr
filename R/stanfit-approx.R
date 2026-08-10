@@ -4,7 +4,7 @@
   as.numeric(self$draws(variables = "lp_approx__", format = "draws_matrix"))
 }
 
-# StanLaplace class ------------------------------------------------------------
+# StanLaplace class
 
 #' StanLaplace objects
 #'
@@ -59,8 +59,7 @@ StanLaplace <- R6Class(
   cloneable = FALSE
 )
 
-# StanLaplace method documentation ---------------------------------------------
-
+# StanLaplace method documentation
 #' Extract Laplace mode
 #'
 #' @name fit-method-laplace-mode
@@ -78,7 +77,7 @@ StanLaplace <- R6Class(
 #'
 NULL
 
-# StanVB class -----------------------------------------------------------------
+# StanVB class
 
 #' StanVB objects
 #'
@@ -142,7 +141,7 @@ StanVB <- R6Class(
   cloneable = FALSE
 )
 
-# StanPathfinder class ---------------------------------------------------------
+# StanPathfinder class
 
 #' StanPathfinder objects
 #'
