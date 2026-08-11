@@ -31,6 +31,7 @@ Other contributors:
   \item Walnutpie Developers (Walnutpie sources and headers) [copyright holder]
   \item Lawrence Livermore National Security (SUNDIALS sources and headers) [copyright holder]
   \item Intel Corporation (TBB sources and headers) [copyright holder]
+  \item Posit Software, PBC (cpp11 sources and headers) [copyright holder]
 }
 
 }

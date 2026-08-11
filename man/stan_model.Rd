@@ -18,7 +18,8 @@ stan_model(
   quiet = TRUE,
   external_cpp = NULL,
   use_opencl = FALSE,
-  compile_standalone = FALSE
+  compile_standalone = FALSE,
+  backend = "compiled"
 )
 }
 \arguments{
@@ -98,6 +99,11 @@ returns -- equivalent to \code{FALSE} here plus calling
 immediately after, but without a second compile. See
 \code{\link[=model-method-expose-stan-functions]{$expose_stan_functions()}} for
 what gets exposed and how.}
+
+\item{backend}{(string) Either \code{"compiled"} (the default), which compiles
+the model to a native shared library, or \code{"stanli"}, which interprets
+the model instead of compiling it. The \code{"stanli"} backend does not
+support \code{use_opencl} or constrained-scale \code{init} values.}
 }
 \value{
 A \code{\link{StanModel}} object.

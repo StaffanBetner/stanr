@@ -4,19 +4,12 @@ CXX_STD = CXX20
 # Must stay the first rule: make's default goal is the first rule seen.
 all: $(SHLIB)
 
-STANLI_EIGEN_DIR = $(firstword $(wildcard stanli/deps/math/lib/eigen_*))
-STANLI_BOOST_DIR = $(firstword $(wildcard stanli/deps/math/lib/boost_*))
-STANLI_TBB_DIR = $(firstword $(wildcard stanli/deps/math/lib/tbb_*))
-
-PKG_CPPFLAGS = -I"../inst/include" -I"stanli/deps/math" -I"stanli/deps/stan/src" \
-  -I"$(STANLI_EIGEN_DIR)" -I"$(STANLI_BOOST_DIR)" -I"$(STANLI_TBB_DIR)/include" \
+PKG_CPPFLAGS = -I"../inst/include" \
   -I"sundials" \
-  -I"stanli/runtime/include" -I"stanli/runtime/third_party" \
+  -I"stanli/runtime/include" \
   -include stan_sundials_printf_override.hpp -D_REENTRANT -DSTAN_THREADS \
-  -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
-# oneTBB has no tbb/tbb_stddef.h, which stan/math uses to detect the modern
-# TBB API; force that branch directly (see init_threadpool_tbb.hpp).
-PKG_CPPFLAGS += -DTBB_INTERFACE_NEW
+  -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS \
+  -DTBB_INTERFACE_NEW
 
 TBB_BUILD_DIR = ../inst/tbb-build
 TBB_LIB_DIR = ../inst/lib/$(R_ARCH)
@@ -38,7 +31,7 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
   TBB_LIB_NAMES = libtbb.dylib libtbbmalloc.dylib
   TBB_PIC_FLAG = -fPIC
-  TBB_PLATFORM_CXXFLAGS = -D_XOPEN_SOURCE
+  TBB_PLATFORM_CXXFLAGS = -D_XOPEN_SOURCE -D__TBB_RESUMABLE_TASKS_USE_THREADS=1
   TBB_PLATFORM_LDFLAGS = -pthread
   TBB_SONAME_TBB = -Wl,-install_name,@rpath/libtbb.dylib
   TBB_SONAME_TBBMALLOC = -Wl,-install_name,@rpath/libtbbmalloc.dylib
@@ -59,9 +52,6 @@ else
   TBB_SONAME_TBBMALLOC =
 endif
 
-# RTM (-mrtm) is deliberately not enabled: it trips R CMD check's
-# non-portable-flags NOTE, and TBB's TSX-based mutex is an optional fast
-# path (spin_mutex/spin_rw_mutex fall back to a plain lock without it).
 TBB_COMMON_FLAGS = $(TBB_STD_FLAG) $(TBB_PIC_FLAG) $(TBB_PLATFORM_CXXFLAGS) \
   -I"../inst/include" -O2 -DNDEBUG
 
@@ -105,15 +95,8 @@ SUNDIALS_SOURCES = $(wildcard sundials/*.c) \
   nvector/serial/nvector_serial.c
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
 
-
-STANLI_SOURCES = $(filter-out stanli/runtime/src/capi.cpp \
-  stanli/runtime/src/bridgestan_abi.cpp \
-  stanli/runtime/src/stanc_embed_c.cpp \
-  stanli/runtime/src/nuts.cpp \
-  stanli/runtime/src/estimate.cpp \
-  stanli/runtime/src/diagnose.cpp, \
-  $(wildcard stanli/runtime/src/*.cpp) \
-  $(wildcard stanli/runtime/kernels/*.cpp))
+STANLI_SOURCES = $(wildcard stanli/runtime/src/*.cpp) \
+  $(wildcard stanli/runtime/kernels/*.cpp)
 STANLI_OBJECTS = $(STANLI_SOURCES:.cpp=.o)
 
 stanli/runtime/src/%.o: stanli/runtime/src/%.cpp
@@ -129,7 +112,6 @@ OBJECTS = init.o xptr.o hash.o
 
 $(SHLIB): static
 
-
 static: $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)) $(STANLI_RUNNER_ARCHIVE)
 
 $(STANLI_RUNNER_ARCHIVE): $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
@@ -137,4 +119,6 @@ $(STANLI_RUNNER_ARCHIVE): $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 	$(AR) -rs ../inst/lib/$(R_ARCH)/libstanr_runner.a $(SUNDIALS_OBJECTS) $(RUNNER_OBJECTS)
 	@strip -S ../inst/lib/$(R_ARCH)/libstanr_runner.a || true
 
-clean: ; rm -rf ../inst/lib ../inst/tbb-build; rm -f $(OBJECTS) $(RUNNER_OBJECTS) $(STANLI_OBJECTS)
+clean:
+	rm -rf ../inst/lib ../inst/tbb-build;
+	rm -f $(OBJECTS) $(RUNNER_OBJECTS) $(STANLI_OBJECTS)

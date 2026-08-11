@@ -105,25 +105,20 @@ void set_data_entry(stanli::DataMap& out, const std::string& name,
         throw std::runtime_error("stanli data cannot contain NA, NaN, or Inf: " + name);
       all_whole = all_whole && whole_number(values[i]);
     }
-    // dims.size() >= 2 here means R already confirmed this isn't an
-    // all-whole-number value (.stanr_stanli_data_json() routes those
-    // through the JSON fallback instead, the only way to build a
-    // multi-dim int-readable entry -- see set_int_array() below).
-    if (all_whole && dims.size() <= 1) {
+    // Matches r_data_context.cpp's store_numeric(): a whole-number real
+    // array is also usable wherever int-declared data is read.
+    if (all_whole) {
       std::vector<int> ints(values.size());
       for (size_t i = 0; i < values.size(); ++i) {
         ints[i] = static_cast<int>(values[i]);
       }
-      out.set_int_array(name, std::move(ints));
+      out.set_int_array(name, std::move(ints), dims);
       return;
     }
     out.set_real_array(name, std::move(values), dims);
     return;
   }
 
-  // R only calls this path (rather than the from_json() one below) once it
-  // has confirmed no variable needs a dims.size() >= 2 integer entry, the
-  // one shape set_int_array() can't represent.
   std::vector<int> values(n);
   for (R_xlen_t i = 0; i < n; ++i) {
     const int x =
@@ -132,37 +127,28 @@ void set_data_entry(stanli::DataMap& out, const std::string& name,
       throw std::runtime_error("stanli data cannot contain NA: " + name);
     values[i] = x;
   }
-  out.set_int_array(name, std::move(values));
+  out.set_int_array(name, std::move(values), dims);
 }
 
-// SEXP -> stanli::DataMap. `data` is either a named list, built directly
-// via the typed setters above, or a single JSON string that R has already
-// produced with QuickJSR::to_json() -- used only for the one shape
-// DataMap's setters can't build directly (an integer array with 2+
-// dimensions; R decides which shape it's sending, see
-// .stanr_stanli_data_json() in R/stan_model.R).
-class stanr_data_map : public stanli::DataMap {
- public:
-  explicit stanr_data_map(SEXP data) {
-    if (TYPEOF(data) == STRSXP) {
-      if (XLENGTH(data) != 1)
-        throw std::runtime_error("stanli data JSON must be a single string");
-      static_cast<stanli::DataMap&>(*this) =
-          stanli::DataMap::from_json(CHAR(STRING_ELT(data, 0)));
-      return;
-    }
-    if (Rf_isNull(data) || XLENGTH(data) == 0) return;
-    SEXP names = Rf_getAttrib(data, R_NamesSymbol);
-    if (TYPEOF(data) != VECSXP || Rf_isNull(names))
-      throw std::runtime_error("stanli data must be a named list");
-    for (R_xlen_t i = 0; i < XLENGTH(data); ++i) {
-      const char* name = CHAR(STRING_ELT(names, i));
-      if (name[0] == '\0')
-        throw std::runtime_error("stanli data list names must be non-empty");
-      set_data_entry(*this, name, VECTOR_ELT(data, i));
-    }
+// SEXP -> stanli::DataMap, via DataMap's typed setters. No JSON round trip:
+// set_int_array() takes a dims argument (a stanr patch to data.hpp; see
+// tools/upgrade_stanli.sh), so a multi-dimensional integer array -- the one
+// shape that used to force a fallback through QuickJSR::to_json() plus
+// DataMap::from_json() -- now builds directly like everything else.
+stanli::DataMap sexp_to_data_map(SEXP data) {
+  stanli::DataMap out;
+  if (Rf_isNull(data) || XLENGTH(data) == 0) return out;
+  SEXP names = Rf_getAttrib(data, R_NamesSymbol);
+  if (TYPEOF(data) != VECSXP || Rf_isNull(names))
+    throw std::runtime_error("stanli data must be a named list");
+  for (R_xlen_t i = 0; i < XLENGTH(data); ++i) {
+    const char* name = CHAR(STRING_ELT(names, i));
+    if (name[0] == '\0')
+      throw std::runtime_error("stanli data list names must be non-empty");
+    set_data_entry(out, name, VECTOR_ELT(data, i));
   }
-};
+  return out;
+}
 
 void append_unc_names(const stanli::CompiledModel::UncParam& p,
                       std::vector<std::string>& out) {
@@ -515,7 +501,7 @@ extern "C" SEXP stanr_stanli_new_model(SEXP mir, SEXP data, SEXP model_name,
     cpp11::stop("stanli MIR must be a single string");
   if (TYPEOF(model_name) != STRSXP || XLENGTH(model_name) != 1)
     cpp11::stop("stanli model name must be a single string");
-  stanr_data_map data_map(data);
+  stanli::DataMap data_map = sexp_to_data_map(data);
   auto* model = new stanli_model_base(
       CHAR(STRING_ELT(mir, 0)), data_map, CHAR(STRING_ELT(model_name, 0)),
       stanr::as_cpp<unsigned int>(seed));

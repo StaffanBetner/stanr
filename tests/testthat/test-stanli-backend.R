@@ -70,12 +70,11 @@ test_that("sampling a stanli-backend model produces a usable fit", {
 # ---------------------------------------------------------------------------
 # Data marshaling: every shape the stanli backend accepts.
 #
-# stanli::DataMap builds most shapes directly via typed setters (no JSON at
-# all), and falls back to a QuickJSR::to_json() round trip only for an
-# integer/logical array with 2+ dimensions -- the one shape its setters
-# can't represent (see .stanr_stanli_data_json(), R/stan_model.R). This
-# model exercises both paths in one data list (im/iar3 force the fallback,
-# which then carries every other variable along in the same JSON object).
+# SEXP -> stanli::DataMap goes entirely through DataMap's typed setters, no
+# JSON involved (see sexp_to_data_map(), src/stanli_model.cpp) -- including
+# multi-dimensional integer arrays (im/iar3 below), via the dims-aware
+# set_int_array() overload stanr patches into the vendored data.hpp (see
+# tools/upgrade_stanli.sh).
 #
 # Values are read back through indexed transformed-data expressions rather
 # than by echoing whole arrays through generated quantities: stanli's own
@@ -160,7 +159,7 @@ test_that("all stanli data shapes round-trip to the correct values", {
   expect_equal(get_val("iar3_out"), iar3[1, 3, 2])
 })
 
-test_that("a bare logical scalar (no fallback needed) round-trips through the fast path", {
+test_that("a bare logical scalar round-trips through set_int()", {
   code <- "
     data { int<lower=0, upper=1> flag; }
     parameters { real theta; }
@@ -181,7 +180,7 @@ test_that("a bare logical scalar (no fallback needed) round-trips through the fa
   expect_equal(fit$summary()$mean[fit$summary()$variable == "flag_out"], 0)
 })
 
-test_that("a logical matrix (fallback path) round-trips through 0/1, not JSON true/false", {
+test_that("a logical matrix round-trips through set_int_array() as 0/1", {
   code <- "
     data { array[2, 2] int lm; }
     transformed data { int chk = lm[2, 1]; }
@@ -208,11 +207,10 @@ test_that("a logical matrix (fallback path) round-trips through 0/1, not JSON tr
 })
 
 # ---------------------------------------------------------------------------
-# Data validation errors, on both the fast (typed-setter) and fallback
-# (QuickJSR::to_json) paths.
+# Data validation errors.
 # ---------------------------------------------------------------------------
 
-test_that("NA/NaN/Inf real data errors on the fast path", {
+test_that("NA/NaN/Inf real data errors", {
   mod <- stan_model(
     code = "data { real x; } parameters { real theta; } model { theta ~ normal(0, x); }",
     backend = "stanli"
@@ -232,7 +230,7 @@ test_that("NA/NaN/Inf real data errors on the fast path", {
   }
 })
 
-test_that("NA integer data errors on the fallback (multi-dim int array) path", {
+test_that("NA integer data errors for a multi-dim int array", {
   mod <- stan_model(
     code = "data { array[2, 2] int im; } parameters { real theta; } model { theta ~ normal(0, 1); }",
     backend = "stanli"
@@ -246,7 +244,7 @@ test_that("NA integer data errors on the fallback (multi-dim int array) path", {
       seed = 1,
       show_messages = FALSE
     ),
-    "stanli data cannot contain NA, NaN, or Inf"
+    "stanli data cannot contain NA"
   )
 })
 
@@ -304,7 +302,7 @@ test_that("tuple-typed (list) data is rejected", {
   )
 })
 
-test_that("arrays with more than 3 dimensions are rejected on both paths", {
+test_that("arrays with more than 3 dimensions are rejected, real and int", {
   mod_real <- stan_model(
     code = "data { array[2, 2, 2, 2] real a; } parameters { real theta; } model { theta ~ normal(0, 1); }",
     backend = "stanli"

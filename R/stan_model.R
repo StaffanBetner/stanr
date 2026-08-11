@@ -276,96 +276,6 @@
   res$result
 }
 
-# The one stanli data shape that needs a JSON round trip: an integer,
-# logical, or whole-number-valued double array with 2+ dimensions (the last
-# so a plain `matrix(1:6, 2, 3)`-style whole-number real array -- as common
-# as `y = c(1, 0, 1, ...)` instead of `1L` -- is still readable wherever
-# int-declared data is read, matching r_data_context.cpp's store_numeric()
-# for the compiled backend). stanli::DataMap::set_int_array() only ever
-# builds a 1-D entry, and set_real_array() takes dims but never sets
-# is_int -- so a correctly-shaped multi-dim integer entry can only come from
-# stanli::DataMap::from_json(). Returns NULL when every variable in `data`
-# is fine on the direct/typed native path (no JSON at all).
-.stanr_stanli_data_json <- function(data) {
-  if (!length(data)) {
-    return(NULL)
-  }
-  needs_json <- function(x) {
-    if (length(dim(x)) < 2) {
-      return(FALSE)
-    }
-    if (is.integer(x) || is.logical(x)) {
-      return(TRUE)
-    }
-    is.double(x) &&
-      all(is.finite(x)) &&
-      all(x == trunc(x)) &&
-      all(abs(x) <= .Machine$integer.max)
-  }
-  if (!any(vapply(data, needs_json, logical(1)))) {
-    return(NULL)
-  }
-  QuickJSR::to_json(
-    Map(.stanr_stanli_json_shape, data, names(data)),
-    auto_unbox = TRUE
-  )
-}
-
-# Validates one data value and reshapes 3-D arrays into nested lists --
-# QuickJSR::to_json() only special-cases exactly-2-D matrices as nested JSON
-# arrays, so higher dimensions need the nesting done by hand. R's arrays are
-# column-major; JSON matrices/arrays nest row-major, with the first JSON
-# index the slowest R dimension (matching what
-# stanli::DataMap::from_json() expects on the way back in).
-.stanr_stanli_json_shape <- function(x, name) {
-  if (is.null(x) || is.list(x) || is.data.frame(x)) {
-    stop(
-      "stanli data does not support tuple-typed values or data.frames yet: ",
-      name,
-      call. = FALSE
-    )
-  }
-  if (is.complex(x)) {
-    stop(
-      "stanli data does not support complex values yet: ",
-      name,
-      call. = FALSE
-    )
-  }
-  if (!is.numeric(x) && !is.logical(x)) {
-    stop(
-      "stanli data must be numeric, logical, or an array: ",
-      name,
-      call. = FALSE
-    )
-  }
-  if (!all(is.finite(x))) {
-    stop("stanli data cannot contain NA, NaN, or Inf: ", name, call. = FALSE)
-  }
-  # QuickJSR::to_json() renders a logical as a JSON true/false literal,
-  # which stanli::DataMap::from_json() cannot parse (only numbers and
-  # arrays); 0/1 integers round-trip the same way the fast/direct path
-  # treats them.
-  if (is.logical(x)) {
-    storage.mode(x) <- "integer"
-  }
-  d <- dim(x)
-  if (length(d) > 3) {
-    stop(
-      "stanli data arrays with more than 3 dimensions are not supported: ",
-      name,
-      call. = FALSE
-    )
-  }
-  if (length(d) < 3) {
-    return(x)
-  }
-  lapply(seq_len(d[1]), function(i) {
-    slice <- x[i, , ]
-    lapply(seq_len(d[2]), function(j) as.vector(slice[j, ]))
-  })
-}
-
 .stanr_stanli_native_function <- function(name) {
   # stanr deliberately has no useDynLib directive: zzz.R loads the package
   # DLL explicitly and stores its DLLInfo object in `.stanr_dll`. Resolve
@@ -586,8 +496,7 @@
   }
   memo[[key]] <- env
   env$new_model <- function(data, seed, declarations = NULL) {
-    json <- .stanr_stanli_data_json(data)
-    new_model(mir, json %||% data, model_name, seed)
+    new_model(mir, data, model_name, seed)
   }
   env
 }

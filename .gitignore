@@ -12,6 +12,7 @@ libs
 lib
 tools/cmdstan-*
 tools/oneTBB-*
+tools/stanli-*
 **.stanrc
 .posit
 **.DS_Store
