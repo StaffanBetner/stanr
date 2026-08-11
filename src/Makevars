@@ -22,7 +22,7 @@ TBB_LIB_DIR = ../inst/lib/$(R_ARCH)
 TBB_CXX_SOURCES = address_waiter allocator arena arena_slot concurrent_bounded_queue \
   dynamic_link exception governor global_control itt_notify main market tcm_adaptor \
   misc misc_ex observer_proxy parallel_pipeline private_server profiling rml_tbb \
-  rtm_mutex rtm_rw_mutex semaphore small_object_pool task task_dispatcher \
+  semaphore small_object_pool task task_dispatcher \
   task_group_context thread_dispatcher thread_request_serializer threading_control \
   version queuing_rw_mutex
 TBBMALLOC_CXX_SOURCES = backend backref frontend large_objects tbbmalloc
@@ -59,15 +59,10 @@ else
   TBB_SONAME_TBBMALLOC =
 endif
 
-# Intel TSX (-mrtm) is x86-only.
-UNAME_M := $(shell uname -m)
-ifneq (,$(filter x86_64 amd64 i386 i686,$(UNAME_M)))
-  TBB_RTM_FLAG = -mrtm
-else
-  TBB_RTM_FLAG =
-endif
-
-TBB_COMMON_FLAGS = $(TBB_STD_FLAG) $(TBB_PIC_FLAG) $(TBB_PLATFORM_CXXFLAGS) $(TBB_RTM_FLAG) \
+# RTM (-mrtm) is deliberately not enabled: it trips R CMD check's
+# non-portable-flags NOTE, and TBB's TSX-based mutex is an optional fast
+# path (spin_mutex/spin_rw_mutex fall back to a plain lock without it).
+TBB_COMMON_FLAGS = $(TBB_STD_FLAG) $(TBB_PIC_FLAG) $(TBB_PLATFORM_CXXFLAGS) \
   $(TBB_INCLUDES) -O2 -DNDEBUG
 
 $(TBB_BUILD_DIR)/tbb/%.o: $(TBB_SRC)/src/tbb/%.cpp
