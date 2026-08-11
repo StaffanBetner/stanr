@@ -56,15 +56,11 @@
 }
 
 .stanr_dependency_cppflags <- function() {
-  c(
-    paste0(
-      "-I",
-      shQuote(system.file("include", package = "Rcpp", mustWork = TRUE))
-    ),
-    paste0(
-      "-I",
-      shQuote(system.file("tbb", "include", package = "stanr", mustWork = TRUE))
-    )
+  # TBB headers live under inst/include (see src/tbb), already covered by
+  # the stanr include dir in .stanr_base_cppflags().
+  paste0(
+    "-I",
+    shQuote(system.file("include", package = "Rcpp", mustWork = TRUE))
   )
 }
 

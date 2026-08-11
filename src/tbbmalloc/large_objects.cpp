@@ -15,7 +15,7 @@
 */
 
 #include "tbbmalloc_internal.h"
-#include "../src/tbb/environment.h"
+#include "../tbb/environment.h"
 
 #if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
     // Suppress warning: unary minus operator applied to unsigned type, result still unsigned

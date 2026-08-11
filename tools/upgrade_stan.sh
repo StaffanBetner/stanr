@@ -49,7 +49,8 @@ cp -Rf "$MATH_SRC"/lib/sundials_*/src/sundials ../src/sundials
 
 # --- 7. TBB ------------------------------------------------------------
 # TBB is not vendored from the CmdStan/math bundle -- see tools/upgrade_tbb.sh,
-# which vendors a standalone oneTBB release into inst/tbb independently.
+# which vendors a standalone oneTBB release (headers into inst/include,
+# sources into src/) independently.
 
 rm -rf "$INC/boost"
 mkdir -p "$INC/boost"
@@ -169,4 +170,4 @@ for file in "${files_list[@]}"; do
   fi
 done
 
-echo "Done. Vendored stan and math headers into inst/include and TBB into inst/tbb from CmdStan $CMDSTAN_VER."
+echo "Done. Vendored stan and math headers into inst/include from CmdStan $CMDSTAN_VER."

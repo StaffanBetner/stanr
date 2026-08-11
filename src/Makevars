@@ -5,22 +5,15 @@ CXX_STD = CXX20
 all: $(SHLIB)
 
 PKG_CPPFLAGS = -I"../inst/include" -I"sundials" -include stan_sundials_printf_override.hpp -D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
-PKG_CPPFLAGS += -I"../inst/tbb/include"
 # oneTBB has no tbb/tbb_stddef.h, which stan/math uses to detect the modern
 # TBB API; force that branch directly (see init_threadpool_tbb.hpp).
 PKG_CPPFLAGS += -DTBB_INTERFACE_NEW
 
-TBB_SRC = ../inst/tbb
 TBB_BUILD_DIR = ../inst/tbb-build
 TBB_LIB_DIR = ../inst/lib/$(R_ARCH)
 
-# oneTBB dropped its classic Makefile build for CMake-only; rather than add
-# a cmake dependency, compile the fixed source list its own CMakeLists.txt
-# uses for the `tbb`/`tbbmalloc` targets directly. No .def export list is
-# used -- this build is private to stanr, so exporting more than upstream's
-# curated list is harmless (and Windows/MinGW skips .def upstream too).
 TBB_CXX_SOURCES = address_waiter allocator arena arena_slot concurrent_bounded_queue \
-  dynamic_link exception governor global_control itt_notify main market tcm_adaptor \
+  dynamic_link exception governor global_control main market tcm_adaptor \
   misc misc_ex observer_proxy parallel_pipeline private_server profiling rml_tbb \
   semaphore small_object_pool task task_dispatcher \
   task_group_context thread_dispatcher thread_request_serializer threading_control \
@@ -28,10 +21,8 @@ TBB_CXX_SOURCES = address_waiter allocator arena arena_slot concurrent_bounded_q
 TBBMALLOC_CXX_SOURCES = backend backref frontend large_objects tbbmalloc
 
 TBB_OBJECTS = $(addprefix $(TBB_BUILD_DIR)/tbb/,$(addsuffix .o,$(TBB_CXX_SOURCES)))
-TBBMALLOC_OBJECTS = $(addprefix $(TBB_BUILD_DIR)/tbbmalloc/,$(addsuffix .o,$(TBBMALLOC_CXX_SOURCES))) \
-  $(TBB_BUILD_DIR)/tbbmalloc/itt_notify.o
+TBBMALLOC_OBJECTS = $(addprefix $(TBB_BUILD_DIR)/tbbmalloc/,$(addsuffix .o,$(TBBMALLOC_CXX_SOURCES)))
 
-TBB_INCLUDES = -I"$(TBB_SRC)/include" -I"$(TBB_SRC)/src"
 TBB_STD_FLAG = -std=c++17
 
 UNAME_S := $(shell uname -s)
@@ -63,17 +54,13 @@ endif
 # non-portable-flags NOTE, and TBB's TSX-based mutex is an optional fast
 # path (spin_mutex/spin_rw_mutex fall back to a plain lock without it).
 TBB_COMMON_FLAGS = $(TBB_STD_FLAG) $(TBB_PIC_FLAG) $(TBB_PLATFORM_CXXFLAGS) \
-  $(TBB_INCLUDES) -O2 -DNDEBUG
+  -I"../inst/include" -O2 -DNDEBUG
 
-$(TBB_BUILD_DIR)/tbb/%.o: $(TBB_SRC)/src/tbb/%.cpp
+$(TBB_BUILD_DIR)/tbb/%.o: tbb/%.cpp
 	@mkdir -p $(TBB_BUILD_DIR)/tbb
 	$(CXX) $(TBB_COMMON_FLAGS) -D__TBB_BUILD -c $< -o $@
 
-$(TBB_BUILD_DIR)/tbbmalloc/%.o: $(TBB_SRC)/src/tbbmalloc/%.cpp
-	@mkdir -p $(TBB_BUILD_DIR)/tbbmalloc
-	$(CXX) $(TBB_COMMON_FLAGS) -D__TBBMALLOC_BUILD -fno-rtti -fno-exceptions -c $< -o $@
-
-$(TBB_BUILD_DIR)/tbbmalloc/itt_notify.o: $(TBB_SRC)/src/tbb/itt_notify.cpp
+$(TBB_BUILD_DIR)/tbbmalloc/%.o: tbbmalloc/%.cpp
 	@mkdir -p $(TBB_BUILD_DIR)/tbbmalloc
 	$(CXX) $(TBB_COMMON_FLAGS) -D__TBBMALLOC_BUILD -fno-rtti -fno-exceptions -c $< -o $@
 
