@@ -1,7 +1,7 @@
 #ifndef STANR_TUPLE_DECLARATIONS_HPP
 #define STANR_TUPLE_DECLARATIONS_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
 #include <string>
 
 namespace stanr {
@@ -13,7 +13,7 @@ namespace stanr {
 struct slot_decl {
   bool is_tuple = false;
   std::string kind;
-  Rcpp::List tuple_df;
+  cpp11::list tuple_df;
   int dims = 0;
 };
 
@@ -22,23 +22,30 @@ inline int decl_int(SEXP column, int index) {
   return static_cast<int>(REAL(column)[index]);
 }
 
-inline int tuple_slot_count(Rcpp::List type_df) {
+inline int tuple_slot_count(cpp11::list type_df) {
   return Rf_length(type_df["dimensions"]);
 }
 
-inline slot_decl tuple_slot(Rcpp::List type_df, int slot) {
+// `x` is either a CHARSXP (from STRING_ELT) or a length-1 STRSXP (from
+// VECTOR_ELT); r_string's operator std::string() needs a CHARSXP.
+inline std::string sexp_to_string(SEXP x) {
+  return TYPEOF(x) == STRSXP ? cpp11::r_string(STRING_ELT(x, 0))
+                             : cpp11::r_string(x);
+}
+
+inline slot_decl tuple_slot(cpp11::list type_df, int slot) {
   slot_decl out;
   out.dims = decl_int(type_df["dimensions"], slot);
   SEXP type_column = type_df["type"];
   if (TYPEOF(type_column) == STRSXP) {
-    out.kind = Rcpp::as<std::string>(STRING_ELT(type_column, slot));
+    out.kind = sexp_to_string(STRING_ELT(type_column, slot));
   } else {
     SEXP type = VECTOR_ELT(type_column, slot);
     if (Rf_inherits(type, "data.frame")) {
       out.is_tuple = true;
       out.tuple_df = type;
     } else {
-      out.kind = Rcpp::as<std::string>(type);
+      out.kind = sexp_to_string(type);
     }
   }
   return out;

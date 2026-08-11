@@ -13,7 +13,9 @@ Authors@R:
     person("Lawrence Livermore National Security", role = "cph",
             comment = "SUNDIALS sources and headers"),
     person("Intel Corporation", role = "cph",
-            comment = "TBB sources and headers")
+            comment = "TBB sources and headers"),
+    person("Posit Software, PBC", role = "cph",
+            comment = "cpp11 sources and headers")
   )
 Description: A modern, simpler R interface for Stan.
 License: BSD_3_clause + file LICENSE
@@ -23,12 +25,9 @@ Depends:
     R (>= 4.0)
 Imports:
     R6,
-    Rcpp (>= 1.0.0),
     QuickJSR,
     posterior,
     withr
-LinkingTo:
-    Rcpp
 Suggests:
     testthat (>= 3.0.0),
     loo

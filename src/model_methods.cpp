@@ -8,7 +8,7 @@
 #include <stan/model/model_base.hpp>
 #include <stan/services/util/create_rng.hpp>
 
-#include <stanr/rcpp_eigen_interop.hpp>
+#include <stanr/cpp11_tuple_interop.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -28,23 +28,25 @@ std::string model_method_error_prefix(
 }
 
 Eigen::VectorXd checked_unconstrained_values(
-    const stan::model::model_base& model, Rcpp::NumericVector values,
+    const stan::model::model_base& model, cpp11::doubles values,
     const char* method) {
   const R_xlen_t expected = static_cast<R_xlen_t>(model.num_params_r());
   if (values.size() != expected) {
-    Rcpp::stop(
+    cpp11::stop(
         "%sexpected %d unconstrained parameter value(s), but received %d.",
-        model_method_error_prefix(model, method), expected, values.size());
+        model_method_error_prefix(model, method).c_str(),
+        static_cast<int>(expected), static_cast<int>(values.size()));
   }
 
-  const Eigen::Map<const Eigen::VectorXd> mapped(values.begin(), expected);
+  const Eigen::Map<const Eigen::VectorXd> mapped(REAL(values.data()), expected);
   if (!mapped.allFinite()) {
     for (R_xlen_t i = 0; i < expected; ++i) {
       if (!std::isfinite(values[i])) {
-        Rcpp::stop(
+        cpp11::stop(
             "%sunconstrained parameter values must all be finite; value "
             "%d is not finite.",
-            model_method_error_prefix(model, method), i + 1);
+            model_method_error_prefix(model, method).c_str(),
+            static_cast<int>(i + 1));
       }
     }
   }
@@ -54,12 +56,16 @@ Eigen::VectorXd checked_unconstrained_values(
 template <typename RObject>
 void attach_messages(RObject& result, const std::ostringstream& stream) {
   const std::string messages = stream.str();
-  if (!messages.empty()) result.attr("messages") = messages;
+  // matrix::attr() returns a plain value, not an assignable proxy like
+  // r_vector/list's -- Rf_setAttrib() works uniformly for both.
+  if (!messages.empty()) {
+    Rf_setAttrib(result.data(), Rf_install("messages"), cpp11::as_sexp(messages));
+  }
 }
 
-Rcpp::XPtr<stan::rng_t> make_base_rng(unsigned int seed) {
+cpp11::external_pointer<stan::rng_t> make_base_rng(unsigned int seed) {
   // Independent stream; chain zero so these draws don't share a chain's stream.
-  return Rcpp::XPtr<stan::rng_t>(
+  return cpp11::external_pointer<stan::rng_t>(
       new stan::rng_t(stan::services::util::create_rng(seed, 0)));
 }
 
@@ -67,7 +73,7 @@ int model_num_upars(const stan::model::model_base& model) {
   return static_cast<int>(model.num_params_r());
 }
 
-Rcpp::List model_param_metadata(
+cpp11::writable::list model_param_metadata(
     const stan::model::model_base& model) {
   std::vector<std::string> parameter_names;
   std::vector<std::vector<size_t>> parameter_dims;
@@ -83,12 +89,12 @@ Rcpp::List model_param_metadata(
   model.get_param_names(all_names, true, true);
   model.get_dims(all_dims, true, true);
 
-  Rcpp::CharacterVector names(all_names.size());
-  Rcpp::List dimensions(all_names.size());
-  Rcpp::CharacterVector stages(all_names.size());
+  cpp11::writable::strings names(all_names.size());
+  cpp11::writable::list dimensions(all_names.size());
+  cpp11::writable::strings stages(all_names.size());
   for (size_t i = 0; i < all_names.size(); ++i) {
     names[i] = all_names[i];
-    Rcpp::IntegerVector dims(all_dims[i].size());
+    cpp11::writable::integers dims(all_dims[i].size());
     for (size_t j = 0; j < all_dims[i].size(); ++j) {
       dims[j] = static_cast<int>(all_dims[i][j]);
     }
@@ -100,28 +106,28 @@ Rcpp::List model_param_metadata(
                            : "generated_quantity");
   }
 
-  return Rcpp::List::create(Rcpp::Named("names") = names,
-                            Rcpp::Named("dimensions") = dimensions,
-                            Rcpp::Named("stages") = stages);
+  return cpp11::writable::list({cpp11::named_arg("names") = names,
+                                cpp11::named_arg("dimensions") = dimensions,
+                                cpp11::named_arg("stages") = stages});
 }
 
-Rcpp::CharacterVector model_constrained_names(
+cpp11::writable::strings model_constrained_names(
     const stan::model::model_base& model, bool include_tparams,
     bool include_gqs) {
   std::vector<std::string> names;
   model.constrained_param_names(names, include_tparams, include_gqs);
-  return Rcpp::wrap(names);
+  return cpp11::as_sexp(names);
 }
 
-Rcpp::CharacterVector model_unconstrained_names(
+cpp11::writable::strings model_unconstrained_names(
     const stan::model::model_base& model) {
   std::vector<std::string> names;
   model.unconstrained_param_names(names, false, false);
-  return Rcpp::wrap(names);
+  return cpp11::as_sexp(names);
 }
 
-Rcpp::NumericVector model_log_prob(
-    const stan::model::model_base& model, Rcpp::NumericVector values,
+cpp11::writable::doubles model_log_prob(
+    const stan::model::model_base& model, cpp11::doubles values,
     bool jacobian) {
   Eigen::VectorXd upars
       = checked_unconstrained_values(model, values, "model_log_prob");
@@ -132,16 +138,16 @@ Rcpp::NumericVector model_log_prob(
              ? stan::model::log_prob_propto<true>(model, upars, &messages)
              : stan::model::log_prob_propto<false>(model, upars, &messages);
   } catch (const std::exception& error) {
-    Rcpp::stop("%s%s", model_method_error_prefix(model, "model_log_prob"),
+    cpp11::stop("%s%s", model_method_error_prefix(model, "model_log_prob").c_str(),
                error.what());
   }
-  Rcpp::NumericVector result = Rcpp::NumericVector::create(lp);
+  cpp11::writable::doubles result({lp});
   attach_messages(result, messages);
   return result;
 }
 
-Rcpp::NumericVector model_grad_log_prob(
-    const stan::model::model_base& model, Rcpp::NumericVector values,
+cpp11::writable::doubles model_grad_log_prob(
+    const stan::model::model_base& model, cpp11::doubles values,
     bool jacobian) {
   Eigen::VectorXd upars
       = checked_unconstrained_values(model, values, "model_grad_log_prob");
@@ -155,18 +161,19 @@ Rcpp::NumericVector model_grad_log_prob(
              : stan::model::log_prob_grad<true, false>(model, upars, gradient,
                                                         &messages);
   } catch (const std::exception& error) {
-    Rcpp::stop("%s%s", model_method_error_prefix(model, "model_grad_log_prob"),
+    cpp11::stop("%s%s",
+               model_method_error_prefix(model, "model_grad_log_prob").c_str(),
                error.what());
   }
 
-  Rcpp::NumericVector result = Rcpp::wrap(gradient);
+  cpp11::writable::doubles result(stanr::as_sexp(gradient));
   result.attr("log_prob") = lp;
   attach_messages(result, messages);
   return result;
 }
 
-Rcpp::List model_hessian(const stan::model::model_base& model,
-                                Rcpp::NumericVector values, bool jacobian) {
+cpp11::writable::list model_hessian(const stan::model::model_base& model,
+                                    cpp11::doubles values, bool jacobian) {
   Eigen::VectorXd upars
       = checked_unconstrained_values(model, values, "model_hessian");
   std::ostringstream messages;
@@ -192,20 +199,20 @@ Rcpp::List model_hessian(const stan::model::model_base& model,
           log_density, upars, lp, gradient, hessian);
     }
   } catch (const std::exception& error) {
-    Rcpp::stop("%s%s", model_method_error_prefix(model, "model_hessian"),
+    cpp11::stop("%s%s", model_method_error_prefix(model, "model_hessian").c_str(),
                error.what());
   }
 
-  Rcpp::List result = Rcpp::List::create(
-      Rcpp::Named("log_prob") = lp,
-      Rcpp::Named("grad_log_prob") = gradient,
-      Rcpp::Named("hessian") = hessian);
+  cpp11::writable::list result({
+      cpp11::named_arg("log_prob") = lp,
+      cpp11::named_arg("grad_log_prob") = stanr::as_sexp(gradient),
+      cpp11::named_arg("hessian") = stanr::as_sexp(hessian)});
   attach_messages(result, messages);
   return result;
 }
 
-Rcpp::NumericVector model_unconstrain(
-    const stan::model::model_base& model, Rcpp::List variables,
+cpp11::writable::doubles model_unconstrain(
+    const stan::model::model_base& model, cpp11::list variables,
     SEXP declarations) {
   r_data_context context(variables, declarations);
   Eigen::VectorXd upars;
@@ -213,45 +220,45 @@ Rcpp::NumericVector model_unconstrain(
   try {
     model.transform_inits(context, upars, &messages);
   } catch (const std::exception& error) {
-    Rcpp::stop("%s%s", model_method_error_prefix(model, "model_unconstrain"),
+    cpp11::stop("%s%s", model_method_error_prefix(model, "model_unconstrain").c_str(),
                error.what());
   }
   if (upars.size() != static_cast<Eigen::Index>(model.num_params_r())) {
-    Rcpp::stop(
+    cpp11::stop(
         "%sthe generated transform returned an unexpected number of values.",
-        model_method_error_prefix(model, "model_unconstrain"));
+        model_method_error_prefix(model, "model_unconstrain").c_str());
   }
-  Rcpp::NumericVector result = Rcpp::wrap(upars);
+  cpp11::writable::doubles result(stanr::as_sexp(upars));
   attach_messages(result, messages);
   return result;
 }
 
-Rcpp::NumericMatrix model_unconstrain_matrix(
-    const stan::model::model_base& model, Rcpp::NumericMatrix values) {
+cpp11::writable::doubles_matrix<> model_unconstrain_matrix(
+    const stan::model::model_base& model, cpp11::doubles_matrix<> values) {
   std::vector<std::string> constrained_names;
   model.constrained_param_names(constrained_names, false, false);
   if (values.ncol() != static_cast<int>(constrained_names.size())) {
-    Rcpp::stop(
+    cpp11::stop(
         "%sexpected %d constrained parameter column(s), but received %d.",
-        model_method_error_prefix(model, "model_unconstrain_matrix"),
-        constrained_names.size(), values.ncol());
+        model_method_error_prefix(model, "model_unconstrain_matrix").c_str(),
+        static_cast<int>(constrained_names.size()), values.ncol());
   }
 
   const int output_columns = model_num_upars(model);
-  Rcpp::NumericMatrix result(values.nrow(), output_columns);
-  const Eigen::Map<const Eigen::MatrixXd> input(values.begin(), values.nrow(),
-                                                 values.ncol());
-  Eigen::Map<Eigen::MatrixXd> output(result.begin(), values.nrow(),
-                                     output_columns);
+  cpp11::writable::doubles_matrix<> result(values.nrow(), output_columns);
+  const Eigen::Map<const Eigen::MatrixXd> input(
+      REAL(values.data()), values.nrow(), values.ncol());
+  Eigen::Map<Eigen::MatrixXd> output(
+      REAL(result.data()), values.nrow(), output_columns);
   std::ostringstream messages;
   for (int row = 0; row < values.nrow(); ++row) {
     if (!input.row(row).allFinite()) {
       for (int column = 0; column < values.ncol(); ++column) {
         if (!std::isfinite(input(row, column))) {
-          Rcpp::stop(
+          cpp11::stop(
               "%sconstrained parameter values must all be finite; row %d, "
               "column %d is not finite.",
-              model_method_error_prefix(model, "model_unconstrain_matrix"),
+              model_method_error_prefix(model, "model_unconstrain_matrix").c_str(),
               row + 1, column + 1);
         }
       }
@@ -261,24 +268,24 @@ Rcpp::NumericMatrix model_unconstrain_matrix(
     try {
       model.unconstrain_array(input.row(row), unconstrained, &messages);
     } catch (const std::exception& error) {
-      Rcpp::stop(
+      cpp11::stop(
           "%srow %d: %s",
-          model_method_error_prefix(model, "model_unconstrain_matrix"),
+          model_method_error_prefix(model, "model_unconstrain_matrix").c_str(),
           row + 1, error.what());
     }
     if (unconstrained.size() != output_columns) {
-      Rcpp::stop(
+      cpp11::stop(
           "%srow %d produced an unexpected number of values.",
-          model_method_error_prefix(model, "model_unconstrain_matrix"),
+          model_method_error_prefix(model, "model_unconstrain_matrix").c_str(),
           row + 1);
     }
     output.row(row) = unconstrained;
   }
 
-  Rcpp::CharacterVector unconstrained_names
+  cpp11::writable::strings unconstrained_names
       = model_unconstrained_names(model);
-  result.attr("dimnames")
-      = Rcpp::List::create(R_NilValue, unconstrained_names);
+  Rf_setAttrib(result.data(), R_DimNamesSymbol,
+              cpp11::writable::list({R_NilValue, unconstrained_names}));
   attach_messages(result, messages);
   return result;
 }
@@ -311,7 +318,7 @@ int dims_product(const std::vector<int>& dims) {
 
 // Dotted name of some leaf reachable from this tuple node via slot 1: any
 // leaf beneath the subtree carries the same enclosing-array dims prefix.
-std::string first_leaf_name(const std::string& dotted, Rcpp::List type_df) {
+std::string first_leaf_name(const std::string& dotted, cpp11::list type_df) {
   slot_decl slot = tuple_slot(type_df, 0);
   const std::string name = dotted + ".1";
   return slot.is_tuple ? first_leaf_name(name, slot.tuple_df) : name;
@@ -321,15 +328,15 @@ const std::vector<size_t>& metadata_dims(const metadata_index& metadata,
                                          const std::string& name) {
   const auto it = metadata.find(name);
   if (it == metadata.end()) {
-    Rcpp::stop(
+    cpp11::stop(
         "stanr internal error: the model metadata is missing an entry for "
         "`%s`.",
-        name);
+        name.c_str());
   }
   return *it->second;
 }
 
-sized_node build_tuple_node(const std::string& dotted, Rcpp::List type_df,
+sized_node build_tuple_node(const std::string& dotted, cpp11::list type_df,
                             int own_array_count,
                             const std::vector<int>& outer_dims,
                             const metadata_index& metadata) {
@@ -361,10 +368,10 @@ sized_node build_tuple_node(const std::string& dotted, Rcpp::List type_df,
     for (size_t d = 0; d < new_outer.size(); ++d) {
       if (d >= dims.size()
           || dims[d] != static_cast<size_t>(new_outer[d])) {
-        Rcpp::stop(
+        cpp11::stop(
             "stanr internal error: `%s`'s declared dimensions are "
             "inconsistent with the enclosing tuple-array sizes.",
-            slot_name);
+            slot_name.c_str());
       }
     }
     sized_node leaf;
@@ -379,7 +386,7 @@ sized_node build_tuple_node(const std::string& dotted, Rcpp::List type_df,
 }
 
 std::vector<sized_variable> build_sized_structure(
-    const stan::model::model_base& model, Rcpp::List declarations) {
+    const stan::model::model_base& model, cpp11::list declarations) {
   std::vector<std::string> names;
   model.get_param_names(names, false, false);
   const size_t n_parameter_rows = names.size();
@@ -399,13 +406,14 @@ std::vector<sized_variable> build_sized_structure(
   for (size_t i = 0; i < names.size(); ++i) {
     const std::string base = names[i].substr(0, names[i].find('.'));
     if (!seen.insert(base).second) continue;
-    if (!declarations.containsElementNamed(base.c_str())) {
-      Rcpp::stop(
+    SEXP decl_sexp = declarations[base.c_str()];
+    if (Rf_isNull(decl_sexp)) {
+      cpp11::stop(
           "stanr internal error: `%s` from the model metadata is not "
           "declared in `model$variables()`.",
-          base);
+          base.c_str());
     }
-    Rcpp::List decl = declarations[base];
+    cpp11::list decl = decl_sexp;
     SEXP decl_type = decl["type"];
 
     sized_variable variable;
@@ -419,7 +427,7 @@ std::vector<sized_variable> build_sized_structure(
     } else {
       const std::vector<size_t>& leaf_dims = metadata_dims(metadata, base);
       variable.node.is_complex
-          = Rcpp::as<std::string>(decl_type) == "complex";
+          = cpp11::as_cpp<std::string>(decl_type) == "complex";
       for (size_t d : leaf_dims) {
         variable.node.dims.push_back(static_cast<int>(d));
       }
@@ -433,21 +441,20 @@ std::vector<sized_variable> build_sized_structure(
 
 void apply_leaf_dims(SEXP values, const std::vector<int>& dims) {
   if (dims.size() >= 2) {
-    Rf_setAttrib(values, R_DimSymbol,
-                 Rcpp::IntegerVector(dims.begin(), dims.end()));
+    Rf_setAttrib(values, R_DimSymbol, cpp11::as_sexp(dims));
   }
 }
 
 // Rebuild the canonical nested-list shape from tuple-array elements
 // enumerated column-major (first index fastest).
-SEXP reshape_column_major(Rcpp::List elements, const std::vector<int>& dims) {
+SEXP reshape_column_major(cpp11::list elements, const std::vector<int>& dims) {
   if (dims.size() <= 1) return elements;
   const int d1 = dims[0];
   const std::vector<int> rest(dims.begin() + 1, dims.end());
   const int rest_n = dims_product(rest);
-  Rcpp::List out(d1);
+  cpp11::writable::list out(d1);
   for (int i = 0; i < d1; ++i) {
-    Rcpp::List sub(rest_n);
+    cpp11::writable::list sub(rest_n);
     for (int r = 0; r < rest_n; ++r) sub[r] = elements[i + r * d1];
     out[i] = reshape_column_major(sub, rest);
   }
@@ -461,9 +468,9 @@ SEXP consume_node(const sized_node& node, const Eigen::VectorXd& flat,
                   Eigen::Index& pos) {
   if (node.is_tuple) {
     const int n_elements = dims_product(node.array_dims);
-    Rcpp::List elements(n_elements);
+    cpp11::writable::list elements(n_elements);
     for (int e = 0; e < n_elements; ++e) {
-      Rcpp::List slots(node.slots.size());
+      cpp11::writable::list slots(node.slots.size());
       for (size_t s = 0; s < node.slots.size(); ++s) {
         slots[s] = consume_node(node.slots[s], flat, pos);
       }
@@ -475,25 +482,25 @@ SEXP consume_node(const sized_node& node, const Eigen::VectorXd& flat,
   const int n = dims_product(node.dims);
   if (node.is_complex) {
     if (pos + 2 * n > flat.size()) {
-      Rcpp::stop(
+      cpp11::stop(
           "stanr internal error: the constrained output has fewer values "
           "than the variable structure expects.");
     }
-    Rcpp::ComplexVector values(n);
+    cpp11::sexp values = cpp11::safe[Rf_allocVector](CPLXSXP, n);
+    Rcomplex* p = COMPLEX(values.data());
     for (int j = 0; j < n; ++j) {
-      values[j].r = flat[pos + 2 * j];
-      values[j].i = flat[pos + 2 * j + 1];
+      p[j] = Rcomplex{flat[pos + 2 * j], flat[pos + 2 * j + 1]};
     }
     pos += 2 * n;
     apply_leaf_dims(values, node.dims);
     return values;
   }
   if (pos + n > flat.size()) {
-    Rcpp::stop(
+    cpp11::stop(
         "stanr internal error: the constrained output has fewer values "
         "than the variable structure expects.");
   }
-  Rcpp::NumericVector values(n);
+  cpp11::writable::doubles values(n);
   for (int j = 0; j < n; ++j) values[j] = flat[pos + j];
   pos += n;
   apply_leaf_dims(values, node.dims);
@@ -503,9 +510,9 @@ SEXP consume_node(const sized_node& node, const Eigen::VectorXd& flat,
 SEXP skeleton_node(const sized_node& node) {
   if (node.is_tuple) {
     const int n_elements = dims_product(node.array_dims);
-    Rcpp::List elements(n_elements);
+    cpp11::writable::list elements(n_elements);
     for (int e = 0; e < n_elements; ++e) {
-      Rcpp::List slots(node.slots.size());
+      cpp11::writable::list slots(node.slots.size());
       for (size_t s = 0; s < node.slots.size(); ++s) {
         slots[s] = skeleton_node(node.slots[s]);
       }
@@ -515,14 +522,14 @@ SEXP skeleton_node(const sized_node& node) {
     return reshape_column_major(elements, node.array_dims);
   }
   const int n = dims_product(node.dims);
-  SEXP values;
+  cpp11::sexp values;
   if (node.is_complex) {
-    Rcpp::ComplexVector out(n);
-    std::fill(COMPLEX(out), COMPLEX(out) + n,
+    values = cpp11::safe[Rf_allocVector](CPLXSXP, n);
+    std::fill(COMPLEX(values.data()), COMPLEX(values.data()) + n,
               Rcomplex{NA_REAL, NA_REAL});
-    values = out;
   } else {
-    values = Rcpp::NumericVector(n, NA_REAL);
+    values = cpp11::safe[Rf_allocVector](REALSXP, n);
+    std::fill(REAL(values.data()), REAL(values.data()) + n, NA_REAL);
   }
   apply_leaf_dims(values, node.dims);
   return values;
@@ -535,10 +542,10 @@ bool stage_kept(int stage, bool include_tparams, bool include_gqs) {
 
 }  // namespace
 
-Rcpp::List model_constrain_variables(
+cpp11::writable::list model_constrain_variables(
     const stan::model::model_base& model, stan::rng_t& rng,
-    Rcpp::NumericVector values, bool include_tparams, bool include_gqs,
-    Rcpp::List declarations) {
+    cpp11::doubles values, bool include_tparams, bool include_gqs,
+    cpp11::list declarations) {
   Eigen::VectorXd upars
       = checked_unconstrained_values(model, values,
                                      "model_constrain_variables");
@@ -548,8 +555,8 @@ Rcpp::List model_constrain_variables(
     model.write_array(rng, upars, constrained, include_tparams, include_gqs,
                       &messages);
   } catch (const std::exception& error) {
-    Rcpp::stop("%s%s",
-               model_method_error_prefix(model, "model_constrain_variables"),
+    cpp11::stop("%s%s",
+               model_method_error_prefix(model, "model_constrain_variables").c_str(),
                error.what());
   }
 
@@ -561,28 +568,28 @@ Rcpp::List model_constrain_variables(
       kept.push_back(&variable);
     }
   }
-  Rcpp::List result(kept.size());
-  Rcpp::CharacterVector names(kept.size());
+  cpp11::writable::list result(kept.size());
+  cpp11::writable::strings names(kept.size());
   Eigen::Index pos = 0;
   for (size_t k = 0; k < kept.size(); ++k) {
     names[k] = kept[k]->name;
     result[k] = consume_node(kept[k]->node, constrained, pos);
   }
   if (pos != constrained.size()) {
-    Rcpp::stop(
+    cpp11::stop(
         "%sthe constrained output length (%d) did not match the expected "
         "variable structure (consumed %d).",
-        model_method_error_prefix(model, "model_constrain_variables"),
-        constrained.size(), pos);
+        model_method_error_prefix(model, "model_constrain_variables").c_str(),
+        static_cast<int>(constrained.size()), static_cast<int>(pos));
   }
   result.names() = names;
   attach_messages(result, messages);
   return result;
 }
 
-Rcpp::List model_variable_skeleton(
+cpp11::writable::list model_variable_skeleton(
     const stan::model::model_base& model, bool include_tparams,
-    bool include_gqs, Rcpp::List declarations) {
+    bool include_gqs, cpp11::list declarations) {
   const std::vector<sized_variable> sized
       = build_sized_structure(model, declarations);
   std::vector<const sized_variable*> kept;
@@ -591,8 +598,8 @@ Rcpp::List model_variable_skeleton(
       kept.push_back(&variable);
     }
   }
-  Rcpp::List result(kept.size());
-  Rcpp::CharacterVector names(kept.size());
+  cpp11::writable::list result(kept.size());
+  cpp11::writable::strings names(kept.size());
   for (size_t k = 0; k < kept.size(); ++k) {
     names[k] = kept[k]->name;
     result[k] = skeleton_node(kept[k]->node);
@@ -601,24 +608,25 @@ Rcpp::List model_variable_skeleton(
   return result;
 }
 
-Rcpp::NumericMatrix model_constrain_matrix(
+cpp11::writable::doubles_matrix<> model_constrain_matrix(
     const stan::model::model_base& model, stan::rng_t& rng,
-    Rcpp::NumericMatrix values, bool include_tparams, bool include_gqs) {
+    cpp11::doubles_matrix<> values, bool include_tparams, bool include_gqs) {
   const int input_columns = model_num_upars(model);
   if (values.ncol() != input_columns) {
-    Rcpp::stop(
+    cpp11::stop(
         "%sexpected %d unconstrained parameter column(s), but received %d.",
-        model_method_error_prefix(model, "model_constrain_matrix"),
+        model_method_error_prefix(model, "model_constrain_matrix").c_str(),
         input_columns, values.ncol());
   }
 
-  Rcpp::CharacterVector names
+  cpp11::writable::strings names
       = model_constrained_names(model, include_tparams, include_gqs);
-  Rcpp::NumericMatrix result(values.nrow(), names.size());
-  const Eigen::Map<const Eigen::MatrixXd> input(values.begin(), values.nrow(),
-                                                 values.ncol());
-  Eigen::Map<Eigen::MatrixXd> output(result.begin(), values.nrow(),
-                                     names.size());
+  const int output_columns = static_cast<int>(names.size());
+  cpp11::writable::doubles_matrix<> result(values.nrow(), output_columns);
+  const Eigen::Map<const Eigen::MatrixXd> input(
+      REAL(values.data()), values.nrow(), values.ncol());
+  Eigen::Map<Eigen::MatrixXd> output(
+      REAL(result.data()), values.nrow(), output_columns);
   std::ostringstream messages;
   Eigen::VectorXd upars(input_columns);
   Eigen::VectorXd constrained;
@@ -626,10 +634,10 @@ Rcpp::NumericMatrix model_constrain_matrix(
     if (!input.row(row).allFinite()) {
       for (int column = 0; column < input_columns; ++column) {
         if (!std::isfinite(input(row, column))) {
-          Rcpp::stop(
+          cpp11::stop(
               "%sunconstrained parameter values must all be finite; row %d, "
               "column %d is not finite.",
-              model_method_error_prefix(model, "model_constrain_matrix"),
+              model_method_error_prefix(model, "model_constrain_matrix").c_str(),
               row + 1, column + 1);
         }
       }
@@ -640,27 +648,28 @@ Rcpp::NumericMatrix model_constrain_matrix(
       model.write_array(rng, upars, constrained, include_tparams, include_gqs,
                         &messages);
     } catch (const std::exception& error) {
-      Rcpp::stop("%srow %d: %s",
-                 model_method_error_prefix(model, "model_constrain_matrix"),
+      cpp11::stop("%srow %d: %s",
+                 model_method_error_prefix(model, "model_constrain_matrix").c_str(),
                  row + 1, error.what());
     }
     if (constrained.size() != static_cast<Eigen::Index>(names.size())) {
-      Rcpp::stop(
+      cpp11::stop(
           "%srow %d produced an unexpected number of values.",
-          model_method_error_prefix(model, "model_constrain_matrix"),
+          model_method_error_prefix(model, "model_constrain_matrix").c_str(),
           row + 1);
     }
     output.row(row) = constrained;
   }
 
-  result.attr("dimnames") = Rcpp::List::create(R_NilValue, names);
+  Rf_setAttrib(result.data(), R_DimNamesSymbol,
+              cpp11::writable::list({R_NilValue, names}));
   attach_messages(result, messages);
   return result;
 }
 
-Rcpp::NumericVector model_constrain(
+cpp11::writable::doubles model_constrain(
     const stan::model::model_base& model, stan::rng_t& rng,
-    Rcpp::NumericVector values, bool include_tparams, bool include_gqs) {
+    cpp11::doubles values, bool include_tparams, bool include_gqs) {
   Eigen::VectorXd upars
       = checked_unconstrained_values(model, values, "model_constrain");
   Eigen::VectorXd constrained;
@@ -669,18 +678,18 @@ Rcpp::NumericVector model_constrain(
     model.write_array(rng, upars, constrained, include_tparams, include_gqs,
                       &messages);
   } catch (const std::exception& error) {
-    Rcpp::stop("%s%s", model_method_error_prefix(model, "model_constrain"),
+    cpp11::stop("%s%s", model_method_error_prefix(model, "model_constrain").c_str(),
                error.what());
   }
 
-  Rcpp::CharacterVector names
+  cpp11::writable::strings names
       = model_constrained_names(model, include_tparams, include_gqs);
   if (constrained.size() != names.size()) {
-    Rcpp::stop(
+    cpp11::stop(
         "%sthe generated transform returned an unexpected number of values.",
-        model_method_error_prefix(model, "model_constrain"));
+        model_method_error_prefix(model, "model_constrain").c_str());
   }
-  Rcpp::NumericVector result = Rcpp::wrap(constrained);
+  cpp11::writable::doubles result(stanr::as_sexp(constrained));
   result.names() = names;
   attach_messages(result, messages);
   return result;

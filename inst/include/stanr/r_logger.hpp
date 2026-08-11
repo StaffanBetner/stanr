@@ -1,7 +1,7 @@
 #ifndef STANR_R_LOGGER_HPP
 #define STANR_R_LOGGER_HPP
 
-#include <Rcpp.h>
+#include <R_ext/Print.h>
 #include <stan/callbacks/logger.hpp>
 #include <mutex>
 #include <sstream>

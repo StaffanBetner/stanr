@@ -1,7 +1,8 @@
 #ifndef STANR_RUN_WALNUTS_HPP
 #define STANR_RUN_WALNUTS_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
+#include <stanr/cpp11_tuple_interop.hpp>
 #include <walnutpie/adaptive_walnuts.hpp>
 #include <walnutpie/config.hpp>
 #include <stan/model/model_base.hpp>
@@ -111,46 +112,46 @@ class r_walnuts_handler {
   Eigen::VectorXd constrained_;
 };
 
-inline Rcpp::List run_walnuts(stan::model::model_base& model, Rcpp::List args) {
-  const bool verbose = Rcpp::as<bool>(args["verbose"]);
-  const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
+inline cpp11::writable::list run_walnuts(stan::model::model_base& model, cpp11::list args) {
+  const bool verbose = stanr::as_cpp<bool>(args["verbose"]);
+  const bool show_exceptions = stanr::as_cpp<bool>(args["show_exceptions"]);
 
-  const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-  const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-  const int num_chains = Rcpp::as<int>(args["num_chains"]);
-  const double init_radius = Rcpp::as<double>(args["init_radius"]);
-  const int num_warmup = Rcpp::as<int>(args["num_warmup"]);
-  const int num_samples = Rcpp::as<int>(args["num_samples"]);
-  const int num_thin = Rcpp::as<int>(args["thin"]);
-  const bool save_warmup = Rcpp::as<bool>(args["save_warmup"]);
-  const double step_size_init = Rcpp::as<double>(args["stepsize"]);
+  const unsigned int seed = stanr::as_cpp<unsigned int>(args["seed"]);
+  const unsigned int chain_id = stanr::as_cpp<unsigned int>(args["id"]);
+  const int num_chains = stanr::as_cpp<int>(args["num_chains"]);
+  const double init_radius = stanr::as_cpp<double>(args["init_radius"]);
+  const int num_warmup = stanr::as_cpp<int>(args["num_warmup"]);
+  const int num_samples = stanr::as_cpp<int>(args["num_samples"]);
+  const int num_thin = stanr::as_cpp<int>(args["thin"]);
+  const bool save_warmup = stanr::as_cpp<bool>(args["save_warmup"]);
+  const double step_size_init = stanr::as_cpp<double>(args["stepsize"]);
 
   const auto size_arg = [&](const char* name) {
-    return static_cast<std::size_t>(Rcpp::as<int>(args[name]));
+    return static_cast<std::size_t>(stanr::as_cpp<int>(args[name]));
   };
   const std::size_t max_trajectory_doublings = size_arg("max_depth");
   const std::size_t max_step_halvings = size_arg("max_step_halvings");
   const std::size_t min_micro_steps = size_arg("min_micro_steps");
 
-  const double step_accept_rate_target = Rcpp::as<double>(args["delta"]);
+  const double step_accept_rate_target = stanr::as_cpp<double>(args["delta"]);
   const double max_hamiltonian_error =
-      Rcpp::as<double>(args["max_hamiltonian_error"]);
-  const double mass_init_count = Rcpp::as<double>(args["mass_init_count"]);
+      stanr::as_cpp<double>(args["max_hamiltonian_error"]);
+  const double mass_init_count = stanr::as_cpp<double>(args["mass_init_count"]);
   const double mass_additive_smoothing =
-      Rcpp::as<double>(args["mass_additive_smoothing"]);
+      stanr::as_cpp<double>(args["mass_additive_smoothing"]);
   const double max_macro_steps_target =
-      Rcpp::as<double>(args["max_macro_steps_target"]);
-  const double step_learning_rate = Rcpp::as<double>(args["step_learning_rate"]);
+      stanr::as_cpp<double>(args["max_macro_steps_target"]);
+  const double step_learning_rate = stanr::as_cpp<double>(args["step_learning_rate"]);
   const double step_gradient_decay =
-      Rcpp::as<double>(args["step_gradient_decay"]);
+      stanr::as_cpp<double>(args["step_gradient_decay"]);
   const double step_sq_gradient_decay =
-      Rcpp::as<double>(args["step_sq_gradient_decay"]);
-  const double step_stabilization = Rcpp::as<double>(args["step_stabilization"]);
+      stanr::as_cpp<double>(args["step_sq_gradient_decay"]);
+  const double step_stabilization = stanr::as_cpp<double>(args["step_stabilization"]);
   const double step_learn_rate_decay =
-      Rcpp::as<double>(args["step_learn_rate_decay"]);
+      stanr::as_cpp<double>(args["step_learn_rate_decay"]);
 
   const std::vector<std::string> diagnostic_names =
-      Rcpp::as<std::vector<std::string>>(args["diagnostic_names"]);
+      stanr::as_cpp<std::vector<std::string>>(args["diagnostic_names"]);
 
   stanr::r_logger logger(verbose, show_exceptions);
 
@@ -173,8 +174,8 @@ inline Rcpp::List run_walnuts(stan::model::model_base& model, Rcpp::List args) {
 
   // Per-chain unconstrained init and RNG for the model's own constraining
   // transform -- separate from walnutpie's own mt19937_64 stream.
-  stanr::r_data_context init_ctx(Rcpp::as<Rcpp::List>(args["init"]),
-                                 args["init_declarations"]);
+  cpp11::list init_list = args["init"];
+  stanr::r_data_context init_ctx(init_list, args["init_declarations"]);
   std::vector<stan::rng_t> model_rngs;
   std::vector<Eigen::VectorXd> positions;
   model_rngs.reserve(num_chains);
@@ -194,17 +195,16 @@ inline Rcpp::List run_walnuts(stan::model::model_base& model, Rcpp::List args) {
   walnutpie::InitConfigBuilder init_builder{static_cast<std::size_t>(num_chains),
                                             model.num_params_r()};
   init_builder.step_sizes(step_size_init).positions(positions);
-  if (args.containsElementNamed("inv_metric")) {
-    Rcpp::List inv_metric_list = Rcpp::as<Rcpp::List>(args["inv_metric"]);
+  if (!Rf_isNull(args["inv_metric"])) {
+    cpp11::list inv_metric_list = args["inv_metric"];
     const bool per_chain =
-        inv_metric_list.length() == static_cast<R_xlen_t>(num_chains);
+        inv_metric_list.size() == static_cast<R_xlen_t>(num_chains);
     std::vector<Eigen::VectorXd> masses(num_chains);
     for (int i = 0; i < num_chains; ++i) {
-      Rcpp::NumericVector inv_metric =
-          Rcpp::as<Rcpp::NumericVector>(inv_metric_list[per_chain ? i : 0]);
+      cpp11::doubles inv_metric(inv_metric_list[per_chain ? i : 0]);
       // walnutpie's masses() wants the mass matrix; inv_metric is its
       // inverse (Stan's usual "inverse metric" convention).
-      masses[i] = Eigen::Map<Eigen::VectorXd>(inv_metric.begin(),
+      masses[i] = Eigen::Map<Eigen::VectorXd>(REAL(inv_metric.data()),
                                               inv_metric.size())
                       .array()
                       .inverse()
@@ -270,28 +270,28 @@ inline Rcpp::List run_walnuts(stan::model::model_base& model, Rcpp::List args) {
         return 0;
       });
 
-  // Interrupts and worker exceptions surface as Rcpp::stop inside
+  // Interrupts and worker exceptions surface as cpp11::stop inside
   // run_on_worker_thread, so reaching here means success.
-  Rcpp::List chain_arrays = stanr::writer_chains_to_arrays(
+  cpp11::writable::list chain_arrays = stanr::writer_chains_to_arrays(
       sample_writers, diagnostic_names, warmup_rows);
-  Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
+  cpp11::writable::strings output = cpp11::as_sexp(logger.history());
 
-  Rcpp::List inv_metric(num_chains);
-  Rcpp::NumericVector step_size(num_chains);
+  cpp11::writable::list inv_metric(num_chains);
+  cpp11::writable::doubles step_size(num_chains);
   for (int i = 0; i < num_chains; ++i) {
     step_size[i] = handlers[i].step_size();
-    inv_metric[i] = Rcpp::wrap(handlers[i].inv_mass());
+    inv_metric[i] = stanr::as_sexp(handlers[i].inv_mass());
   }
 
-  return Rcpp::List::create(
-      Rcpp::_["samples"] = chain_arrays["samples"],
-      Rcpp::_["diagnostics"] = chain_arrays["diagnostics"],
-      Rcpp::_["warmup_samples"] = chain_arrays["warmup_samples"],
-      Rcpp::_["warmup_diagnostics"] = chain_arrays["warmup_diagnostics"],
-      Rcpp::_["return_code"] = 0,
-      Rcpp::_["inv_metric"] = inv_metric,
-      Rcpp::_["step_size"] = step_size,
-      Rcpp::_["output"] = output);
+  return cpp11::writable::list({
+      cpp11::named_arg("samples") = chain_arrays["samples"],
+      cpp11::named_arg("diagnostics") = chain_arrays["diagnostics"],
+      cpp11::named_arg("warmup_samples") = chain_arrays["warmup_samples"],
+      cpp11::named_arg("warmup_diagnostics") = chain_arrays["warmup_diagnostics"],
+      cpp11::named_arg("return_code") = 0,
+      cpp11::named_arg("inv_metric") = inv_metric,
+      cpp11::named_arg("step_size") = step_size,
+      cpp11::named_arg("output") = output});
 }
 
 }  // namespace stanr

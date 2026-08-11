@@ -1,7 +1,7 @@
 #ifndef STANR_R_OUTPUT_HPP
 #define STANR_R_OUTPUT_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
 #include <stan/callbacks/logger.hpp>
 #include <stan/callbacks/writer.hpp>
 #include <stan/callbacks/structured_writer.hpp>
@@ -116,16 +116,18 @@ class r_sample_writer : public stan::callbacks::writer {
   }
 
   /** Convert collected data to an R matrix. Main R thread only. */
-  Rcpp::NumericMatrix to_r_matrix() const {
-    Rcpp::NumericMatrix r_mat(n_rows_, n_cols_);
+  cpp11::writable::doubles_matrix<> to_r_matrix() const {
+    cpp11::writable::doubles_matrix<> r_mat(n_rows_, n_cols_);
     if (n_rows_ > 0) {
-      Eigen::Map<Eigen::MatrixXd>(r_mat.begin(), n_rows_, n_cols_) =
+      // r_mat.begin() is a cpp11 iterator, not a raw pointer -- go through
+      // REAL() for the zero-copy Eigen::Map write.
+      Eigen::Map<Eigen::MatrixXd>(REAL(r_mat.data()), n_rows_, n_cols_) =
         values_.topLeftCorner(n_rows_, n_cols_);
     }
-    r_mat.attr("dimnames") = Rcpp::List::create(
-      R_NilValue,
-      Rcpp::CharacterVector(colnames_.begin(), colnames_.end())
-    );
+    // matrix::attr() returns a plain value, not an assignable proxy like
+    // r_vector/list's -- Rf_setAttrib() is required here.
+    Rf_setAttrib(r_mat.data(), R_DimNamesSymbol, cpp11::writable::list(
+        {R_NilValue, cpp11::as_sexp(colnames_)}));
     return r_mat;
   }
 

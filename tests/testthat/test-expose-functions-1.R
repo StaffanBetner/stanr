@@ -4,7 +4,7 @@ init_test_cache("expose-functions-1")
 
 # Tests for the AST-based wrapper generator `.stanr_functions_to_cpp_wrappers`.
 # It runs stanc's debug-ast and emits one `extern "C" SEXP <fn>_sexp(...)`
-# wrapper per function (using Rcpp::as / Rcpp::wrap) plus a registry.
+# wrapper per function (using stanr::as_cpp / stanr::as_sexp) plus a registry.
 
 wrapper_for <- function(code) {
   stanr:::.stanr_functions_to_cpp_wrappers(code)
@@ -30,9 +30,9 @@ functions {
   expect_match(code, "extern \"C\" SEXP my_add_rng_sexp", fixed = TRUE)
   expect_match(code, "extern \"C\" SEXP say_hello_sexp", fixed = TRUE)
 
-  # Rcpp::as fills the args; Rcpp::wrap returns the result.
-  expect_match(code, "Rcpp::as<double>(a_sexp)", fixed = TRUE)
-  expect_match(code, "Rcpp::wrap(model_namespace::my_add(a, b, pstream__))", fixed = TRUE)
+  # stanr::as_cpp fills the args; stanr::as_sexp returns the result.
+  expect_match(code, "stanr::as_cpp<double>(a_sexp)", fixed = TRUE)
+  expect_match(code, "stanr::as_sexp(model_namespace::my_add(a, b, pstream__))", fixed = TRUE)
 
   # RNG wrapper takes a seed and builds a fresh RNG.
   expect_match(code, "SEXP seed_sexp", fixed = TRUE)
@@ -47,9 +47,9 @@ functions {
   expect_match(code, "return R_NilValue;", fixed = TRUE)
 
   # Registry carries name / is_rng / args.
-  expect_match(code, 'Rcpp::Named("name") = names', fixed = TRUE)
-  expect_match(code, 'Rcpp::Named("is_rng") = is_rng', fixed = TRUE)
-  expect_match(code, 'Rcpp::Named("args") = args', fixed = TRUE)
+  expect_match(code, 'cpp11::named_arg("name") = names', fixed = TRUE)
+  expect_match(code, 'cpp11::named_arg("is_rng") = is_rng', fixed = TRUE)
+  expect_match(code, 'cpp11::named_arg("args") = args', fixed = TRUE)
   expect_match(
     code,
     "extern \"C\" SEXP stanr_exposed_functions",
@@ -73,12 +73,12 @@ functions {
   code <- result$code
   expect_match(
     code,
-    "Rcpp::as<Eigen::Matrix<double,-1,1>>(a_sexp)",
+    "stanr::as_cpp<Eigen::Matrix<double,-1,1>>(a_sexp)",
     fixed = TRUE
   )
   expect_match(
     code,
-    "Rcpp::as<Eigen::Matrix<double,-1,-1>>(a_sexp)",
+    "stanr::as_cpp<Eigen::Matrix<double,-1,-1>>(a_sexp)",
     fixed = TRUE
   )
 })
@@ -96,16 +96,16 @@ functions {
 
   expect_equal(result$functions$name, c("arr_fun", "rv_fun", "int_arr_fun"))
   code <- result$code
-  expect_match(code, "Rcpp::as<std::vector<double>>(x_sexp)", fixed = TRUE)
-  expect_match(code, "Rcpp::as<int>(n_sexp)", fixed = TRUE)
+  expect_match(code, "stanr::as_cpp<std::vector<double>>(x_sexp)", fixed = TRUE)
+  expect_match(code, "stanr::as_cpp<int>(n_sexp)", fixed = TRUE)
   expect_match(
     code,
-    "Rcpp::as<Eigen::Matrix<double,1,-1>>(x_sexp)",
+    "stanr::as_cpp<Eigen::Matrix<double,1,-1>>(x_sexp)",
     fixed = TRUE
   )
   expect_match(
     code,
-    "Rcpp::as<std::vector<std::vector<int>>>(x_sexp)",
+    "stanr::as_cpp<std::vector<std::vector<int>>>(x_sexp)",
     fixed = TRUE
   )
 })
@@ -123,8 +123,8 @@ functions {
   expect_equal(result$functions$name, c("two_things", "keep_me"))
   code <- result$code
   # two_things takes a real and returns a tuple; the wrapper wraps the result.
-  expect_match(code, "Rcpp::as<double>(a_sexp)", fixed = TRUE)
-  expect_match(code, "Rcpp::wrap(model_namespace::two_things(a, pstream__))", fixed = TRUE)
+  expect_match(code, "stanr::as_cpp<double>(a_sexp)", fixed = TRUE)
+  expect_match(code, "stanr::as_sexp(model_namespace::two_things(a, pstream__))", fixed = TRUE)
   expect_match(code, "model_namespace::keep_me(a, pstream__)", fixed = TRUE)
 })
 
@@ -151,9 +151,8 @@ functions {
 }
 "
   )$code
-  expect_match(code, "#include <Rcpp.h>", fixed = TRUE)
-  expect_match(code, "#include <stanr/rcpp_eigen_interop.hpp>", fixed = TRUE)
-  expect_match(code, "#include <stanr/rcpp_tuple_interop.hpp>", fixed = TRUE)
+  expect_match(code, "#include <cpp11.hpp>", fixed = TRUE)
+  expect_match(code, "#include <stanr/cpp11_tuple_interop.hpp>", fixed = TRUE)
   expect_match(code, "#include <stan/model/model_header.hpp>", fixed = TRUE)
 })
 

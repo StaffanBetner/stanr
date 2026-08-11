@@ -1,7 +1,6 @@
-#include <Rcpp.h>
+#include <cpp11.hpp>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 
 // FNV-1a 64-bit, used only to build cache-key fingerprints (no need for
 // cryptographic strength). Each string's length is folded in before its
@@ -26,17 +25,15 @@ std::uint64_t mix_length(std::uint64_t hash, std::size_t len) {
 }  // namespace
 
 extern "C" SEXP stanr_hash_strings(SEXP strings_sexp) {
-  Rcpp::CharacterVector strings(strings_sexp);
+  cpp11::strings strings(strings_sexp);
   std::uint64_t hash = kOffsetBasis;
   for (const auto& element : strings) {
-    Rcpp::String s(element);
-    const char* c_str = s.get_cstring();
-    std::size_t len = std::strlen(c_str);
-    hash = mix_length(hash, len);
-    hash = fnv1a(hash, reinterpret_cast<const unsigned char*>(c_str), len);
+    std::string s(element);
+    hash = mix_length(hash, s.size());
+    hash = fnv1a(hash, reinterpret_cast<const unsigned char*>(s.data()), s.size());
   }
 
   char buf[17];
   std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(hash));
-  return Rcpp::wrap(std::string(buf));
+  return cpp11::as_sexp(std::string(buf));
 }

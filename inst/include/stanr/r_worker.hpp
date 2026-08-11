@@ -1,7 +1,7 @@
 #ifndef STANR_R_WORKER_HPP
 #define STANR_R_WORKER_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
 #include <stan/math/rev/core/chainablestack.hpp>
 #include <stan/math/rev/core/init_chainablestack.hpp>
 #include <stan/services/error_codes.hpp>
@@ -73,13 +73,13 @@ int run_on_worker_thread(stanr::r_logger& logger, const char* what,
     try {
       std::rethrow_exception(worker_error);
     } catch (const std::exception& e) {
-      Rcpp::stop(e.what());
+      cpp11::stop("%s", e.what());
     } catch (...) {
-      Rcpp::stop(std::string("Unknown exception in ") + what + " worker.");
+      cpp11::stop("Unknown exception in %s worker.", what);
     }
   }
   if (interrupted) {
-    Rcpp::stop(std::string(what) + " interrupted.");
+    cpp11::stop("%s interrupted.", what);
   }
 
   return return_code;

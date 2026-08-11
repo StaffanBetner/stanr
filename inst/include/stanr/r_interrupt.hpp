@@ -1,7 +1,7 @@
 #ifndef STANR_R_INTERRUPT_H
 #define STANR_R_INTERRUPT_H
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
 #include <stan/callbacks/interrupt.hpp>
 
 #include <atomic>
@@ -9,19 +9,20 @@
 
 namespace stanr {
 
-// Must be called from R's original thread; Rcpp converts a pending
-// interrupt into this exception.
+// Must be called from R's original thread. R_CheckUserInterrupt only ever
+// longjmps for a genuine pending interrupt, so catching unwind_exception
+// here (cpp11's generic R-error-during-safe[] exception) is safe.
 inline bool user_interrupt_pending() {
   try {
-    Rcpp::checkUserInterrupt();
+    cpp11::check_user_interrupt();
     return false;
-  } catch (const Rcpp::internal::InterruptedException&) {
+  } catch (const cpp11::unwind_exception&) {
     return true;
   }
 }
 
 // Stan callback::interrupt. Worker-thread users pass an atomic cancellation
-// flag; synchronous R-thread services may opt into Rcpp interrupt polling.
+// flag; synchronous R-thread services may opt into R interrupt polling.
 class r_interrupt : public stan::callbacks::interrupt {
  private:
   const std::atomic<bool>* cancel_requested_;
@@ -45,7 +46,7 @@ class r_interrupt : public stan::callbacks::interrupt {
         cancel_requested_->load(std::memory_order_relaxed)) {
       throw std::runtime_error(std::string(what_) + " interrupted.");
     }
-    if (check_r_) Rcpp::checkUserInterrupt();
+    if (check_r_) cpp11::check_user_interrupt();
   }
 };
 

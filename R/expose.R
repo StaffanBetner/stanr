@@ -3,11 +3,11 @@
 # (one `extern "C" SEXP <fn>_sexp(...)` per function + a registry) and
 # `functions` is data.frame(name, is_rng, args, arg_types, returntype).
 #
-# Wrappers use Rcpp::as/wrap (and vendored interop specializations), so they
-# compile with plain `R CMD SHLIB` (no Rcpp attribute processor). RNG fns are
-# detected by scanning each body for a `_rng` call; their wrappers take an
-# extra `seed` arg. Wrappers call `model_namespace::<fn>`; callers rewrite to
-# unqualified for external_cpp.
+# Wrappers use stanr::as_cpp/as_sexp (cpp11 plus vendored interop
+# specializations), so they compile with plain `R CMD SHLIB` (no attribute
+# processor). RNG fns are detected by scanning each body for a `_rng` call;
+# their wrappers take an extra `seed` arg. Wrappers call
+# `model_namespace::<fn>`; callers rewrite to unqualified for external_cpp.
 .stanr_functions_to_cpp_wrappers <- function(model_code) {
   if (!is.character(model_code) || length(model_code) != 1 || is.na(model_code)) {
     stop("model_code must be a single, non-missing string.", call. = FALSE)
@@ -199,7 +199,7 @@
     }
     get_lines <- if (length(arg_names)) {
       paste0(
-        "  const auto ", arg_names, " = Rcpp::as<", arg_types,
+        "  const auto ", arg_names, " = stanr::as_cpp<", arg_types,
         ">(", arg_names, "_sexp);"
       )
     } else {
@@ -218,7 +218,7 @@
       )
     } else {
       body <- paste0(
-        "  return Rcpp::wrap(model_namespace::", name, "(", call_args, "));"
+        "  return stanr::as_sexp(model_namespace::", name, "(", call_args, "));"
       )
     }
 
@@ -226,22 +226,22 @@
       wrapper <- c(
         paste0("extern \"C\" SEXP ", name, "_sexp(",
                paste(c(sexp_params, "SEXP seed_sexp"), collapse = ", "), ") {"),
-        "  BEGIN_RCPP",
+        "  BEGIN_CPP11",
         "  stan::rng_t base_rng__ = stan::services::util::create_rng(",
-        "      static_cast<unsigned int>(Rcpp::as<int>(seed_sexp)), 0);",
+        "      static_cast<unsigned int>(stanr::as_cpp<int>(seed_sexp)), 0);",
         get_lines,
         body,
-        "  END_RCPP",
+        "  END_CPP11",
         "}"
       )
     } else {
       wrapper <- c(
         paste0("extern \"C\" SEXP ", name, "_sexp(",
                paste(sexp_params, collapse = ", "), ") {"),
-        "  BEGIN_RCPP",
+        "  BEGIN_CPP11",
         get_lines,
         body,
-        "  END_RCPP",
+        "  END_CPP11",
         "}"
       )
     }
@@ -269,29 +269,33 @@
 
   reg_lines <- c(
     "extern \"C\" SEXP stanr_exposed_functions(void) {",
-    "  BEGIN_RCPP",
-    "  Rcpp::CharacterVector names = Rcpp::CharacterVector::create(",
-    paste0("    ", paste(sprintf('"%s"', names_vec), collapse = ", "), ");"),
-    "  Rcpp::LogicalVector is_rng = Rcpp::LogicalVector::create(",
-    paste0("    ", paste(ifelse(is_rng_vec, "true", "false"), collapse = ", "), ");"),
-    "  Rcpp::CharacterVector args = Rcpp::CharacterVector::create(",
-    paste0("    ", paste(sprintf('"%s"', args_vec), collapse = ", "), ");"),
-    "  return Rcpp::List::create(",
-    "    Rcpp::Named(\"name\") = names,",
-    "    Rcpp::Named(\"is_rng\") = is_rng,",
-    "    Rcpp::Named(\"args\") = args",
-    "  );",
-    "  END_RCPP",
+    "  BEGIN_CPP11",
+    # Direct-list-init (no parens): with parens, a single-element {x} list
+    # ambiguously prefers the explicit r_vector(R_xlen_t size) constructor
+    # over the initializer_list one when x converts to R_xlen_t (true for
+    # bool/int/double elements), silently building a zero-length vector.
+    "  cpp11::writable::strings names{",
+    paste0("    ", paste(sprintf('"%s"', names_vec), collapse = ", "), "};"),
+    "  cpp11::writable::logicals is_rng{",
+    paste0("    ", paste(ifelse(is_rng_vec, "true", "false"), collapse = ", "), "};"),
+    "  cpp11::writable::strings args{",
+    paste0("    ", paste(sprintf('"%s"', args_vec), collapse = ", "), "};"),
+    "  return cpp11::writable::list({",
+    "    cpp11::named_arg(\"name\") = names,",
+    "    cpp11::named_arg(\"is_rng\") = is_rng,",
+    "    cpp11::named_arg(\"args\") = args",
+    "  });",
+    "  END_CPP11",
     "}"
   )
 
   header <- c(
     "#include <stan/model/model_header.hpp>",
-    "#include <Rcpp.h>",
-    "#include <stanr/rcpp_eigen_interop.hpp>",
-    "#include <stanr/rcpp_tuple_interop.hpp>",
-    "// [[Rcpp::plugins(cpp20)]]",
-    "static std::ostream* pstream__ = &Rcpp::Rcout;"
+    "#include <cpp11.hpp>",
+    "#include <cpp11/declarations.hpp>",
+    "#include <stanr/cpp11_tuple_interop.hpp>",
+    "#include <stanr/model_methods.hpp>",
+    "static std::ostream* pstream__ = &stanr::r_console_stream();"
   )
 
   code <- paste(c(header, wrappers, paste(reg_lines, collapse = "\n")),
@@ -311,10 +315,9 @@
   list(code = code, functions = functions_df)
 }
 
-# Compiles a Stan `functions` block into a callable env via `R CMD SHLIB`
-# (no Rcpp::sourceCpp): stanc -> standalone C++ + generated SEXP wrappers,
-# then dyn.load. Wrappers call `model_namespace::<fn>`, which the standalone
-# TU defines.
+# Compiles a Stan `functions` block into a callable env via `R CMD SHLIB`:
+# stanc -> standalone C++ + generated SEXP wrappers, then dyn.load. Wrappers
+# call `model_namespace::<fn>`, which the standalone TU defines.
 .compile_standalone_functions_environment <- function(
   code,
   stan_file = NULL,
@@ -323,8 +326,6 @@
   verbose = FALSE,
   precompiled_headers = TRUE
 ) {
-  .stanr_require_compile_packages()
-
   stanc_out <- stanc(
     code,
     standalone_functions = TRUE,

@@ -61,10 +61,7 @@
     withr::with_makevars(
       .stanr_apply_makevars(
         c(
-          PKG_CPPFLAGS = paste(
-            c(cppflags, .stanr_dependency_cppflags()),
-            collapse = " "
-          ),
+          PKG_CPPFLAGS = paste(cppflags, collapse = " "),
           PKG_LIBS = libs,
           CXX20FLAGS = .stanr_opt_flags()
         ),
@@ -90,11 +87,6 @@
     shQuote(tbb_lib_dir),
     " -ltbb -ltbbmalloc"
   )
-}
-
-# Rcpp must be loaded for its callables to register.
-.stanr_require_compile_packages <- function() {
-  loadNamespace("Rcpp")
 }
 
 .stanr_base_cppflags <- function() {
@@ -280,8 +272,6 @@
   cpp_options = list(),
   compile_standalone = FALSE
 ) {
-  .stanr_require_compile_packages()
-
   model_support <- readLines(
     system.file("stan_model.cpp", package = "stanr", mustWork = TRUE)
   )
@@ -344,7 +334,7 @@
     use_opencl = use_opencl
   )
   if (compile_standalone) {
-    # Generate R->C++ SEXP wrappers from the AST (no Rcpp::sourceCpp).
+    # Generate R->C++ SEXP wrappers from the AST.
     gen <- .stanr_functions_to_cpp_wrappers(code)
     wrapper_section <- gen$code
     # external_cpp is at file scope before `model_namespace`; unqualify calls.

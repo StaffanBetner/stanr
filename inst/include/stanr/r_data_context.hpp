@@ -1,7 +1,7 @@
 #ifndef STANR_R_DATA_CONTEXT_HPP
 #define STANR_R_DATA_CONTEXT_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
 #include <stan/io/validate_dims.hpp>
 #include <stan/io/var_context.hpp>
 
@@ -50,19 +50,19 @@ class r_data_context : public stan::io::var_context {
   void store_complex(const std::string& name,
                      std::vector<std::complex<double>> values,
                      std::vector<size_t> dims, size_t enclosing_dims);
-  void flatten_tuple(const std::string& name, SEXP value, Rcpp::List type_df,
+  void flatten_tuple(const std::string& name, SEXP value, cpp11::list type_df,
                      int n_array_dims);
   void flatten_recurse(const std::string& name,
                        const std::vector<SEXP>& elements,
                        const std::vector<int>& array_sizes,
-                       Rcpp::List type_df);
+                       cpp11::list type_df);
   void flatten_leaf(const std::string& name,
                     const std::vector<SEXP>& slot_values,
                     const std::string& kind,
                     const std::vector<int>& array_sizes);
 
  public:
-  explicit r_data_context(Rcpp::List list, SEXP declarations = R_NilValue);
+  explicit r_data_context(cpp11::list list, SEXP declarations = R_NilValue);
 
   bool contains_r(const std::string& name) const override;
   std::vector<double> vals_r(const std::string& name) const override;

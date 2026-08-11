@@ -1,7 +1,8 @@
 #ifndef STANR_RUN_PATHFINDER
 #define STANR_RUN_PATHFINDER
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
+#include <stanr/cpp11_tuple_interop.hpp>
 #include <stan/services/pathfinder/single.hpp>
 #include <stan/services/pathfinder/multi.hpp>
 #include <stan/callbacks/structured_writer.hpp>
@@ -14,30 +15,30 @@
 
 namespace stanr {
   template <class Model>
-  Rcpp::List run_pathfinder(Model& model, Rcpp::List args) {
-    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    const double init_radius = Rcpp::as<double>(args["init_radius"]);
-    const int max_lbfgs_iters = Rcpp::as<int>(args["max_lbfgs_iters"]);
-    const int history_size = Rcpp::as<int>(args["history_size"]);
-    const int num_elbo_draws = Rcpp::as<int>(args["num_elbo_draws"]);
-    const int num_draws = Rcpp::as<int>(args["num_draws"]);
-    const int num_paths = Rcpp::as<int>(args["num_paths"]);
-    const int num_psis_draws = Rcpp::as<int>(args["num_psis_draws"]);
-    const double init_alpha = Rcpp::as<double>(args["init_alpha"]);
-    const double tol_obj = Rcpp::as<double>(args["tol_obj"]);
-    const double tol_rel_obj = Rcpp::as<double>(args["tol_rel_obj"]);
-    const double tol_grad = Rcpp::as<double>(args["tol_grad"]);
-    const double tol_rel_grad = Rcpp::as<double>(args["tol_rel_grad"]);
-    const double tol_param = Rcpp::as<double>(args["tol_param"]);
-    const bool save_single_paths = Rcpp::as<bool>(args["save_single_paths"]);
-    const bool psis_resample = Rcpp::as<bool>(args["psis_resample"]);
-    const bool calculate_lp = Rcpp::as<bool>(args["calculate_lp"]);
-    const int refresh = Rcpp::as<int>(args["refresh"]);
-    const bool verbose = Rcpp::as<bool>(args["verbose"]);
-    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
+  cpp11::writable::list run_pathfinder(Model& model, cpp11::list args) {
+    const unsigned int seed = stanr::as_cpp<unsigned int>(args["seed"]);
+    const unsigned int chain_id = stanr::as_cpp<unsigned int>(args["id"]);
+    const double init_radius = stanr::as_cpp<double>(args["init_radius"]);
+    const int max_lbfgs_iters = stanr::as_cpp<int>(args["max_lbfgs_iters"]);
+    const int history_size = stanr::as_cpp<int>(args["history_size"]);
+    const int num_elbo_draws = stanr::as_cpp<int>(args["num_elbo_draws"]);
+    const int num_draws = stanr::as_cpp<int>(args["num_draws"]);
+    const int num_paths = stanr::as_cpp<int>(args["num_paths"]);
+    const int num_psis_draws = stanr::as_cpp<int>(args["num_psis_draws"]);
+    const double init_alpha = stanr::as_cpp<double>(args["init_alpha"]);
+    const double tol_obj = stanr::as_cpp<double>(args["tol_obj"]);
+    const double tol_rel_obj = stanr::as_cpp<double>(args["tol_rel_obj"]);
+    const double tol_grad = stanr::as_cpp<double>(args["tol_grad"]);
+    const double tol_rel_grad = stanr::as_cpp<double>(args["tol_rel_grad"]);
+    const double tol_param = stanr::as_cpp<double>(args["tol_param"]);
+    const bool save_single_paths = stanr::as_cpp<bool>(args["save_single_paths"]);
+    const bool psis_resample = stanr::as_cpp<bool>(args["psis_resample"]);
+    const bool calculate_lp = stanr::as_cpp<bool>(args["calculate_lp"]);
+    const int refresh = stanr::as_cpp<int>(args["refresh"]);
+    const bool verbose = stanr::as_cpp<bool>(args["verbose"]);
+    const bool show_exceptions = stanr::as_cpp<bool>(args["show_exceptions"]);
 
-    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
+    cpp11::list init_list = args["init"];
 
     stanr::r_logger logger(verbose, show_exceptions);
     // Single-path stays on the R thread; multi-path uses a coordinator
@@ -66,12 +67,12 @@ namespace stanr {
           calculate_lp);
 
       logger.flush();
-      Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
-      return Rcpp::List::create(
-        Rcpp::_["return_code"] = return_code,
-        Rcpp::_["draws"] = sample_writer.to_r_matrix(),
-        Rcpp::_["output"] = output
-      );
+      cpp11::writable::strings output = cpp11::as_sexp(logger.history());
+      return cpp11::writable::list({
+        cpp11::named_arg("return_code") = return_code,
+        cpp11::named_arg("draws") = sample_writer.to_r_matrix(),
+        cpp11::named_arg("output") = output
+      });
     } else {
       // Multi-path runs in a coordinator std::thread; all contexts/writers
       // are C++ owned before launch. The immutable context is shared.
@@ -105,12 +106,12 @@ namespace stanr {
                 param_writer, diag_writer, calculate_lp, psis_resample);
           });
 
-      Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
-      return Rcpp::List::create(
-        Rcpp::_["return_code"] = return_code,
-        Rcpp::_["draws"] = param_writer.to_r_matrix(),
-        Rcpp::_["output"] = output
-      );
+      cpp11::writable::strings output = cpp11::as_sexp(logger.history());
+      return cpp11::writable::list({
+        cpp11::named_arg("return_code") = return_code,
+        cpp11::named_arg("draws") = param_writer.to_r_matrix(),
+        cpp11::named_arg("output") = output
+      });
     }
   }
 }

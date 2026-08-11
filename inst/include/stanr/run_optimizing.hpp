@@ -1,7 +1,8 @@
 #ifndef STANR_RUN_OPTIMIZING_HPP
 #define STANR_RUN_OPTIMIZING_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
+#include <stanr/cpp11_tuple_interop.hpp>
 #include <stan/services/optimize/bfgs.hpp>
 #include <stan/services/optimize/lbfgs.hpp>
 #include <stan/services/optimize/newton.hpp>
@@ -14,7 +15,7 @@ namespace stanr {
   template <bool Jacobian, class Model, class InitContext, class InitWriter,
             class SampleWriter, class Logger, class Interrupt>
   int run_optimizing_algorithm(Model& model, const std::string& algorithm,
-                                Rcpp::List args, InitContext& init_ctx,
+                                cpp11::list args, InitContext& init_ctx,
                                 unsigned int seed, unsigned int chain_id,
                                 double init_radius, int iter,
                                 bool save_iterations, Interrupt& interrupt,
@@ -27,13 +28,13 @@ namespace stanr {
           interrupt, logger,
           init_writer, sample_writer);
     } else if (algorithm == "bfgs") {
-      const double init_alpha = Rcpp::as<double>(args["init_alpha"]);
-      const double tol_obj = Rcpp::as<double>(args["tol_obj"]);
-      const double tol_rel_obj = Rcpp::as<double>(args["tol_rel_obj"]);
-      const double tol_grad = Rcpp::as<double>(args["tol_grad"]);
-      const double tol_rel_grad = Rcpp::as<double>(args["tol_rel_grad"]);
-      const double tol_param = Rcpp::as<double>(args["tol_param"]);
-      const int refresh = Rcpp::as<int>(args["refresh"]);
+      const double init_alpha = stanr::as_cpp<double>(args["init_alpha"]);
+      const double tol_obj = stanr::as_cpp<double>(args["tol_obj"]);
+      const double tol_rel_obj = stanr::as_cpp<double>(args["tol_rel_obj"]);
+      const double tol_grad = stanr::as_cpp<double>(args["tol_grad"]);
+      const double tol_rel_grad = stanr::as_cpp<double>(args["tol_rel_grad"]);
+      const double tol_param = stanr::as_cpp<double>(args["tol_param"]);
+      const int refresh = stanr::as_cpp<int>(args["refresh"]);
 
       return stan::services::optimize::bfgs<Model, Jacobian>(
           model, init_ctx, seed, chain_id, init_radius,
@@ -42,14 +43,14 @@ namespace stanr {
           interrupt, logger,
           init_writer, sample_writer);
     } else if (algorithm == "lbfgs") {
-      const double init_alpha = Rcpp::as<double>(args["init_alpha"]);
-      const double tol_obj = Rcpp::as<double>(args["tol_obj"]);
-      const double tol_rel_obj = Rcpp::as<double>(args["tol_rel_obj"]);
-      const double tol_grad = Rcpp::as<double>(args["tol_grad"]);
-      const double tol_rel_grad = Rcpp::as<double>(args["tol_rel_grad"]);
-      const double tol_param = Rcpp::as<double>(args["tol_param"]);
-      const int history_size = Rcpp::as<int>(args["history_size"]);
-      const int refresh = Rcpp::as<int>(args["refresh"]);
+      const double init_alpha = stanr::as_cpp<double>(args["init_alpha"]);
+      const double tol_obj = stanr::as_cpp<double>(args["tol_obj"]);
+      const double tol_rel_obj = stanr::as_cpp<double>(args["tol_rel_obj"]);
+      const double tol_grad = stanr::as_cpp<double>(args["tol_grad"]);
+      const double tol_rel_grad = stanr::as_cpp<double>(args["tol_rel_grad"]);
+      const double tol_param = stanr::as_cpp<double>(args["tol_param"]);
+      const int history_size = stanr::as_cpp<int>(args["history_size"]);
+      const int refresh = stanr::as_cpp<int>(args["refresh"]);
 
       return stan::services::optimize::lbfgs<Model, Jacobian>(
           model, init_ctx, seed, chain_id, init_radius,
@@ -66,19 +67,19 @@ namespace stanr {
   }
 
   template <class Model>
-  Rcpp::List run_optimizing(Model& model, Rcpp::List args) {
-    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
+  cpp11::writable::list run_optimizing(Model& model, cpp11::list args) {
+    const std::string algorithm = stanr::as_cpp<std::string>(args["algorithm"]);
 
-    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    const double init_radius = Rcpp::as<double>(args["init_radius"]);
-    const int iter = Rcpp::as<int>(args["iter"]);
-    const bool save_iterations = Rcpp::as<bool>(args["save_iterations"]);
-    const bool jacobian = Rcpp::as<bool>(args["jacobian"]);
-    const bool verbose = Rcpp::as<bool>(args["verbose"]);
-    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
+    const unsigned int seed = stanr::as_cpp<unsigned int>(args["seed"]);
+    const unsigned int chain_id = stanr::as_cpp<unsigned int>(args["id"]);
+    const double init_radius = stanr::as_cpp<double>(args["init_radius"]);
+    const int iter = stanr::as_cpp<int>(args["iter"]);
+    const bool save_iterations = stanr::as_cpp<bool>(args["save_iterations"]);
+    const bool jacobian = stanr::as_cpp<bool>(args["jacobian"]);
+    const bool verbose = stanr::as_cpp<bool>(args["verbose"]);
+    const bool show_exceptions = stanr::as_cpp<bool>(args["show_exceptions"]);
 
-    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
+    cpp11::list init_list = args["init"];
 
     stanr::r_data_context init_ctx(init_list, args["init_declarations"]);
     stan::callbacks::writer init_writer;
@@ -98,13 +99,13 @@ namespace stanr {
               iter, save_iterations, interrupt, logger, init_writer,
               sample_writer);
 
-    Rcpp::NumericMatrix mat = sample_writer.to_r_matrix();
+    cpp11::writable::doubles_matrix<> mat = sample_writer.to_r_matrix();
     double lp_val = NA_REAL;
 
     if (mat.nrow() > 0 && mat.ncol() >= 1) {
       // Last row contains the solution; find lp__ column
-      Rcpp::List dimnames = mat.attr("dimnames");
-      Rcpp::CharacterVector colnames = dimnames[1];
+      cpp11::list dimnames = SEXP(mat.attr("dimnames"));
+      cpp11::strings colnames = dimnames[1];
       for (int j = 0; j < mat.ncol(); ++j) {
         if (colnames[j] == "lp__") {
           lp_val = mat(mat.nrow() - 1, j);
@@ -114,13 +115,13 @@ namespace stanr {
     }
 
     logger.flush();
-    Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
-    return Rcpp::List::create(
-      Rcpp::_["par"] = mat,
-      Rcpp::_["value"] = lp_val,
-      Rcpp::_["return_code"] = return_code,
-      Rcpp::_["output"] = output
-    );
+    cpp11::writable::strings output = cpp11::as_sexp(logger.history());
+    return cpp11::writable::list({
+      cpp11::named_arg("par") = mat,
+      cpp11::named_arg("value") = lp_val,
+      cpp11::named_arg("return_code") = return_code,
+      cpp11::named_arg("output") = output
+    });
   }
 }
 

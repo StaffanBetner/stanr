@@ -1,7 +1,8 @@
 #ifndef STANR_RUN_DIAGNOSE_HPP
 #define STANR_RUN_DIAGNOSE_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
+#include <stanr/cpp11_tuple_interop.hpp>
 #include <stan/callbacks/writer.hpp>
 #include <stan/model/finite_diff_grad.hpp>
 #include <stan/model/log_prob_grad.hpp>
@@ -20,16 +21,16 @@ namespace stanr {
   // formatted text stan::model::test_gradients() writes. The logged table
   // matches test_gradients() line for line.
   template <class Model>
-  Rcpp::List run_diagnose(Model& model, Rcpp::List args) {
-    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    const double init_radius = Rcpp::as<double>(args["init_radius"]);
-    const double epsilon = Rcpp::as<double>(args["epsilon"]);
-    const double error_thresh = Rcpp::as<double>(args["error"]);
-    const bool verbose = Rcpp::as<bool>(args["verbose"]);
-    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
+  cpp11::writable::list run_diagnose(Model& model, cpp11::list args) {
+    const unsigned int seed = stanr::as_cpp<unsigned int>(args["seed"]);
+    const unsigned int chain_id = stanr::as_cpp<unsigned int>(args["id"]);
+    const double init_radius = stanr::as_cpp<double>(args["init_radius"]);
+    const double epsilon = stanr::as_cpp<double>(args["epsilon"]);
+    const double error_thresh = stanr::as_cpp<double>(args["error"]);
+    const bool verbose = stanr::as_cpp<bool>(args["verbose"]);
+    const bool show_exceptions = stanr::as_cpp<bool>(args["show_exceptions"]);
 
-    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
+    cpp11::list init_list = args["init"];
 
     stanr::r_data_context init_ctx(init_list, args["init_declarations"]);
     stan::callbacks::writer init_writer;
@@ -80,21 +81,18 @@ namespace stanr {
     }
 
     logger.flush();
-    Rcpp::CharacterVector output(
-        logger.history().begin(),
-        logger.history().end()
-    );
+    cpp11::writable::strings output = cpp11::as_sexp(logger.history());
 
-    return Rcpp::List::create(
-      Rcpp::_["num_failed"] = num_failed,
-      Rcpp::_["return_code"] = num_failed == 0 ? 0 : 1,
-      Rcpp::_["output"] = output,
-      Rcpp::_["lp"] = lp,
-      Rcpp::_["value"] = params_r,
-      Rcpp::_["model"] = grad,
-      Rcpp::_["finite_diff"] = grad_fd,
-      Rcpp::_["error"] = grad_error
-    );
+    return cpp11::writable::list({
+      cpp11::named_arg("num_failed") = num_failed,
+      cpp11::named_arg("return_code") = num_failed == 0 ? 0 : 1,
+      cpp11::named_arg("output") = output,
+      cpp11::named_arg("lp") = lp,
+      cpp11::named_arg("value") = params_r,
+      cpp11::named_arg("model") = grad,
+      cpp11::named_arg("finite_diff") = grad_fd,
+      cpp11::named_arg("error") = grad_error
+    });
   }
 }
 

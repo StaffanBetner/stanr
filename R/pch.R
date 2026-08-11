@@ -55,15 +55,6 @@
   )
 }
 
-.stanr_dependency_cppflags <- function() {
-  # TBB headers live under inst/include (see src/tbb), already covered by
-  # the stanr include dir in .stanr_base_cppflags().
-  paste0(
-    "-I",
-    shQuote(system.file("include", package = "Rcpp", mustWork = TRUE))
-  )
-}
-
 # C++ compiler identity (from `--version`), for clang-vs-gcc PCH flags and
 # the model cache key.
 .stanr_compiler_identity <- function() {
@@ -100,8 +91,7 @@
     package = "stanr",
     mustWork = TRUE
   )
-  dependency_flags <- .stanr_dependency_cppflags()
-  pch_cppflags <- paste(c(cppflags, dependency_flags), collapse = " ")
+  pch_cppflags <- paste(cppflags, collapse = " ")
   make <- Sys.which("make")
   if (!nzchar(make)) {
     warning(
@@ -149,12 +139,7 @@
       ),
       cppflags = pch_cppflags,
       opt_flags = pch_build_cxxflags,
-      header = unname(tools::md5sum(header)),
-      dependencies = vapply(
-        c("Rcpp"),
-        function(package) as.character(utils::packageVersion(package)),
-        character(1)
-      )
+      header = unname(tools::md5sum(header))
     )
   )
   cache_dir <- file.path(

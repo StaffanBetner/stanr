@@ -28,7 +28,7 @@ functions {
   expect_equal(env$vec_add(c(1, 2), c(3, 4)), c(4, 6))
 })
 
-test_that("tuple/complex functions compile and round-trip through Rcpp marshalling", {
+test_that("tuple/complex functions compile and round-trip through cpp11 marshalling", {
   code <- "
 functions {
   tuple(real, vector) split_stat(vector x) { return (mean(x), head(x, 2)); }

@@ -1,7 +1,8 @@
 #ifndef STANR_RUN_SAMPLING_HPP
 #define STANR_RUN_SAMPLING_HPP
 
-#include <Rcpp.h>
+#include <cpp11.hpp>
+#include <stanr/cpp11_tuple_interop.hpp>
 #include <memory>
 #include <stan/io/array_var_context.hpp>
 #include <stan/io/var_context.hpp>
@@ -34,7 +35,7 @@ namespace stanr {
 
   template <class Model>
   std::vector<std::shared_ptr<stan::io::var_context>> make_metric_contexts(
-      Model& model, const Rcpp::List& args, const std::string& metric,
+      Model& model, const cpp11::list& args, const std::string& metric,
       int num_chains, bool metric_supplied) {
     if (metric == "unit_e") return {};
     const size_t num_params = model.num_params_r();
@@ -54,9 +55,9 @@ namespace stanr {
                                                                    default_ctx);
     }
 
-    Rcpp::List inv_metric_list = Rcpp::as<Rcpp::List>(args["inv_metric"]);
+    cpp11::list inv_metric_list = args["inv_metric"];
     const bool per_chain =
-        inv_metric_list.length() == static_cast<R_xlen_t>(num_chains);
+        inv_metric_list.size() == static_cast<R_xlen_t>(num_chains);
     std::vector<std::shared_ptr<stan::io::var_context>> contexts;
     contexts.reserve(num_chains);
 
@@ -65,12 +66,17 @@ namespace stanr {
       std::vector<double> values;
       std::vector<size_t> dimensions;
       if (metric == "diag_e") {
-        Rcpp::NumericVector vector = Rcpp::as<Rcpp::NumericVector>(metric_value);
+        cpp11::doubles vector(metric_value);
         values.assign(vector.begin(), vector.end());
         dimensions = {static_cast<size_t>(vector.size())};
       } else {
-        Rcpp::NumericMatrix matrix = Rcpp::as<Rcpp::NumericMatrix>(metric_value);
-        values.assign(matrix.begin(), matrix.end());
+        cpp11::doubles_matrix<> matrix(metric_value);
+        // matrix::begin()/end() iterate slices (rows/columns), not flat
+        // elements like Rcpp::NumericMatrix did -- go through the flat
+        // column-major SEXP data directly.
+        const double* flat = REAL(matrix.data());
+        const R_xlen_t n = static_cast<R_xlen_t>(matrix.nrow()) * matrix.ncol();
+        values.assign(flat, flat + n);
         dimensions = {static_cast<size_t>(matrix.nrow()),
                       static_cast<size_t>(matrix.ncol())};
       }
@@ -82,44 +88,44 @@ namespace stanr {
   }
 
   template <class Model>
-  Rcpp::List run_sampling(Model& model, Rcpp::List args) {
-    const std::string engine = Rcpp::as<std::string>(args["engine"]);
+  cpp11::writable::list run_sampling(Model& model, cpp11::list args) {
+    const std::string engine = stanr::as_cpp<std::string>(args["engine"]);
     if (engine == "walnuts") {
       return run_walnuts(model, args);
     }
 
-    const std::string algorithm = Rcpp::as<std::string>(args["algorithm"]);
-    const std::string metric = Rcpp::as<std::string>(args["metric"]);
-    const bool adapt_engaged = Rcpp::as<bool>(args["adapt_engaged"]);
-    const bool verbose = Rcpp::as<bool>(args["verbose"]);
-    const bool show_exceptions = Rcpp::as<bool>(args["show_exceptions"]);
+    const std::string algorithm = stanr::as_cpp<std::string>(args["algorithm"]);
+    const std::string metric = stanr::as_cpp<std::string>(args["metric"]);
+    const bool adapt_engaged = stanr::as_cpp<bool>(args["adapt_engaged"]);
+    const bool verbose = stanr::as_cpp<bool>(args["verbose"]);
+    const bool show_exceptions = stanr::as_cpp<bool>(args["show_exceptions"]);
 
-    const unsigned int seed = Rcpp::as<unsigned int>(args["seed"]);
-    const unsigned int chain_id = Rcpp::as<unsigned int>(args["id"]);
-    const int num_chains = Rcpp::as<int>(args["num_chains"]);
-    const double init_radius = Rcpp::as<double>(args["init_radius"]);
-    const int num_warmup = Rcpp::as<int>(args["num_warmup"]);
-    const int num_samples = Rcpp::as<int>(args["num_samples"]);
-    const int num_thin = Rcpp::as<int>(args["thin"]);
-    const bool save_warmup = Rcpp::as<bool>(args["save_warmup"]);
-    const int refresh = Rcpp::as<int>(args["refresh"]);
-    const double stepsize = Rcpp::as<double>(args["stepsize"]);
-    const double stepsize_jitter = Rcpp::as<double>(args["stepsize_jitter"]);
-    const int max_depth = Rcpp::as<int>(args["max_depth"]);
-    const double int_time = Rcpp::as<double>(args["int_time"]);
+    const unsigned int seed = stanr::as_cpp<unsigned int>(args["seed"]);
+    const unsigned int chain_id = stanr::as_cpp<unsigned int>(args["id"]);
+    const int num_chains = stanr::as_cpp<int>(args["num_chains"]);
+    const double init_radius = stanr::as_cpp<double>(args["init_radius"]);
+    const int num_warmup = stanr::as_cpp<int>(args["num_warmup"]);
+    const int num_samples = stanr::as_cpp<int>(args["num_samples"]);
+    const int num_thin = stanr::as_cpp<int>(args["thin"]);
+    const bool save_warmup = stanr::as_cpp<bool>(args["save_warmup"]);
+    const int refresh = stanr::as_cpp<int>(args["refresh"]);
+    const double stepsize = stanr::as_cpp<double>(args["stepsize"]);
+    const double stepsize_jitter = stanr::as_cpp<double>(args["stepsize_jitter"]);
+    const int max_depth = stanr::as_cpp<int>(args["max_depth"]);
+    const double int_time = stanr::as_cpp<double>(args["int_time"]);
 
     // Adaptation parameters
-    const double delta = Rcpp::as<double>(args["delta"]);
-    const double gamma = Rcpp::as<double>(args["gamma"]);
-    const double kappa = Rcpp::as<double>(args["kappa"]);
-    const double t0 = Rcpp::as<double>(args["t0"]);
+    const double delta = stanr::as_cpp<double>(args["delta"]);
+    const double gamma = stanr::as_cpp<double>(args["gamma"]);
+    const double kappa = stanr::as_cpp<double>(args["kappa"]);
+    const double t0 = stanr::as_cpp<double>(args["t0"]);
 
     // Adaptation window parameters (for diag_e and dense_e metrics)
-    const int init_buffer_arg = Rcpp::as<int>(args["init_buffer"]);
-    const int term_buffer_arg = Rcpp::as<int>(args["term_buffer"]);
-    const int window_arg = Rcpp::as<int>(args["window"]);
+    const int init_buffer_arg = stanr::as_cpp<int>(args["init_buffer"]);
+    const int term_buffer_arg = stanr::as_cpp<int>(args["term_buffer"]);
+    const int window_arg = stanr::as_cpp<int>(args["window"]);
     const std::vector<std::string> diagnostic_names =
-        Rcpp::as<std::vector<std::string>>(args["diagnostic_names"]);
+        stanr::as_cpp<std::vector<std::string>>(args["diagnostic_names"]);
 
     stanr::r_logger logger(verbose, show_exceptions);
 
@@ -132,7 +138,7 @@ namespace stanr {
     const unsigned int term_buffer = static_cast<unsigned int>(term_buffer_arg);
     const unsigned int window = static_cast<unsigned int>(window_arg);
 
-    Rcpp::List init_list = Rcpp::as<Rcpp::List>(args["init"]);
+    cpp11::list init_list = args["init"];
 
     // --- Build per-chain contexts and writers ---
     const auto init_ctx = std::make_shared<stanr::r_data_context>(
@@ -151,7 +157,7 @@ namespace stanr {
       sample_writers.emplace_back(expected_rows);
     }
 
-    const bool metric_supplied = args.containsElementNamed("inv_metric");
+    const bool metric_supplied = !Rf_isNull(args["inv_metric"]);
     auto metric_ctxs = make_metric_contexts(model, args, metric, num_chains,
                                              metric_supplied);
     const bool multi_chain = num_chains > 1;
@@ -346,15 +352,15 @@ namespace stanr {
         });
 
     // --- Combine results (R thread only) ---
-    Rcpp::List chain_arrays = worker_return_code == 0
+    cpp11::writable::list chain_arrays = worker_return_code == 0
         ? writer_chains_to_arrays(sample_writers, diagnostic_names,
                                   warmup_rows)
-        : Rcpp::List::create(
-              Rcpp::_["samples"] = Rcpp::NumericVector(0),
-              Rcpp::_["diagnostics"] = Rcpp::NumericVector(0),
-              Rcpp::_["warmup_samples"] = R_NilValue,
-              Rcpp::_["warmup_diagnostics"] = R_NilValue);
-    Rcpp::CharacterVector output(logger.history().begin(), logger.history().end());
+        : cpp11::writable::list({
+              cpp11::named_arg("samples") = cpp11::writable::doubles(R_xlen_t(0)),
+              cpp11::named_arg("diagnostics") = cpp11::writable::doubles(R_xlen_t(0)),
+              cpp11::named_arg("warmup_samples") = R_NilValue,
+              cpp11::named_arg("warmup_diagnostics") = R_NilValue});
+    cpp11::writable::strings output = cpp11::as_sexp(logger.history());
 
     bool metric_captured = false;
     for (int i = 0; i < num_chains; ++i) {
@@ -364,27 +370,27 @@ namespace stanr {
       }
     }
 
-    Rcpp::List result = Rcpp::List::create(
-      Rcpp::_["samples"] = chain_arrays["samples"],
-      Rcpp::_["diagnostics"] = chain_arrays["diagnostics"],
-      Rcpp::_["warmup_samples"] = chain_arrays["warmup_samples"],
-      Rcpp::_["warmup_diagnostics"] = chain_arrays["warmup_diagnostics"],
-      Rcpp::_["return_code"] = worker_return_code,
-      Rcpp::_["inv_metric"] = R_NilValue,
-      Rcpp::_["step_size"] = R_NilValue,
-      Rcpp::_["output"] = output
-    );
+    cpp11::writable::list result = cpp11::writable::list({
+      cpp11::named_arg("samples") = chain_arrays["samples"],
+      cpp11::named_arg("diagnostics") = chain_arrays["diagnostics"],
+      cpp11::named_arg("warmup_samples") = chain_arrays["warmup_samples"],
+      cpp11::named_arg("warmup_diagnostics") = chain_arrays["warmup_diagnostics"],
+      cpp11::named_arg("return_code") = worker_return_code,
+      cpp11::named_arg("inv_metric") = R_NilValue,
+      cpp11::named_arg("step_size") = R_NilValue,
+      cpp11::named_arg("output") = output
+    });
 
     if (metric_captured) {
-      Rcpp::List inv_metric(num_chains);
-      Rcpp::NumericVector step_size(num_chains);
+      cpp11::writable::list inv_metric(num_chains);
+      cpp11::writable::doubles step_size(num_chains);
       for (int i = 0; i < num_chains; ++i) {
         const stanr::r_metric_writer& w = metric_writers[i];
         step_size[i] = w.stepsize();
         if (w.is_dense()) {
-          inv_metric[i] = w.inv_metric_matrix();
+          inv_metric[i] = stanr::as_sexp(w.inv_metric_matrix());
         } else {
-          inv_metric[i] = w.inv_metric_vector();
+          inv_metric[i] = stanr::as_sexp(w.inv_metric_vector());
         }
       }
       result["inv_metric"] = inv_metric;
