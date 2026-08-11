@@ -42,21 +42,15 @@ endif
 
 TBB_LIBS = -L"$(TBB_LIB_DIR)" -Wl,-rpath,@loader_path/../lib -ltbb -ltbbmalloc
 
-ifeq ($(TBB_CXX_TYPE),clang)
-  TBB_CXXFLAGS = -Wno-unknown-warning-option -Wno-deprecated-copy
-else
-  TBB_CXXFLAGS = -Wno-unknown-warning-option -Wno-deprecated-copy -Wno-missing-attributes -Wno-class-memaccess -Wno-sized-deallocation
-endif
-
 $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)):
 	@mkdir -p $(TBB_BUILD_DIR) $(TBB_LIB_DIR)
 	cd $(TBB_BUILD_DIR) && \
 	CXX="$(TBB_MAKE_CXX)" CC="$(TBB_MAKE_CC)" $(MAKE) -r -f $(abspath $(TBB_SRC))/build/Makefile.tbb \
-	  tbb_root=$(abspath $(TBB_SRC)) compiler=$(TBB_CXX_TYPE) cfg=release stdver=c++17 stdlib= \
+	  tbb_root=$(abspath $(TBB_SRC)) compiler=$(TBB_CXX_TYPE) cfg=release stdver=c++14 stdlib= \
 	  CXXFLAGS="$(TBB_CXXFLAGS)"
 	cd $(TBB_BUILD_DIR) && \
 	CXX="$(TBB_MAKE_CXX)" CC="$(TBB_MAKE_CC)" $(MAKE) -r -f $(abspath $(TBB_SRC))/build/Makefile.tbbmalloc \
-	  tbb_root=$(abspath $(TBB_SRC)) compiler=$(TBB_CXX_TYPE) cfg=release stdver=c++17 stdlib= \
+	  tbb_root=$(abspath $(TBB_SRC)) compiler=$(TBB_CXX_TYPE) cfg=release stdver=c++14 stdlib= \
 	  CXXFLAGS="$(TBB_CXXFLAGS)" malloc_dll
 	cp -f $(addprefix $(TBB_BUILD_DIR)/,$(TBB_LIB_GLOBS)) $(TBB_LIB_DIR)/
 	rm -rf $(TBB_BUILD_DIR)
