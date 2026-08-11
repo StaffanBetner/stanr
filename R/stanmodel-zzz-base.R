@@ -85,7 +85,8 @@ StanModel <- R6Class(
       quiet = TRUE,
       external_cpp = NULL,
       use_opencl = FALSE,
-      compile_standalone = FALSE
+      compile_standalone = FALSE,
+      backend = "compiled"
     ) {
       compile <- .stanr_flag(compile, "compile")
       force_recompile <- .stanr_flag(force_recompile, "force_recompile")
@@ -99,6 +100,11 @@ StanModel <- R6Class(
         compile_standalone,
         "compile_standalone"
       )
+      backend <- match.arg(backend, c("compiled", "stanli"))
+      if (backend == "stanli" && use_opencl) {
+        stop("`use_opencl = TRUE` is not supported by the stanli backend.",
+             call. = FALSE)
+      }
       if (is.null(stan_file) == is.null(code)) {
         stop("Supply exactly one of `stan_file` and `code`.", call. = FALSE)
       }
@@ -167,6 +173,7 @@ StanModel <- R6Class(
       private$external_cpp_ <- external_cpp
       private$use_opencl_ <- use_opencl
       private$compile_standalone_ <- compile_standalone
+      private$backend_ <- backend
       self$functions <- new.env(parent = emptyenv())
       if (compile) {
         self$compile()
@@ -190,6 +197,7 @@ StanModel <- R6Class(
     cpp_options = function() private$cpp_options_,
     stanc_options = function() private$stanc_options_,
     use_opencl = function() private$use_opencl_,
+    backend = function() private$backend_,
 
     # ---- Variables method
     variables = function() {
@@ -217,7 +225,17 @@ StanModel <- R6Class(
       )
       # Increment first so it reflects "a compile was attempted" even on throw.
       private$compile_generation_ <- private$compile_generation_ + 1L
-      private$compiled_env_ <- .compile_stan_model_environment(
+      private$compiled_env_ <- if (private$backend_ == "stanli") {
+        .compile_stanli_model_environment(
+          code = private$resolved_code(),
+          model_name = private$model_name_,
+          include_paths = private$include_paths_,
+          external_cpp = private$external_cpp_,
+          cpp_options = private$cpp_options_,
+          verbose = !quiet,
+          force_recompile = force_recompile
+        )
+      } else .compile_stan_model_environment(
         code = private$resolved_code(),
         model_name = private$model_name_,
         stan_file = private$stan_file_,
@@ -403,6 +421,7 @@ StanModel <- R6Class(
     external_cpp_ = NULL,
     use_opencl_ = FALSE,
     compile_standalone_ = FALSE,
+    backend_ = "compiled",
     compiled_env_ = NULL,
     functions_compiled_env_ = NULL,
     compile_generation_ = 0L,

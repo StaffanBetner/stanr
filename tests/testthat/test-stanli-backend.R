@@ -1,0 +1,414 @@
+local_test_context()
+
+init_test_cache("stanli-backend")
+
+# ---------------------------------------------------------------------------
+# Construction and backend selection
+# ---------------------------------------------------------------------------
+
+test_that("stan_model(backend = \"stanli\") compiles and reports its backend", {
+  mod <- stan_model(
+    code = "parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  expect_true(mod$is_compiled())
+  expect_equal(mod$backend(), "stanli")
+})
+
+test_that("the default backend is \"compiled\"", {
+  mod <- stan_model(
+    code = "parameters { real theta; } model { theta ~ normal(0, 1); }",
+    compile = FALSE
+  )
+  expect_equal(mod$backend(), "compiled")
+})
+
+test_that("an unknown backend value errors", {
+  expect_error(
+    stan_model(code = "parameters { real x; }", backend = "nope"),
+    "should be one of"
+  )
+})
+
+test_that("use_opencl = TRUE with backend = \"stanli\" errors, even without compiling", {
+  expect_error(
+    stan_model(
+      code = "parameters { real x; }",
+      backend = "stanli",
+      use_opencl = TRUE,
+      compile = FALSE
+    ),
+    "`use_opencl = TRUE` is not supported by the stanli backend"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# Sampling parity with the compiled backend
+# ---------------------------------------------------------------------------
+
+test_that("sampling a stanli-backend model produces a usable fit", {
+  mod <- stan_model(
+    stan_file = test_stan_file("bernoulli.stan"),
+    backend = "stanli"
+  )
+  fit <- mod$sample(
+    data = bernoulli_data,
+    chains = 2,
+    iter_warmup = 200,
+    iter_sampling = 200,
+    seed = 42,
+    show_messages = FALSE
+  )
+
+  expect_equal(fit$return_codes(), c(0L, 0L))
+  theta_mean <- fit$summary()$mean[fit$summary()$variable == "theta"]
+  # 5/10 successes (bernoulli_data$y) with a beta(1,1) prior: posterior is
+  # beta(6, 6), mean 0.5.
+  expect_equal(theta_mean, 0.5, tolerance = 0.05)
+})
+
+# ---------------------------------------------------------------------------
+# Data marshaling: every shape the stanli backend accepts.
+#
+# stanli::DataMap builds most shapes directly via typed setters (no JSON at
+# all), and falls back to a QuickJSR::to_json() round trip only for an
+# integer/logical array with 2+ dimensions -- the one shape its setters
+# can't represent (see .stanr_stanli_data_json(), R/stan_model.R). This
+# model exercises both paths in one data list (im/iar3 force the fallback,
+# which then carries every other variable along in the same JSON object).
+#
+# Values are read back through indexed transformed-data expressions rather
+# than by echoing whole arrays through generated quantities: stanli's own
+# write_array output naming for a directly-assigned 3-D `array[,,]`
+# generated quantity does not line up with its values (a preexisting stanli
+# issue, unrelated to data marshaling -- confirmed by cross-checking against
+# the compiled backend, which names/values these consistently). Indexed
+# reads sidestep that entirely and test exactly what this backend's R/C++
+# integration is responsible for: did the right value reach the right cell.
+# ---------------------------------------------------------------------------
+
+test_that("all stanli data shapes round-trip to the correct values", {
+  code <- "
+    data {
+      int n;
+      real x;
+      int<lower=0, upper=1> flag;
+      vector[3] v;
+      matrix[2, 3] m;
+      array[2, 3] int im;
+      array[2, 3, 4] real ar3;
+      array[2, 3, 4] int iar3;
+    }
+    transformed data {
+      real chk_v2 = v[2];
+      real chk_m = m[2, 3];
+      int chk_im = im[2, 3];
+      real chk_ar3 = ar3[2, 1, 3];
+      int chk_iar3 = iar3[1, 3, 2];
+    }
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+    generated quantities {
+      int n_out = n;
+      real x_out = x;
+      int flag_out = flag;
+      real v2_out = chk_v2;
+      real m_out = chk_m;
+      int im_out = chk_im;
+      real ar3_out = chk_ar3;
+      int iar3_out = chk_iar3;
+    }
+  "
+  mod <- stan_model(code = code, backend = "stanli")
+
+  v <- c(10.1, 20.2, 30.3)
+  m <- matrix(c(1.5, 2.5, 3.5, 4.5, 5.5, 6.5), nrow = 2, ncol = 3)
+  im <- matrix(1:6L, nrow = 2, ncol = 3)
+  ar3 <- array(seq(100, by = 1, length.out = 24), dim = c(2, 3, 4))
+  iar3 <- array(1:24L, dim = c(2, 3, 4))
+
+  data <- list(
+    n = 5L,
+    x = 3.5,
+    flag = TRUE,
+    v = v,
+    m = m,
+    im = im,
+    ar3 = ar3,
+    iar3 = iar3
+  )
+
+  fit <- mod$sample(
+    data = data,
+    chains = 1,
+    iter_warmup = 5,
+    iter_sampling = 1,
+    seed = 1,
+    show_messages = FALSE,
+    fixed_param = TRUE
+  )
+  s <- fit$summary()
+  get_val <- function(name) s$mean[s$variable == name]
+
+  expect_equal(get_val("n_out"), 5)
+  expect_equal(get_val("x_out"), 3.5)
+  expect_equal(get_val("flag_out"), 1)
+  expect_equal(get_val("v2_out"), v[2])
+  expect_equal(get_val("m_out"), m[2, 3])
+  expect_equal(get_val("im_out"), im[2, 3])
+  expect_equal(get_val("ar3_out"), ar3[2, 1, 3])
+  expect_equal(get_val("iar3_out"), iar3[1, 3, 2])
+})
+
+test_that("a bare logical scalar (no fallback needed) round-trips through the fast path", {
+  code <- "
+    data { int<lower=0, upper=1> flag; }
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+    generated quantities { int flag_out = flag; }
+  "
+  mod <- stan_model(code = code, backend = "stanli")
+
+  fit <- mod$sample(
+    data = list(flag = FALSE),
+    chains = 1,
+    iter_warmup = 5,
+    iter_sampling = 1,
+    seed = 1,
+    show_messages = FALSE,
+    fixed_param = TRUE
+  )
+  expect_equal(fit$summary()$mean[fit$summary()$variable == "flag_out"], 0)
+})
+
+test_that("a logical matrix (fallback path) round-trips through 0/1, not JSON true/false", {
+  code <- "
+    data { array[2, 2] int lm; }
+    transformed data { int chk = lm[2, 1]; }
+    parameters { real theta; }
+    model { theta ~ normal(0, 1); }
+    generated quantities { int out = chk; }
+  "
+  mod <- stan_model(code = code, backend = "stanli")
+  lm <- matrix(c(TRUE, FALSE, TRUE, FALSE), nrow = 2)
+
+  fit <- mod$sample(
+    data = list(lm = lm),
+    chains = 1,
+    iter_warmup = 5,
+    iter_sampling = 1,
+    seed = 1,
+    show_messages = FALSE,
+    fixed_param = TRUE
+  )
+  expect_equal(
+    fit$summary()$mean[fit$summary()$variable == "out"],
+    as.numeric(lm[2, 1])
+  )
+})
+
+# ---------------------------------------------------------------------------
+# Data validation errors, on both the fast (typed-setter) and fallback
+# (QuickJSR::to_json) paths.
+# ---------------------------------------------------------------------------
+
+test_that("NA/NaN/Inf real data errors on the fast path", {
+  mod <- stan_model(
+    code = "data { real x; } parameters { real theta; } model { theta ~ normal(0, x); }",
+    backend = "stanli"
+  )
+  for (bad in list(NA_real_, NaN, Inf, -Inf)) {
+    expect_error(
+      mod$sample(
+        data = list(x = bad),
+        chains = 1,
+        iter_warmup = 5,
+        iter_sampling = 5,
+        seed = 1,
+        show_messages = FALSE
+      ),
+      "stanli data cannot contain NA, NaN, or Inf"
+    )
+  }
+})
+
+test_that("NA integer data errors on the fallback (multi-dim int array) path", {
+  mod <- stan_model(
+    code = "data { array[2, 2] int im; } parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  expect_error(
+    mod$sample(
+      data = list(im = matrix(c(1L, NA, 3L, 4L), 2, 2)),
+      chains = 1,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      seed = 1,
+      show_messages = FALSE
+    ),
+    "stanli data cannot contain NA, NaN, or Inf"
+  )
+})
+
+test_that("complex data is rejected", {
+  mod <- stan_model(
+    code = "data { real x; } parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  expect_error(
+    mod$sample(
+      data = list(x = 1 + 2i),
+      chains = 1,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      seed = 1,
+      show_messages = FALSE
+    ),
+    "stanli data does not support complex values yet"
+  )
+})
+
+test_that("data.frame data is rejected", {
+  mod <- stan_model(
+    code = "data { real x; } parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  expect_error(
+    mod$sample(
+      data = list(x = data.frame(a = 1)),
+      chains = 1,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      seed = 1,
+      show_messages = FALSE
+    ),
+    "stanli data does not support data.frames yet"
+  )
+})
+
+test_that("tuple-typed (list) data is rejected", {
+  mod <- stan_model(
+    code = "data { real x; } parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  expect_error(
+    mod$sample(
+      data = list(x = list(1, 2)),
+      chains = 1,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      seed = 1,
+      show_messages = FALSE
+    ),
+    "tuple-typed"
+  )
+})
+
+test_that("arrays with more than 3 dimensions are rejected on both paths", {
+  mod_real <- stan_model(
+    code = "data { array[2, 2, 2, 2] real a; } parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  expect_error(
+    mod_real$sample(
+      data = list(a = array(1, dim = c(2, 2, 2, 2))),
+      chains = 1,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      seed = 1,
+      show_messages = FALSE
+    ),
+    "more than 3 dimensions"
+  )
+
+  mod_int <- stan_model(
+    code = "data { array[2, 2, 2, 2] int a; } parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  expect_error(
+    mod_int$sample(
+      data = list(a = array(1L, dim = c(2, 2, 2, 2))),
+      chains = 1,
+      iter_warmup = 5,
+      iter_sampling = 5,
+      seed = 1,
+      show_messages = FALSE
+    ),
+    "more than 3 dimensions"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# Init: stanli has no inverse parameter transform, so only unconstrained
+# (i.e. no named values at all -- a plain radius) init is supported.
+# ---------------------------------------------------------------------------
+
+test_that("a constrained-scale (named) init fails clearly", {
+  mod <- stan_model(
+    code = "parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  fit <- mod$sample(
+    data = list(),
+    chains = 1,
+    iter_warmup = 5,
+    iter_sampling = 5,
+    seed = 1,
+    show_messages = FALSE,
+    init = list(theta = 0.5)
+  )
+  expect_true(all(fit$return_codes() != 0L))
+  expect_match(
+    paste(fit$output(), collapse = "\n"),
+    "stanli cannot take inits on the constrained scale"
+  )
+})
+
+test_that("radius-only (unconstrained-compatible) init samples successfully", {
+  mod <- stan_model(
+    code = "parameters { real theta; } model { theta ~ normal(0, 1); }",
+    backend = "stanli"
+  )
+  fit <- mod$sample(
+    data = list(),
+    chains = 1,
+    iter_warmup = 20,
+    iter_sampling = 20,
+    seed = 1,
+    show_messages = FALSE,
+    init = 1
+  )
+  expect_equal(fit$return_codes(), 0L)
+})
+
+# ---------------------------------------------------------------------------
+# In-session model cache: force_recompile must touch only the model being
+# recompiled, not evict other cached stanli models (regression test).
+# ---------------------------------------------------------------------------
+
+test_that("force_recompile of one stanli model does not evict another's cache entry", {
+  call_count <- 0
+  real_mir <- stanr:::.stanr_stanli_mir
+  testthat::local_mocked_bindings(
+    .stanr_stanli_mir = function(code) {
+      call_count <<- call_count + 1
+      real_mir(code)
+    },
+    .package = "stanr"
+  )
+
+  code_a <- unique_stan_code()
+  code_b <- unique_stan_code()
+  mod_a <- stan_model(code = code_a, backend = "stanli")
+  stan_model(code = code_b, backend = "stanli")
+  expect_equal(call_count, 2L)
+
+  mod_a$compile(force_recompile = TRUE, quiet = TRUE)
+  expect_equal(call_count, 3L)
+
+  # B must still be served from its untouched cache entry.
+  stan_model(code = code_b, backend = "stanli")
+  expect_equal(call_count, 3L)
+})
+
+withr::deferred_run()

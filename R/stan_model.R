@@ -260,6 +260,124 @@
   "select_opencl_device"
 )
 
+.stanr_stanli_mir <- function(code) {
+  res <- stanc_ctx()$call(
+    "stanc",
+    "model",
+    code,
+    as.array("debug-transformed-mir")
+  )
+  if (!is.null(res$errors)) {
+    stop(paste(res$errors, collapse = "\n"), call. = FALSE)
+  }
+  if (length(res$warnings)) {
+    warning(paste(res$warnings, collapse = "\n"), call. = FALSE)
+  }
+  res$result
+}
+
+# The one stanli data shape that needs a JSON round trip: an integer,
+# logical, or whole-number-valued double array with 2+ dimensions (the last
+# so a plain `matrix(1:6, 2, 3)`-style whole-number real array -- as common
+# as `y = c(1, 0, 1, ...)` instead of `1L` -- is still readable wherever
+# int-declared data is read, matching r_data_context.cpp's store_numeric()
+# for the compiled backend). stanli::DataMap::set_int_array() only ever
+# builds a 1-D entry, and set_real_array() takes dims but never sets
+# is_int -- so a correctly-shaped multi-dim integer entry can only come from
+# stanli::DataMap::from_json(). Returns NULL when every variable in `data`
+# is fine on the direct/typed native path (no JSON at all).
+.stanr_stanli_data_json <- function(data) {
+  if (!length(data)) {
+    return(NULL)
+  }
+  needs_json <- function(x) {
+    if (length(dim(x)) < 2) {
+      return(FALSE)
+    }
+    if (is.integer(x) || is.logical(x)) {
+      return(TRUE)
+    }
+    is.double(x) &&
+      all(is.finite(x)) &&
+      all(x == trunc(x)) &&
+      all(abs(x) <= .Machine$integer.max)
+  }
+  if (!any(vapply(data, needs_json, logical(1)))) {
+    return(NULL)
+  }
+  QuickJSR::to_json(
+    Map(.stanr_stanli_json_shape, data, names(data)),
+    auto_unbox = TRUE
+  )
+}
+
+# Validates one data value and reshapes 3-D arrays into nested lists --
+# QuickJSR::to_json() only special-cases exactly-2-D matrices as nested JSON
+# arrays, so higher dimensions need the nesting done by hand. R's arrays are
+# column-major; JSON matrices/arrays nest row-major, with the first JSON
+# index the slowest R dimension (matching what
+# stanli::DataMap::from_json() expects on the way back in).
+.stanr_stanli_json_shape <- function(x, name) {
+  if (is.null(x) || is.list(x) || is.data.frame(x)) {
+    stop(
+      "stanli data does not support tuple-typed values or data.frames yet: ",
+      name,
+      call. = FALSE
+    )
+  }
+  if (is.complex(x)) {
+    stop(
+      "stanli data does not support complex values yet: ",
+      name,
+      call. = FALSE
+    )
+  }
+  if (!is.numeric(x) && !is.logical(x)) {
+    stop(
+      "stanli data must be numeric, logical, or an array: ",
+      name,
+      call. = FALSE
+    )
+  }
+  if (!all(is.finite(x))) {
+    stop("stanli data cannot contain NA, NaN, or Inf: ", name, call. = FALSE)
+  }
+  # QuickJSR::to_json() renders a logical as a JSON true/false literal,
+  # which stanli::DataMap::from_json() cannot parse (only numbers and
+  # arrays); 0/1 integers round-trip the same way the fast/direct path
+  # treats them.
+  if (is.logical(x)) {
+    storage.mode(x) <- "integer"
+  }
+  d <- dim(x)
+  if (length(d) > 3) {
+    stop(
+      "stanli data arrays with more than 3 dimensions are not supported: ",
+      name,
+      call. = FALSE
+    )
+  }
+  if (length(d) < 3) {
+    return(x)
+  }
+  lapply(seq_len(d[1]), function(i) {
+    slice <- x[i, , ]
+    lapply(seq_len(d[2]), function(j) as.vector(slice[j, ]))
+  })
+}
+
+.stanr_stanli_native_function <- function(name) {
+  # stanr deliberately has no useDynLib directive: zzz.R loads the package
+  # DLL explicitly and stores its DLLInfo object in `.stanr_dll`. Resolve
+  # registered routines against that object rather than by package name.
+  dll <- .stanr_dll
+  if (is.null(dll)) {
+    stop("the stanr native library is not loaded", call. = FALSE)
+  }
+  address <- getNativeSymbolInfo(name, dll)$address
+  function(...) do.call(".Call", c(list(address), list(...)))
+}
+
 .compile_stan_model_environment <- function(
   code,
   model_name,
@@ -430,6 +548,50 @@
   env
 }
 
+.compile_stanli_model_environment <- function(
+  code,
+  model_name,
+  include_paths = character(),
+  external_cpp = NULL,
+  cpp_options = list(),
+  verbose = FALSE,
+  force_recompile = FALSE
+) {
+  memo <- if (is.null(.stanr_memo$stanli_envs)) {
+    .stanr_memo$stanli_envs <- new.env(parent = emptyenv())
+  } else {
+    .stanr_memo$stanli_envs
+  }
+  key <- .stanr_hash(c(
+    "stanli",
+    code,
+    model_name,
+    include_paths,
+    .stanr_external_cpp_contents(external_cpp),
+    vapply(cpp_options, as.character, character(1))
+  ))
+  if (!force_recompile && !is.null(memo[[key]])) {
+    return(memo[[key]])
+  }
+  if (verbose) {
+    message("[stanr] Constructing '", model_name, "' with stanli...")
+  }
+  env <- new.env()
+  mir <- .stanr_stanli_mir(code)
+  new_model <- .stanr_stanli_native_function("stanr_stanli_new_model")
+  for (name in .stanr_model_support_exports) {
+    env[[name]] <- .stanr_stanli_native_function(
+      paste0("stanr_stanli_", name)
+    )
+  }
+  memo[[key]] <- env
+  env$new_model <- function(data, seed, declarations = NULL) {
+    json <- .stanr_stanli_data_json(data)
+    new_model(mir, json %||% data, model_name, seed)
+  }
+  env
+}
+
 #' Create a Stan model object
 #'
 #' @description Create a new [`StanModel`] object from a Stan program file or
@@ -501,6 +663,10 @@
 #'   is simply never called, so the platform/device baked in at compile time
 #'   (0/0) is used. The default OpenCL link flags are `"-framework OpenCL"`
 #'   on macOS and `"-lOpenCL"` elsewhere.
+#' @param backend (string) Either `"compiled"` (the default), which compiles
+#'   the model to a native shared library, or `"stanli"`, which interprets
+#'   the model instead of compiling it. The `"stanli"` backend does not
+#'   support `use_opencl` or constrained-scale `init` values.
 #'
 #' @return A [`StanModel`] object.
 #'
@@ -556,7 +722,8 @@ stan_model <- function(
   quiet = TRUE,
   external_cpp = NULL,
   use_opencl = FALSE,
-  compile_standalone = FALSE
+  compile_standalone = FALSE,
+  backend = "compiled"
 ) {
   StanModel$new(
     stan_file = stan_file,
@@ -572,6 +739,7 @@ stan_model <- function(
     quiet = quiet,
     external_cpp = external_cpp,
     use_opencl = use_opencl,
-    compile_standalone = compile_standalone
+    compile_standalone = compile_standalone,
+    backend = backend
   )
 }

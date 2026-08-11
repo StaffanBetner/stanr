@@ -4,7 +4,16 @@ CXX_STD = CXX20
 # Must stay the first rule: make's default goal is the first rule seen.
 all: $(SHLIB)
 
-PKG_CPPFLAGS = -I"../inst/include" -I"sundials" -include stan_sundials_printf_override.hpp -D_REENTRANT -DSTAN_THREADS -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
+STANLI_EIGEN_DIR = $(firstword $(wildcard stanli/deps/math/lib/eigen_*))
+STANLI_BOOST_DIR = $(firstword $(wildcard stanli/deps/math/lib/boost_*))
+STANLI_TBB_DIR = $(firstword $(wildcard stanli/deps/math/lib/tbb_*))
+
+PKG_CPPFLAGS = -I"../inst/include" -I"stanli/deps/math" -I"stanli/deps/stan/src" \
+  -I"$(STANLI_EIGEN_DIR)" -I"$(STANLI_BOOST_DIR)" -I"$(STANLI_TBB_DIR)/include" \
+  -I"sundials" \
+  -I"stanli/runtime/include" -I"stanli/runtime/third_party" \
+  -include stan_sundials_printf_override.hpp -D_REENTRANT -DSTAN_THREADS \
+  -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS
 # oneTBB has no tbb/tbb_stddef.h, which stan/math uses to detect the modern
 # TBB API; force that branch directly (see init_threadpool_tbb.hpp).
 PKG_CPPFLAGS += -DTBB_INTERFACE_NEW
@@ -96,17 +105,36 @@ SUNDIALS_SOURCES = $(wildcard sundials/*.c) \
   nvector/serial/nvector_serial.c
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
 
-RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o
+
+STANLI_SOURCES = $(filter-out stanli/runtime/src/capi.cpp \
+  stanli/runtime/src/bridgestan_abi.cpp \
+  stanli/runtime/src/stanc_embed_c.cpp \
+  stanli/runtime/src/nuts.cpp \
+  stanli/runtime/src/estimate.cpp \
+  stanli/runtime/src/diagnose.cpp, \
+  $(wildcard stanli/runtime/src/*.cpp) \
+  $(wildcard stanli/runtime/kernels/*.cpp))
+STANLI_OBJECTS = $(STANLI_SOURCES:.cpp=.o)
+
+stanli/runtime/src/%.o: stanli/runtime/src/%.cpp
+	$(CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS) -fPIC -c $< -o $@
+
+stanli/runtime/kernels/%.o: stanli/runtime/kernels/%.cpp
+	$(CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS) -fPIC -c $< -o $@
+
+STANLI_RUNNER_ARCHIVE = ../inst/lib/$(R_ARCH)/libstanr_runner.a
+PKG_LIBS += $(STANLI_RUNNER_ARCHIVE)
+RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o stanli_model.o $(STANLI_OBJECTS)
 OBJECTS = init.o xptr.o hash.o
 
 $(SHLIB): static
 
 
-static: $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)) $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
+static: $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)) $(STANLI_RUNNER_ARCHIVE)
+
+$(STANLI_RUNNER_ARCHIVE): $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 	@mkdir -p ../inst/lib/$(R_ARCH)
 	$(AR) -rs ../inst/lib/$(R_ARCH)/libstanr_runner.a $(SUNDIALS_OBJECTS) $(RUNNER_OBJECTS)
 	@strip -S ../inst/lib/$(R_ARCH)/libstanr_runner.a || true
 
-clean:
-	rm -rf ../inst/lib ../inst/tbb-build
-	rm -f $(OBJECTS) $(RUNNER_OBJECTS)
+clean: ; rm -rf ../inst/lib ../inst/tbb-build; rm -f $(OBJECTS) $(RUNNER_OBJECTS) $(STANLI_OBJECTS)

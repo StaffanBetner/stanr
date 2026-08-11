@@ -1,4 +1,5 @@
 ^src/walnutpie/(?!(include|LICENSE))
+^src/stanli/(?!(LICENSE|runtime))
 ^\.Rproj\.user$
 ^LICENSE\.md$
 ^README\.Rmd$

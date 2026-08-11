@@ -1,0 +1,3 @@
+[submodule "stanli"]
+	path = src/stanli
+	url = https://github.com/seantalts/stanli.git

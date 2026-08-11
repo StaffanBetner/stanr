@@ -42,6 +42,22 @@ rm -f "$SRC/tbb/CMakeLists.txt" "$SRC/tbbmalloc/CMakeLists.txt"
 # trips R CMD check's non-portable-flags NOTE), so these are never compiled.
 rm -f "$SRC/tbb/rtm_mutex.cpp" "$SRC/tbb/rtm_rw_mutex.cpp"
 
+# WAITPKG (_tpause/_umwait) pause-loop fast path: __TBB_WAITPKG_INTRINSICS_PRESENT
+# is gated only on compiler version, unlike __TBB_TSX_INTRINSICS_PRESENT above
+# (gated on __RTM__, which is only predefined given -mrtm) -- so on a
+# sufficiently new GCC/Clang it's "on" even though we never pass -mwaitpkg,
+# and _tpause() (an always_inline intrinsic requiring that target feature)
+# fails to inline into prolonged_pause() with a hard compile error. Force it
+# off; prolonged_pause_impl() is the always-available fallback.
+# Adds one open paren after the macro name and one matching close paren at
+# the expression's end (`&& !__ANDROID__)` -> `&& !__ANDROID__))`) to wrap
+# the whole thing in `(0 && (...))`.
+sed -i.bak \
+  -e 's/#define __TBB_WAITPKG_INTRINSICS_PRESENT (/#define __TBB_WAITPKG_INTRINSICS_PRESENT (0 \&\& (/' \
+  -e 's/\&\& !__ANDROID__)/\&\& !__ANDROID__))/' \
+  "$INST_INCLUDE/oneapi/tbb/detail/_config.h"
+rm -f "$INST_INCLUDE/oneapi/tbb/detail/_config.h.bak"
+
 rm -f "$SRC/tbb/itt_notify.cpp"
 rm -rf "$SRC/tbb/tools_api"
 

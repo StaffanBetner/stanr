@@ -52,14 +52,14 @@ cp -Rf "$MATH_SRC"/lib/sundials_*/include/* "$INC/"
 SUNDIALS_SRC="$MATH_SRC"/lib/sundials_*/src
 rm -rf ../src/sundials ../src/cvodes ../src/idas ../src/kinsol ../src/nvector \
   ../src/sunmatrix ../src/sunlinsol ../src/sunnonlinsol
-cp -Rf "$SUNDIALS_SRC"/sundials ../src/sundials
-cp -Rf "$SUNDIALS_SRC"/cvodes ../src/cvodes
-cp -Rf "$SUNDIALS_SRC"/idas ../src/idas
-cp -Rf "$SUNDIALS_SRC"/kinsol ../src/kinsol
-cp -Rf "$SUNDIALS_SRC"/nvector ../src/nvector
-cp -Rf "$SUNDIALS_SRC"/sunmatrix ../src/sunmatrix
-cp -Rf "$SUNDIALS_SRC"/sunlinsol ../src/sunlinsol
-cp -Rf "$SUNDIALS_SRC"/sunnonlinsol ../src/sunnonlinsol
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/sundials ../src/sundials
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/cvodes ../src/cvodes
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/idas ../src/idas
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/kinsol ../src/kinsol
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/nvector ../src/nvector
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/sunmatrix ../src/sunmatrix
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/sunlinsol ../src/sunlinsol
+cp -Rf "$MATH_SRC"/lib/sundials_*/src/sunnonlinsol ../src/sunnonlinsol
 
 # --- 7. TBB ------------------------------------------------------------
 # TBB is not vendored from the CmdStan/math bundle -- see tools/upgrade_tbb.sh,
@@ -88,6 +88,9 @@ cp -Rf "$MATH_SRC"/lib/boost_*/boost/random "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/optional "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/io "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/circular_buffer "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/accumulators "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/parameter "$INC/boost"
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/mp11 "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/*.hpp "$INC/boost"
 
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/lexical_cast "$INC/boost"
