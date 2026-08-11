@@ -44,8 +44,22 @@ cp -Rf "$MATH_SRC"/lib/sundials_*/include/* "$INC/"
 
 # --- 6. Vendor the Sundials C sources --------------------------------------
 # Makevars: cp -Rf math/lib/sundials_*/src/sundials .
-rm -rf ../src/sundials
-cp -Rf "$MATH_SRC"/lib/sundials_*/src/sundials ../src/sundials
+# stan-math's own make/libraries builds CVODES/IDAS/KINSOL (ode_*, dae,
+# algebra_solver) from sibling directories under src/, not just src/sundials
+# -- see $(SUNDIALS_CVODES)/$(SUNDIALS_IDAS)/$(SUNDIALS_KINSOL)/
+# $(SUNDIALS_NVECSERIAL) there. Vendor those siblings the same way, so
+# src/Makevars can compile them too.
+SUNDIALS_SRC="$MATH_SRC"/lib/sundials_*/src
+rm -rf ../src/sundials ../src/cvodes ../src/idas ../src/kinsol ../src/nvector \
+  ../src/sunmatrix ../src/sunlinsol ../src/sunnonlinsol
+cp -Rf "$SUNDIALS_SRC"/sundials ../src/sundials
+cp -Rf "$SUNDIALS_SRC"/cvodes ../src/cvodes
+cp -Rf "$SUNDIALS_SRC"/idas ../src/idas
+cp -Rf "$SUNDIALS_SRC"/kinsol ../src/kinsol
+cp -Rf "$SUNDIALS_SRC"/nvector ../src/nvector
+cp -Rf "$SUNDIALS_SRC"/sunmatrix ../src/sunmatrix
+cp -Rf "$SUNDIALS_SRC"/sunlinsol ../src/sunlinsol
+cp -Rf "$SUNDIALS_SRC"/sunnonlinsol ../src/sunnonlinsol
 
 # --- 7. TBB ------------------------------------------------------------
 # TBB is not vendored from the CmdStan/math bundle -- see tools/upgrade_tbb.sh,

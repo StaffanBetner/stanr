@@ -80,7 +80,20 @@ endif
 
 PKG_LIBS += $(TBB_LIBS)
 
-SUNDIALS_SOURCES = $(wildcard sundials/*.c)
+# CVODES/IDAS/KINSOL (ode_*, dae, algebra_solver) build from these sibling
+# dirs too, not just sundials/ -- mirrors stan-math's own make/libraries
+# ($(SUNDIALS_CVODES)/$(SUNDIALS_IDAS)/$(SUNDIALS_KINSOL)/$(SUNDIALS_NVECSERIAL)).
+SUNDIALS_SOURCES = $(wildcard sundials/*.c) \
+  $(wildcard cvodes/*.c) \
+  $(wildcard idas/*.c) \
+  $(wildcard kinsol/*.c) \
+  $(wildcard sunmatrix/band/*.c) \
+  $(wildcard sunmatrix/dense/*.c) \
+  $(wildcard sunlinsol/band/*.c) \
+  $(wildcard sunlinsol/dense/*.c) \
+  $(wildcard sunnonlinsol/newton/*.c) \
+  $(wildcard sunnonlinsol/fixedpoint/*.c) \
+  nvector/serial/nvector_serial.c
 SUNDIALS_OBJECTS = $(SUNDIALS_SOURCES:.c=.o)
 
 RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o
