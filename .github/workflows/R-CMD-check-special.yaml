@@ -23,7 +23,7 @@ jobs:
           - { name: "rchk" }
 
     env:
-      MAKEFLAGS: -j4
+      MAKEFLAGS: -j2
       TESTTHAT_CPUS: 4
     steps:
       - uses: r-hub/actions/checkout@main
