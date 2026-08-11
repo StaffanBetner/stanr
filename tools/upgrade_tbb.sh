@@ -51,3 +51,25 @@ rm -rf "$SRC/tbb/tools_api"
 # cross-reference in this file (e.g. "../tbb/itt_notify.h").
 sed -i.bak 's#\.\./src/tbb/environment\.h#../tbb/environment.h#' "$SRC/tbbmalloc/large_objects.cpp"
 rm -f "$SRC/tbbmalloc/large_objects.cpp.bak"
+
+# R CMD check flags non-portable diagnostic-suppression pragmas.
+files_list=(
+  "$SRC/tbb/co_context.h"
+  "$SRC/tbb/concurrent_monitor.h"
+  "$SRC/tbbmalloc/tbbmalloc_internal.h"
+)
+
+for file in "${files_list[@]}"; do
+  if [ -f "$file" ]; then
+    sed -i.bak \
+      -e '/#pragma clang diagnostic/d' \
+      -e '/#pragma GCC diagnostic/d' \
+      -e '/#pragma warning( *push *)/d' \
+      -e '/#pragma warning( *disable *:/d' \
+      -e '/#pragma warning( *pop *)/d' \
+      -e '/#pragma warning push/d' \
+      -e '/#pragma warning disable/d' \
+      "$file"
+    rm -f "$file.bak"
+  fi
+done
