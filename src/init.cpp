@@ -3,6 +3,7 @@
 
 extern "C" SEXP stanr_xptr_is_null(SEXP ptr);
 extern "C" SEXP stanr_hash_strings(SEXP strings);
+extern "C" SEXP stanr_max_concurrency(void);
 extern "C" SEXP stanr_stanli_new_model(SEXP, SEXP, SEXP, SEXP);
 extern "C" SEXP stanr_stanli_run_model(SEXP, SEXP);
 extern "C" SEXP stanr_stanli_constrained_param_names(SEXP);
@@ -26,6 +27,7 @@ extern "C"  {
   static const R_CallMethodDef CallEntries[] = {
     {"stanr_xptr_is_null", (DL_FUNC) &stanr_xptr_is_null, 1},
     {"stanr_hash_strings", (DL_FUNC) &stanr_hash_strings, 1},
+    {"stanr_max_concurrency", (DL_FUNC) &stanr_max_concurrency, 0},
     {"stanr_stanli_new_model", (DL_FUNC) &stanr_stanli_new_model, 4},
     {"stanr_stanli_run_model", (DL_FUNC) &stanr_stanli_run_model, 2},
     {"stanr_stanli_constrained_param_names", (DL_FUNC) &stanr_stanli_constrained_param_names, 1},

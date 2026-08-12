@@ -1,7 +1,7 @@
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 .stanr_default_num_threads <- function() {
-  parallel::detectCores()
+  .Call(stanr_max_concurrency)
 }
 
 .stanr_flag <- function(x, name) {

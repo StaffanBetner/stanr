@@ -113,7 +113,7 @@ stanli/runtime/kernels/%.o: stanli/runtime/kernels/%.cpp
 STANLI_RUNNER_ARCHIVE = ../inst/lib/$(R_ARCH)/libstanr_runner.a
 PKG_LIBS += $(STANLI_RUNNER_ARCHIVE)
 RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o stanli_model.o $(STANLI_OBJECTS)
-OBJECTS = init.o xptr.o hash.o
+OBJECTS = init.o xptr.o hash.o concurrency.o
 
 $(SHLIB): static
 

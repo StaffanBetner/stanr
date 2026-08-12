@@ -65,6 +65,11 @@ private <- self <- NULL
     getNativeSymbolInfo("stanr_hash_strings", dll),
     envir = ns
   )
+  assign(
+    "stanr_max_concurrency",
+    getNativeSymbolInfo("stanr_max_concurrency", dll),
+    envir = ns
+  )
   invisible(NULL)
 }
 
