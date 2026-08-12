@@ -45,7 +45,13 @@ All fit objects inherit from `StanFit` and share common methods:
 
 ## Installation
 
-You can install the development version of stanr from GitHub:
+Install pre-built binaries from R-Universe via:
+
+``` r
+install.packages('stanr', repos = c('https://andrjohns.r-universe.dev', 'https://cloud.r-project.org'))
+```
+
+You can also install the development version of stanr from GitHub:
 
 ``` r
 # install.packages("pak")
