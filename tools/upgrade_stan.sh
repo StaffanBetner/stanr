@@ -61,6 +61,120 @@ cp -Rf "$MATH_SRC"/lib/sundials_*/src/sunmatrix ../src/sunmatrix
 cp -Rf "$MATH_SRC"/lib/sundials_*/src/sunlinsol ../src/sunlinsol
 cp -Rf "$MATH_SRC"/lib/sundials_*/src/sunnonlinsol ../src/sunnonlinsol
 
+# --- 6b. Shim sundials' raw stdio ------------------------------------------
+# R CMD check flags compiled code that calls stdio entry points which write
+# to stdout/stderr instead of R's console, or that format via unbounded
+# [v]sprintf. stan_sundials_printf_override.hpp already neuters the optional
+# STAN_SUNDIALS_FPRINTF diagnostic calls (no-ops unless WITH_SUNDIAL_PRINTF is
+# defined, which it never is here), but it doesn't reach two other things:
+# each solver's errfp/infofp default to the real stdout/stderr streams
+# (read only by the already-neutered fprintf, so nothing observable changes
+# by defaulting to NULL instead -- every read site null-checks first), and
+# each solver's *ProcessError composes its message via unbounded vsprintf
+# into a fixed buffer before doing anything else with it, which is a real
+# overflow risk independent of where the message ends up. vsnprintf is the
+# same behavior, bounded, and not one of the flagged symbols.
+python3 - "../src/idas/idas.c" << 'EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old = "  IDA_mem->ida_errfp          = stderr;\n"
+new = "  IDA_mem->ida_errfp          = NULL;\n"
+assert old in text, "ida_errfp default not found -- idas.c changed upstream"
+text = text.replace(old, new, 1)
+
+old = "  vsprintf(msg, msgfmt, ap);\n"
+new = "  vsnprintf(msg, sizeof msg, msgfmt, ap);\n"
+assert old in text, "IDAProcessError vsprintf not found -- idas.c changed upstream"
+text = text.replace(old, new, 1)
+
+open(path, "w").write(text)
+EOF
+
+python3 - "../src/cvodes/cvodes.c" << 'EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old = "  cv_mem->cv_errfp            = stderr;\n"
+new = "  cv_mem->cv_errfp            = NULL;\n"
+assert old in text, "cv_errfp default not found -- cvodes.c changed upstream"
+text = text.replace(old, new, 1)
+
+old = "  vsprintf(msg, msgfmt, ap);\n"
+new = "  vsnprintf(msg, sizeof msg, msgfmt, ap);\n"
+assert old in text, "cvProcessError vsprintf not found -- cvodes.c changed upstream"
+text = text.replace(old, new, 1)
+
+open(path, "w").write(text)
+EOF
+
+# kinsol has TWO identical `vsprintf(msg, msgfmt, ap);` statements
+# (KINPrintInfo and KINProcessError) at different indentation. A plain
+# string replace risks a partial match of one inside the other's leading
+# whitespace, so match the whole line via regex instead and assert the count.
+python3 - "../src/kinsol/kinsol.c" << 'EOF'
+import re
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old = "  kin_mem->kin_errfp            = stderr;\n"
+new = "  kin_mem->kin_errfp            = NULL;\n"
+assert old in text, "kin_errfp default not found -- kinsol.c changed upstream"
+text = text.replace(old, new, 1)
+
+old = "  kin_mem->kin_infofp           = stdout;\n"
+new = "  kin_mem->kin_infofp           = NULL;\n"
+assert old in text, "kin_infofp default not found -- kinsol.c changed upstream"
+text = text.replace(old, new, 1)
+
+text, n = re.subn(
+    r"^(\s*)vsprintf\(msg, msgfmt, ap\);$",
+    r"\1vsnprintf(msg, sizeof msg, msgfmt, ap);",
+    text,
+    flags=re.MULTILINE,
+)
+assert n == 2, (
+    f"expected 2 vsprintf(msg, msgfmt, ap) call sites in kinsol.c, found {n} "
+    "-- changed upstream"
+)
+
+open(path, "w").write(text)
+EOF
+
+python3 - "../src/sunnonlinsol/newton/sunnonlinsol_newton.c" << 'EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old = "  content->info_file   = stdout;\n"
+new = "  content->info_file   = NULL;\n"
+assert old in text, "info_file default not found -- sunnonlinsol_newton.c changed upstream"
+text = text.replace(old, new, 1)
+
+open(path, "w").write(text)
+EOF
+
+python3 - "../src/nvector/serial/nvector_serial.c" << 'EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old = "  N_VPrintFile_Serial(x, stdout);\n"
+new = "  N_VPrintFile_Serial(x, NULL);\n"
+assert old in text, "N_VPrint_Serial call not found -- nvector_serial.c changed upstream"
+text = text.replace(old, new, 1)
+
+open(path, "w").write(text)
+EOF
+
 # --- 7. TBB ------------------------------------------------------------
 # TBB is not vendored from the CmdStan/math bundle -- see tools/upgrade_tbb.sh,
 # which vendors a standalone oneTBB release (headers into inst/include,
@@ -138,41 +252,39 @@ mkdir -p "$INC/unsupported"
 cp -Rf "$MATH_SRC"/lib/eigen_*/unsupported/Eigen "$INC/unsupported/"
 
 
-files_list=(
-  "$INC/CL/cl_platform.h"
-  "$INC/Eigen/src/Core/util/DisableStupidWarnings.h"
-  "$INC/boost/math/ccmath/isinf.hpp"
-  "$INC/boost/container/allocator_traits.hpp"
-  "$INC/boost/container/string.hpp"
-  "$INC/boost/container/detail/config_begin.hpp"
-  "$INC/boost/container/detail/flat_tree.hpp"
-  "$INC/boost/container/detail/is_container.hpp"
-  "$INC/boost/container/detail/is_contiguous_container.hpp"
-  "$INC/boost/container/detail/node_alloc_holder.hpp"
-  "$INC/boost/container/node_handle.hpp"
-  "$INC/boost/container/small_vector.hpp"
-  "$INC/boost/container/stable_vector.hpp"
-  "$INC/boost/get_pointer.hpp"
-  "$INC/boost/iterator/advance.hpp"
-  "$INC/boost/move/algo/adaptive_merge.hpp"
-  "$INC/boost/move/algo/adaptive_sort.hpp"
-  "$INC/boost/move/algo/detail/adaptive_sort_merge.hpp"
-  "$INC/boost/move/algo/detail/heap_sort.hpp"
-  "$INC/boost/move/algo/detail/insertion_sort.hpp"
-  "$INC/boost/move/algo/detail/merge_sort.hpp"
-  "$INC/boost/move/algo/detail/merge.hpp"
-  "$INC/boost/move/algo/detail/pdqsort.hpp"
-  "$INC/boost/move/algo/detail/search.hpp"
-  "$INC/boost/move/algo/detail/set_difference.hpp"
-  "$INC/boost/move/detail/std_ns_begin.hpp"
-  "$INC/boost/mpl/assert.hpp"
-  "$INC/boost/random/detail/disable_warnings.hpp"
-  "$INC/boost/range/adaptor/indexed.hpp"
-  "$INC/boost/type_traits/detail/has_prefix_operator.hpp"
+for file in \
+  "$INC/CL/cl_platform.h" \
+  "$INC/Eigen/src/Core/util/DisableStupidWarnings.h" \
+  "$INC/boost/math/ccmath/isinf.hpp" \
+  "$INC/boost/container/allocator_traits.hpp" \
+  "$INC/boost/container/string.hpp" \
+  "$INC/boost/container/detail/config_begin.hpp" \
+  "$INC/boost/container/detail/flat_tree.hpp" \
+  "$INC/boost/container/detail/is_container.hpp" \
+  "$INC/boost/container/detail/is_contiguous_container.hpp" \
+  "$INC/boost/container/detail/node_alloc_holder.hpp" \
+  "$INC/boost/container/node_handle.hpp" \
+  "$INC/boost/container/small_vector.hpp" \
+  "$INC/boost/container/stable_vector.hpp" \
+  "$INC/boost/get_pointer.hpp" \
+  "$INC/boost/iterator/advance.hpp" \
+  "$INC/boost/move/algo/adaptive_merge.hpp" \
+  "$INC/boost/move/algo/adaptive_sort.hpp" \
+  "$INC/boost/move/algo/detail/adaptive_sort_merge.hpp" \
+  "$INC/boost/move/algo/detail/heap_sort.hpp" \
+  "$INC/boost/move/algo/detail/insertion_sort.hpp" \
+  "$INC/boost/move/algo/detail/merge_sort.hpp" \
+  "$INC/boost/move/algo/detail/merge.hpp" \
+  "$INC/boost/move/algo/detail/pdqsort.hpp" \
+  "$INC/boost/move/algo/detail/search.hpp" \
+  "$INC/boost/move/algo/detail/set_difference.hpp" \
+  "$INC/boost/move/detail/std_ns_begin.hpp" \
+  "$INC/boost/mpl/assert.hpp" \
+  "$INC/boost/random/detail/disable_warnings.hpp" \
+  "$INC/boost/range/adaptor/indexed.hpp" \
+  "$INC/boost/type_traits/detail/has_prefix_operator.hpp" \
   "$INC/boost/type_traits/has_logical_not.hpp"
-)
-
-for file in "${files_list[@]}"; do
+do
   if [ -f "$file" ]; then
     sed -i.bak \
       -e '/#pragma clang diagnostic/d' \

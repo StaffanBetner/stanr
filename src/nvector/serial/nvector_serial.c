@@ -244,7 +244,7 @@ sunindextype N_VGetLength_Serial(N_Vector v)
 
 void N_VPrint_Serial(N_Vector x)
 {
-  N_VPrintFile_Serial(x, stdout);
+  N_VPrintFile_Serial(x, NULL);
 }
 
 /* ----------------------------------------------------------------------------

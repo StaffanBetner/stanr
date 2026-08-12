@@ -1,5 +1,7 @@
 #include <stanli/mir.hpp>
 
+#include <limits>
+#include <map>
 #include <stdexcept>
 
 namespace stanli {
@@ -29,6 +31,29 @@ const Node* field(const Node& n, const char* key) {
   for (size_t i = 0; i < n.size(); ++i)
     if (n[i].head_is(key)) return &n[i];
   return nullptr;
+}
+
+UnsizedLeaf unsized_leaf(const std::string& atom) {
+  if (atom == "UInt") return UnsizedLeaf::Int;
+  if (atom == "UReal") return UnsizedLeaf::Real;
+  if (atom == "UComplex") return UnsizedLeaf::Complex;
+  if (atom == "UVector") return UnsizedLeaf::Vector;
+  if (atom == "URowVector") return UnsizedLeaf::RowVector;
+  if (atom == "UMatrix") return UnsizedLeaf::Matrix;
+  return UnsizedLeaf::Unknown;
+}
+
+UnsizedView read_unsized(const Node& n) {
+  UnsizedView out;
+  const Node* leaf = &n;
+  while (!leaf->is_atom() && leaf->head_is("UArray") && leaf->size() == 2) {
+    if (out.depth == std::numeric_limits<uint8_t>::max())
+      throw std::runtime_error("mir: unsized array nesting is too deep");
+    ++out.depth;
+    leaf = &(*leaf)[1];
+  }
+  if (leaf->is_atom()) out.leaf = unsized_leaf(leaf->atom);
+  return out;
 }
 
 Expr read_expr(const Node& n);
@@ -153,7 +178,16 @@ Expr read_expr(const Node& n) {
   if (const Node* meta = field(n, "meta")) {
     const Node& m = (*meta)[1];
     if (!m.is_atom()) {
-      if (const Node* t = field(m, "type_")) e.type_ = (*t)[1].atom;
+      if (const Node* t = field(m, "type_")) {
+        const Node& type = (*t)[1];
+        e.unsized = read_unsized(type);
+        if (e.unsized.leaf != UnsizedLeaf::Unknown) {
+          e.type_ = e.unsized.depth ? "UArray" : type.atom;
+        } else {
+          e.type_.clear();
+          e.raw = dump(type);
+        }
+      }
       if (const Node* a = field(m, "adlevel"))
         e.data_only = (*a)[1].is_atom() && (*a)[1].atom == "DataOnly";
     }
@@ -352,11 +386,21 @@ Stmt read_stmt(const Node& n) {
     if (kind.head_is("CompilerInternal")) {
       const Node& internal = kind[1];
       s.fn_name = internal.is_atom() ? internal.atom : internal[0].atom;
-      // FnWriteParam names its column in the payload, not in the (empty)
-      // argument list: (FnWriteParam (unconstrain_opt ()) (var <expr>)).
-      if (!internal.is_atom())
+      if (!internal.is_atom()) {
+        // FnCheck's payload distinguishes lower from upper and names the
+        // value. Its ordinary operands contain the value and bound but not
+        // that relation.
+        if (s.fn_name == "FnCheck") {
+          if (const Node* t = field(internal, "trans"))
+            s.check_transform = read_transform((*t)[1]);
+          if (const Node* name = field(internal, "var_name"))
+            s.check_var_name = (*name)[1].atom;
+        }
+        // FnWriteParam names its column in the payload, not in the (empty)
+        // argument list; FnCheck likewise carries its checked value here.
         if (const Node* v = field(internal, "var"))
           s.fn_args.push_back(read_expr((*v)[1]));
+      }
     } else if (kind.head_is("StanLib")) {
       s.fn_name = kind[1].atom;
     } else {
@@ -369,6 +413,91 @@ Stmt read_stmt(const Node& n) {
     s.raw = dump(p);
   }
   return s;
+}
+
+using Bindings = std::map<std::string, UnsizedView>;
+
+UnsizedView declared_view(const SizedType& type) {
+  const std::string& base = type.base == "SArray" ? type.elem_base : type.base;
+  UnsizedView view;
+  if (base == "SInt")
+    view.leaf = UnsizedLeaf::Int;
+  else if (base == "SReal")
+    view.leaf = UnsizedLeaf::Real;
+  else if (base == "SComplex")
+    view.leaf = UnsizedLeaf::Complex;
+  else if (base == "SVector")
+    view.leaf = UnsizedLeaf::Vector;
+  else if (base == "SRowVector")
+    view.leaf = UnsizedLeaf::RowVector;
+  else if (base == "SMatrix")
+    view.leaf = UnsizedLeaf::Matrix;
+  if (type.base != "SArray") return view;
+
+  size_t leaf_rank = 0;
+  if (view.leaf == UnsizedLeaf::Matrix)
+    leaf_rank = 2;
+  else if (view.leaf == UnsizedLeaf::Vector ||
+           view.leaf == UnsizedLeaf::RowVector)
+    leaf_rank = 1;
+  if (view.leaf == UnsizedLeaf::Unknown || type.dims.size() < leaf_rank ||
+      type.dims.size() - leaf_rank > std::numeric_limits<uint8_t>::max())
+    throw std::runtime_error("mir: malformed sized declaration type");
+  view.depth = static_cast<uint8_t>(type.dims.size() - leaf_rank);
+  return view;
+}
+
+void validate_checks(const std::vector<Stmt>& body, Bindings& bindings);
+
+void validate_checks(const Stmt& s, Bindings& bindings) {
+  if (s.kind == Stmt::Decl) bindings[s.decl_id] = declared_view(s.decl_type);
+  if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
+    if (!s.check_transform)
+      throw std::runtime_error("mir: FnCheck has no transform");
+    const Transform::Kind kind = s.check_transform->kind;
+    if (is_structured_check(kind)) {
+      if (!s.check_transform->args.empty() || s.fn_args.size() != 1)
+        throw std::runtime_error("mir: malformed structured FnCheck");
+      const UnsizedLeaf leaf = s.fn_args[0].unsized.leaf;
+      const bool matrix = leaf == UnsizedLeaf::Matrix;
+      const bool vector = leaf == UnsizedLeaf::Vector;
+      const bool matrix_only =
+          kind == Transform::CholeskyCorr || kind == Transform::Correlation ||
+          kind == Transform::Covariance || kind == Transform::CholeskyCov;
+      const bool vector_only = kind != Transform::SumToZero && !matrix_only;
+      if ((!matrix && !vector) || (matrix_only && !matrix) ||
+          (vector_only && !vector))
+        throw std::runtime_error(
+            "mir: structured FnCheck transform and value type disagree");
+    } else if ((kind == Transform::Lower || kind == Transform::Upper) &&
+               s.check_transform->args.size() == 1 && s.fn_args.size() == 2) {
+      // Exact scalar/container compatibility is value- and shape-dependent;
+      // the lowering/interpreter check it at the original statement site.
+    } else {
+      throw std::runtime_error("mir: unsupported or malformed FnCheck");
+    }
+    const Expr& value = s.fn_args[0];
+    const auto binding =
+        value.kind == Expr::Var ? bindings.find(value.name) : bindings.end();
+    if (binding == bindings.end() ||
+        binding->second.depth != value.unsized.depth ||
+        binding->second.leaf != value.unsized.leaf)
+      throw std::runtime_error(
+          "mir: FnCheck value type disagrees with its declaration");
+  }
+  if (s.kind == Stmt::IfElse) {
+    for (const auto& child : s.body) {
+      Bindings branch = bindings;
+      validate_checks(child, branch);
+    }
+  } else if (!s.body.empty()) {
+    Bindings nested = bindings;
+    validate_checks(s.body, nested);
+  }
+}
+
+void validate_checks(const std::vector<Stmt>& body, Bindings& bindings) {
+  for (const auto& s : body) validate_checks(s, bindings);
 }
 
 }  // namespace
@@ -395,6 +524,7 @@ Program read_program(const sexp::Node& root) {
         for (size_t a = 0; a < args.size(); ++a) {
           // (AutoDiffable name type) or (DataOnly name type)
           f.arg_names.push_back(args[a][1].atom);
+          f.arg_views.push_back(read_unsized(args[a][2]));
           f.arg_types.push_back(args[a][2].is_atom() ? args[a][2].atom
                                                      : dump(args[a][2], 40));
         }
@@ -409,6 +539,21 @@ Program read_program(const sexp::Node& root) {
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
     read_stmt_list((*gq)[1], prog.generate_quantities);
+  Bindings inputs;
+  for (const auto& [name, type] : prog.input_vars)
+    inputs[name] = declared_view(type);
+  Bindings prepare_bindings = inputs;
+  validate_checks(prog.prepare_data, prepare_bindings);
+  Bindings log_prob_bindings = inputs;
+  validate_checks(prog.log_prob, log_prob_bindings);
+  Bindings gq_bindings = inputs;
+  validate_checks(prog.generate_quantities, gq_bindings);
+  for (const auto& f : prog.fun_defs) {
+    Bindings args;
+    for (size_t i = 0; i < f.arg_names.size(); ++i)
+      args[f.arg_names[i]] = f.arg_views[i];
+    validate_checks(f.body, args);
+  }
   return prog;
 }
 

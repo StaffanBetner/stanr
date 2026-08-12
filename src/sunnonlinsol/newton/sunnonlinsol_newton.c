@@ -92,7 +92,7 @@ SUNNonlinearSolver SUNNonlinSol_Newton(N_Vector y, SUNContext sunctx)
   content->nconvfails  = 0;
   content->ctest_data  = NULL;
   content->print_level = 0;
-  content->info_file   = stdout;
+  content->info_file   = NULL;
 
   /* Fill allocatable content */
   content->delta = N_VClone(y);

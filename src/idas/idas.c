@@ -434,7 +434,7 @@ void *IDACreate(SUNContext sunctx)
   IDA_mem->ida_edata          = NULL;
   IDA_mem->ida_ehfun          = IDAErrHandler;
   IDA_mem->ida_eh_data        = IDA_mem;
-  IDA_mem->ida_errfp          = stderr;
+  IDA_mem->ida_errfp          = NULL;
   IDA_mem->ida_maxord         = MAXORD_DEFAULT;
   IDA_mem->ida_mxstep         = MXSTEP_DEFAULT;
   IDA_mem->ida_hmax_inv       = HMAX_INV_DEFAULT;
@@ -7891,7 +7891,7 @@ void IDAProcessError(IDAMem IDA_mem,
 
   /* Compose the message */
 
-  vsprintf(msg, msgfmt, ap);
+  vsnprintf(msg, sizeof msg, msgfmt, ap);
 
   if (IDA_mem == NULL) {    /* We write to stderr */
 #ifndef NO_FPRINTF_OUTPUT

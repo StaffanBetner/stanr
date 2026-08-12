@@ -1,6 +1,5 @@
 #include <stanli/message_sink.hpp>
 
-#include <cstdio>
 #include <mutex>
 #include <utility>
 
@@ -27,16 +26,10 @@ void set_message_sink(MessageSink s) {
 
 void emit_message(const std::string& text) {
   std::lock_guard<std::mutex> lock(sink_mutex());
-  if (sink()) {
-    sink()(text.data(), text.size());
-    return;
-  }
-  // The default, and what both paths did before there was a sink: the
-  // line and its newline to stdout. One fwrite per call rather than two,
-  // so a line cannot be split by another thread's output.
-  std::string line = text;
-  line += '\n';
-  std::fwrite(line.data(), 1, line.size(), stdout);
+  if (sink()) sink()(text.data(), text.size());
+  // No sink installed: stanr does not call set_message_sink() (yet), and
+  // the default fallback wrote to the process's raw stdout, which R CMD
+  // check flags. Drop the message rather than write around R's console.
 }
 
 }  // namespace stanli

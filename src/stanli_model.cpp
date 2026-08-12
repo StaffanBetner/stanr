@@ -360,9 +360,7 @@ class stanli_model_base final : public stan::model::model_base {
 
  private:
   static std::vector<size_t> view_dims(const stanli::CompiledModel::ParamView& v) {
-    if (v.rows > 0) return {static_cast<size_t>(v.rows), static_cast<size_t>(v.len / v.rows)};
-    if (v.len == 1) return {};
-    return {static_cast<size_t>(v.len)};
+    return std::vector<size_t>(v.dims.begin(), v.dims.end());
   }
 
   static std::vector<size_t> column_dims(const stanli::CompiledModel::ParamView& v) {
@@ -404,7 +402,7 @@ class stanli_model_base final : public stan::model::model_base {
           stanli::WaRng probe(1);
           std::copy(q.begin(), q.end(), proto_->params_data());
           proto_->run_forward_only();
-          (void)wa_interp_->eval(stanli::wa_param_env(*proto_, cm_.views), probe);
+          (void)wa_interp_->eval(cm_.constrained_env(*proto_), probe);
           found = true;
         } catch (const std::exception&) {
         }
@@ -458,7 +456,7 @@ class stanli_model_base final : public stan::model::model_base {
       std::copy(q.begin(), q.end(), lease->params_data());
       lease->run_forward_only();
       const std::vector<double> row = wa_interp_->eval(
-          stanli::wa_param_env(*lease, cm_.views), wa_rng);
+          cm_.constrained_env(*lease), wa_rng);
       std::copy(row.begin(), row.begin() + static_cast<std::ptrdiff_t>(out.size()), out.begin());
       return;
     }

@@ -624,7 +624,7 @@ void *CVodeCreate(int lmm, SUNContext sunctx)
   cv_mem->cv_eh_data          = cv_mem;
   cv_mem->cv_monitorfun       = NULL;
   cv_mem->cv_monitor_interval = 0;
-  cv_mem->cv_errfp            = stderr;
+  cv_mem->cv_errfp            = NULL;
   cv_mem->cv_qmax             = maxord;
   cv_mem->cv_mxstep           = MXSTEP_DEFAULT;
   cv_mem->cv_mxhnil           = MXHNIL_DEFAULT;
@@ -9108,7 +9108,7 @@ void cvProcessError(CVodeMem cv_mem,
 
   /* Compose the message */
 
-  vsprintf(msg, msgfmt, ap);
+  vsnprintf(msg, sizeof msg, msgfmt, ap);
 
   if (cv_mem == NULL) {    /* We write to stderr */
 #ifndef NO_FPRINTF_OUTPUT

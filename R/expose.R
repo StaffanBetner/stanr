@@ -375,12 +375,14 @@
   writeLines(full_code, cpp_file)
 
   base_cppflags <- .stanr_base_cppflags()
+  pch_enabled <- FALSE
   if (
     precompiled_headers &&
       length(external_cpp) == 0 &&
       !.stanr_cpp_options_block_pch(extra_assignments)
   ) {
     pch_flags <- .stanr_pch_flags(base_cppflags, verbose)
+    pch_enabled <- nzchar(pch_flags)
     cppflags <- paste(pch_flags, base_cppflags)
   } else {
     cppflags <- base_cppflags
@@ -389,12 +391,21 @@
   if (verbose) {
     message("[stanr] Compiling Stan functions...")
   }
-  lib_file <- .stanr_compile(
-    cpp_file = cpp_file,
-    cppflags = cppflags,
-    libs = .stanr_tbb_libs(),
-    extra_assignments = extra_assignments,
-    verbose = verbose
+  compile_functions <- function(compilation_cppflags) {
+    .stanr_compile(
+      cpp_file = cpp_file,
+      cppflags = compilation_cppflags,
+      libs = .stanr_tbb_libs(),
+      extra_assignments = extra_assignments,
+      verbose = verbose
+    )
+  }
+  lib_file <- .stanr_compile_with_pch_retry(
+    compile_functions,
+    cppflags,
+    base_cppflags,
+    pch_enabled,
+    verbose
   )
 
   compiled_env <- new.env()

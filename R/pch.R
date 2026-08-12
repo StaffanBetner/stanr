@@ -75,6 +75,28 @@
   paste(output, collapse = "\n")
 }
 
+# Retain the two most recently used, successfully built PCHs.  The cache
+# directory is entirely owned by stanr, and each fingerprint gets its own
+# subdirectory, so removing an old entry cannot affect a PCH in use.
+.stanr_prune_pch_cache <- function(cache_root, keep = 2L) {
+  entries <- list.dirs(cache_root, full.names = TRUE, recursive = FALSE)
+  if (!length(entries)) {
+    return(invisible(NULL))
+  }
+
+  pchs <- file.path(entries, "model_pch.hpp.gch")
+  entries <- entries[file.exists(pchs)]
+  pchs <- pchs[file.exists(pchs)]
+  if (length(entries) <= keep) {
+    return(invisible(NULL))
+  }
+
+  mtime <- file.info(pchs)$mtime
+  old_entries <- entries[order(mtime, na.last = FALSE)][seq_len(length(entries) - keep)]
+  unlink(old_entries, recursive = TRUE, force = TRUE)
+  invisible(NULL)
+}
+
 # Flags making the model compile use a cached PCH, building it first if
 # needed. clang names the `.gch` via `-include-pch`; GCC needs a stand-in
 # header (symlink, or copy on Windows) staged next to its `.gch`.
@@ -142,13 +164,11 @@
       header = unname(tools::md5sum(header))
     )
   )
-  cache_dir <- file.path(
-    getOption(
-      "stanr_pch_dir",
-      file.path(tools::R_user_dir("stanr", "cache"), "pch")
-    ),
-    fingerprint
+  cache_root <- getOption(
+    "stanr_pch_dir",
+    file.path(tools::R_user_dir("stanr", "cache"), "pch")
   )
+  cache_dir <- file.path(cache_root, fingerprint)
   cache_header <- file.path(cache_dir, "model_pch.hpp")
   pch <- paste0(cache_header, ".gch")
 
@@ -174,9 +194,7 @@
         return("")
       }
     }
-    if (verbose) {
-      message("[stanr] Compiling precompiled model header...")
-    }
+    message("[stanr] Compiling precompiled model header...")
     # Pass the same makefiles vector as `R CMD SHLIB` via -f so the PCH is
     # built with the same CXX20* flags (e.g. -march=native) as the model TU.
     output <- tryCatch(
@@ -210,6 +228,11 @@
     }
   }
 
+  # Use the PCH's modification time as an LRU timestamp.  This is deliberately
+  # best-effort: a failure to update it must not prevent model compilation.
+  try(Sys.setFileTime(pch, Sys.time()), silent = TRUE)
+  .stanr_prune_pch_cache(cache_root)
+
   if (compiler_type == "clang") {
     paste("-include-pch", shQuote(pch))
   } else {
@@ -232,6 +255,14 @@
   pch_enabled,
   verbose = FALSE
 ) {
+  is_pch_diagnostic <- function(message) {
+    grepl(
+      "PCH file|precompiled header|\\.hpp\\.gch|\\.gch",
+      message,
+      ignore.case = TRUE
+    )
+  }
+
   tryCatch(
     compile_fn(cppflags),
     error = function(error) {
@@ -239,23 +270,31 @@
         stop(error)
       }
       msg <- conditionMessage(error)
-      pch_related <- grepl("PCH file", msg) ||
-        grepl("precompiled header", msg) ||
-        grepl(".hpp.gch", msg)
-      if (!pch_related) {
+      if (!is_pch_diagnostic(msg)) {
         stop(error)
       }
 
-      if (verbose) {
-        message(
-          "[stanr] Compile failed; rebuilding precompiled model header and retrying..."
-        )
-      }
+      message(
+        "[stanr] Compile failed; rebuilding precompiled model header and retrying..."
+      )
       pch_flags <- .stanr_pch_flags(base_cppflags, verbose, rebuild = TRUE)
       if (!nzchar(pch_flags)) {
-        stop(error)
+        # The failed attempt's diagnostic was about the PCH, not the model.
+        # Continue without a PCH instead of exposing that stale-cache error.
+        return(compile_fn(base_cppflags))
       }
-      compile_fn(paste(pch_flags, base_cppflags))
+      tryCatch(
+        compile_fn(paste(pch_flags, base_cppflags)),
+        error = function(retry_error) {
+          if (is_pch_diagnostic(conditionMessage(retry_error))) {
+            # A second PCH-specific failure should likewise fall back to a
+            # regular model compile. Any model diagnostic from that compile
+            # remains visible to the user.
+            return(compile_fn(base_cppflags))
+          }
+          stop(retry_error)
+        }
+      )
     }
   )
 }

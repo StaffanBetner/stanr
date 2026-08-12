@@ -274,10 +274,10 @@ void *KINCreate(SUNContext sunctx)
   kin_mem->kin_constraintsSet   = SUNFALSE;
   kin_mem->kin_ehfun            = KINErrHandler;
   kin_mem->kin_eh_data          = kin_mem;
-  kin_mem->kin_errfp            = stderr;
+  kin_mem->kin_errfp            = NULL;
   kin_mem->kin_ihfun            = KINInfoHandler;
   kin_mem->kin_ih_data          = kin_mem;
-  kin_mem->kin_infofp           = stdout;
+  kin_mem->kin_infofp           = NULL;
   kin_mem->kin_printfl          = PRINTFL_DEFAULT;
   kin_mem->kin_ret_newest       = SUNFALSE;
   kin_mem->kin_mxiter           = MXITER_DEFAULT;
@@ -2344,7 +2344,7 @@ void KINPrintInfo(KINMem kin_mem,
 
     /* Compose the message */
 
-    vsprintf(msg, msgfmt, ap);
+    vsnprintf(msg, sizeof msg, msgfmt, ap);
 
   }
 
@@ -2414,7 +2414,7 @@ void KINProcessError(KINMem kin_mem,
 
   /* Compose the message */
 
-  vsprintf(msg, msgfmt, ap);
+  vsnprintf(msg, sizeof msg, msgfmt, ap);
 
   if (kin_mem == NULL) {    /* We write to stderr */
 #ifndef NO_FPRINTF_OUTPUT

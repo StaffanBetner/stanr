@@ -25,7 +25,6 @@
 #include <stanli/optable.hpp>
 #include <stanli/program_density.hpp>
 
-#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <unordered_map>
@@ -489,15 +488,6 @@ int carve_islands(Graph& g,
       // generated adjoint; otherwise the run stays as ops, which is the
       // same work the CALLs would have done anyway.
       if (!cc.prog.calls.empty() && !cc.prog.native_adj) compiled = false;
-      // A refusal is not an error -- the replay still gives the right
-      // gradient -- but it is worth being able to see, because it is the
-      // difference between a region that is fast and one that merely
-      // works, and nothing else about the model would show it.
-      if (!gen && std::getenv("STANLI_DEBUG_ISLAND"))
-        std::fprintf(stderr,
-                     "island: no adjoint generated for a %zu-op region; "
-                     "it will replay under var\n",
-                     j - i);
     }
     // Is the island cheaper than the ops it replaces? The graph's side is
     // what its ops move (an in-place element update moves one element, not
@@ -532,9 +522,6 @@ int carve_islands(Graph& g,
           kRegWeight * ((int64_t)cc.prog.n_regs - cc.n_call_scratch) +
           cc.n_call_scratch + (int64_t)cc.prog.code.size() +
           (int64_t)cc.prog.adj.code.size() + (kOpCost - 1) * 2 * n_calls;
-      if (std::getenv("STANLI_DEBUG_ISLAND"))
-        std::fprintf(stderr, "island? ops=%zu graph=%lld island=%lld\n", j - i,
-                     (long long)graph_cost, (long long)island_cost);
       if (graph_cost < island_cost) compiled = false;
     }
     if (compiled) {
@@ -608,25 +595,6 @@ int carve_islands(Graph& g,
           ex.n_idata = 1;
           result.push_back(ex);
           off += len;
-        }
-        if (std::getenv("STANLI_DEBUG_ISLAND")) {
-          const IslandProg& p = *static_cast<const IslandProg*>(is.udata);
-          std::fprintf(stderr,
-                       "island: ops=%zu instr=%zu regs=%d ins=%zu outs=%zu "
-                       "adj=%zu\n",
-                       j - i, p.code.size(), p.n_regs, p.ins.size(),
-                       p.out_regs.size(), p.adj.code.size());
-          // Which instructions the region is made of, so a disagreement
-          // with the replay can be attributed to an opcode rather than
-          // guessed at.
-          std::vector<int> hist(64, 0);
-          for (const auto& I : p.code)
-            if ((int)I.code < 64) ++hist[(size_t)I.code];
-          std::fprintf(stderr, "island opcodes:");
-          for (int c = 0; c < 64; ++c)
-            if (hist[(size_t)c])
-              std::fprintf(stderr, " %d:%d", c, hist[(size_t)c]);
-          std::fprintf(stderr, "\n");
         }
         ++carved;
         i = j;

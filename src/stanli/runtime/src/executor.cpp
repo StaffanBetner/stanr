@@ -6,7 +6,8 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
-#include <cstdio>
+#include <iomanip>
+#include <sstream>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -251,25 +252,23 @@ std::string Executor::profile_report() const {
     return prof_[a].fwd_ns + prof_[a].bwd_ns >
            prof_[b].fwd_ns + prof_[b].bwd_ns;
   });
-  char line[160];
-  std::string out;
-  std::snprintf(line, sizeof line, "%-22s %10s %12s %12s %6s %12s\n", "opcode",
-                "calls", "fwd ns", "bwd ns", "%", "elems");
-  out += line;
+  std::ostringstream out;
+  out << std::left << std::setw(22) << "opcode" << ' ' << std::right
+      << std::setw(10) << "calls" << ' ' << std::setw(12) << "fwd ns" << ' '
+      << std::setw(12) << "bwd ns" << ' ' << std::setw(6) << "%" << ' '
+      << std::setw(12) << "elems" << '\n';
   for (uint16_t op : order) {
     const ProfEntry& e = prof_[op];
-    std::snprintf(line, sizeof line,
-                  "%-22s %10lld %12lld %12lld %5.1f%% %12lld\n",
-                  opcode_name(op), (long long)e.calls, (long long)e.fwd_ns,
-                  (long long)e.bwd_ns,
-                  100.0 * (double)(e.fwd_ns + e.bwd_ns) / (double)grand,
-                  (long long)e.elems);
-    out += line;
+    const double pct = 100.0 * (double)(e.fwd_ns + e.bwd_ns) / (double)grand;
+    out << std::left << std::setw(22) << opcode_name(op) << ' ' << std::right
+        << std::setw(10) << (long long)e.calls << ' ' << std::setw(12)
+        << (long long)e.fwd_ns << ' ' << std::setw(12) << (long long)e.bwd_ns
+        << ' ' << std::setw(5) << std::fixed << std::setprecision(1) << pct
+        << '%' << ' ' << std::setw(12) << (long long)e.elems << '\n';
   }
-  std::snprintf(line, sizeof line, "%-22s %10s %12lld ns total\n", "", "",
-                (long long)grand);
-  out += line;
-  return out;
+  out << std::left << std::setw(22) << "" << ' ' << std::right << std::setw(10)
+      << "" << ' ' << std::setw(12) << (long long)grand << " ns total\n";
+  return out.str();
 }
 
 void Executor::run_forward_only() {

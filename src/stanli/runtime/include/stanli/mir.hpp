@@ -6,12 +6,28 @@
 
 #include <stanli/sexp.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace stanli {
 namespace mir {
+
+enum class UnsizedLeaf : uint8_t {
+  Unknown,
+  Int,
+  Real,
+  Complex,
+  Vector,
+  RowVector,
+  Matrix
+};
+
+struct UnsizedView {
+  uint8_t depth = 0;
+  UnsizedLeaf leaf = UnsizedLeaf::Unknown;
+};
 
 struct Expr {
   enum Kind {
@@ -35,6 +51,7 @@ struct Expr {
   std::string lit_s;
   std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx
   std::string type_;       // UInt UReal UVector URowVector UMatrix ...
+  UnsizedView unsized;     // structural (UArray ...), without text parsing
   bool data_only = false;  // adlevel DataOnly
   std::string raw;         // Unsupported diagnostics
 };
@@ -64,6 +81,23 @@ struct Transform {
   std::vector<Expr> args;
   std::string raw;
 };
+
+inline bool is_structured_check(Transform::Kind kind) {
+  switch (kind) {
+    case Transform::Simplex:
+    case Transform::Ordered:
+    case Transform::PositiveOrdered:
+    case Transform::CholeskyCorr:
+    case Transform::UnitVector:
+    case Transform::SumToZero:
+    case Transform::Correlation:
+    case Transform::Covariance:
+    case Transform::CholeskyCov:
+      return true;
+    default:
+      return false;
+  }
+}
 
 struct SizedType {
   std::string base;        // SInt SReal SVector SRowVector SMatrix SArray ...
@@ -103,6 +137,11 @@ struct Stmt {
   // NRFunApp
   std::string fn_name;
   std::vector<Expr> fn_args;
+  // FnCheck: the relation lives in the CompilerInternal payload rather than
+  // the ordinary argument list. The first fn_arg is the value and the rest
+  // are its bounds.
+  std::optional<Transform> check_transform;
+  std::string check_var_name;
   // For
   std::string loopvar;
   Expr lower, upper;
@@ -144,6 +183,7 @@ struct FunDef {
   std::string name;
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_types;  // unsized: UReal UVector UMatrix ...
+  std::vector<UnsizedView> arg_views;
   std::vector<Stmt> body;
 };
 

@@ -125,4 +125,60 @@ test_that("compile failure with a PCH-related diagnostic triggers exactly one re
   expect_equal(pch_build_calls$n, 2L)
 })
 
+test_that("PCH builds announce themselves and retain only two cache entries", {
+  cache_home <- withr::local_tempdir()
+  cache_dir <- file.path(cache_home, "pch")
+  withr::local_options(stanr_pch_dir = cache_dir)
+
+  pch_build_calls <- new.env()
+  pch_build_calls$n <- 0L
+  testthat::local_mocked_bindings(
+    .stanr_rcmd = mock_pch_rcmd,
+    .stanr_system2 = mock_pch_system2(pch_build_calls)
+  )
+
+  # Two older, valid entries make the PCH built below the third one.
+  old_entries <- file.path(cache_dir, c("oldest", "newer"))
+  for (entry in old_entries) {
+    dir.create(entry, recursive = TRUE)
+    file.create(file.path(entry, "model_pch.hpp.gch"))
+  }
+  Sys.setFileTime(
+    file.path(old_entries, "model_pch.hpp.gch"),
+    as.POSIXct(c("2001-01-01", "2002-01-01"), tz = "UTC")
+  )
+
+  expect_message(
+    stanr:::.stanr_pch_flags(stanr:::.stanr_base_cppflags(), verbose = FALSE),
+    "Compiling precompiled model header"
+  )
+  entries <- list.dirs(cache_dir, full.names = FALSE, recursive = FALSE)
+  expect_length(entries, 2L)
+  expect_false("oldest" %in% entries)
+  expect_equal(pch_build_calls$n, 1L)
+})
+
+test_that("a PCH failure after rebuilding falls back without exposing it", {
+  testthat::local_mocked_bindings(
+    .stanr_pch_flags = function(...) "-include-pch rebuilt.gch"
+  )
+  compile_calls <- 0L
+  result <- expect_no_error(
+    stanr:::.stanr_compile_with_pch_retry(
+      function(compilation_cppflags) {
+        compile_calls <<- compile_calls + 1L
+        if (compile_calls == 1L || compile_calls == 2L) {
+          stop("error: unable to read PCH file: cached.gch")
+        }
+        "compiled without PCH"
+      },
+      cppflags = "-include-pch cached.gch",
+      base_cppflags = "-Iinclude",
+      pch_enabled = TRUE
+    )
+  )
+  expect_equal(result, "compiled without PCH")
+  expect_equal(compile_calls, 3L)
+})
+
 withr::deferred_run()

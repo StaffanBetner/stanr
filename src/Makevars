@@ -11,6 +11,11 @@ PKG_CPPFLAGS = -I"../inst/include" \
   -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS \
   -DTBB_INTERFACE_NEW
 
+ifneq ($(findstring emcc,$(CC)),)
+  PKG_CPPFLAGS += -pthread
+  PKG_LIBS += -pthread
+endif
+
 TBB_BUILD_DIR = ../inst/tbb-build
 TBB_LIB_DIR = ../inst/lib/$(R_ARCH)
 
