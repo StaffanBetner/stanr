@@ -43,15 +43,15 @@ STANLI_SOURCES = $(wildcard stanli/runtime/src/*.cpp) \
 STANLI_OBJECTS = $(STANLI_SOURCES:.cpp=.o)
 
 ifneq ($(findstring clang,$(R_CC))$(findstring emcc,$(R_CC)),)
-  STANLI_PCH = stanli_pch.hpp.pch
-  STANLI_CXXFLAGS = $(PKG_CPPFLAGS_BASE) -include-pch stanli_pch.hpp.pch
-  $(STANLI_PCH): stanli_pch.hpp
-    $(CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS_BASE) -fPIC -fpch-instantiate-templates -x c++-header $< -o $@
+STANLI_PCH = stanli_pch.hpp.pch
+STANLI_CXXFLAGS = $(PKG_CPPFLAGS_BASE) -include-pch stanli_pch.hpp.pch
+$(STANLI_PCH): stanli_pch.hpp
+	$(CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS_BASE) -fPIC -fpch-instantiate-templates -x c++-header $< -o $@
 else
-  STANLI_PCH = stanli_pch.hpp.gch
-  STANLI_CXXFLAGS = $(PKG_CPPFLAGS_BASE) -include stanli_pch.hpp
-  $(STANLI_PCH): stanli_pch.hpp
-    $(CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS_BASE) -fPIC -x c++-header $< -o $@
+STANLI_PCH = stanli_pch.hpp.gch
+STANLI_CXXFLAGS = $(PKG_CPPFLAGS_BASE) -include stanli_pch.hpp
+$(STANLI_PCH): stanli_pch.hpp
+	$(CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS_BASE) -fPIC -x c++-header $< -o $@
 endif
 
 stanli/runtime/src/%.o: stanli/runtime/src/%.cpp $(STANLI_PCH)
