@@ -196,6 +196,25 @@ new_body = """  if (sink()) sink()(text.data(), text.size());
 assert old_body in text, "emit_message body not found -- message_sink.cpp changed upstream"
 text = text.replace(old_body, new_body, 1)
 
+# This TU's local sink() clashes with the unrelated struct stanli::sink
+# (recorder.hpp) once src/Makevars's PCH forces recorder.hpp into every
+# stanli translation unit -- ambiguous lookup, not visible when this file
+# is compiled standalone. Rename the local one out of the way.
+old_decl = "MessageSink& sink() {\n"
+new_decl = "MessageSink& current_sink() {\n"
+assert old_decl in text, "sink() declaration not found -- message_sink.cpp changed upstream"
+text = text.replace(old_decl, new_decl, 1)
+
+old_set = "  sink() = std::move(s);\n"
+new_set = "  current_sink() = std::move(s);\n"
+assert old_set in text, "set_message_sink() body not found -- message_sink.cpp changed upstream"
+text = text.replace(old_set, new_set, 1)
+
+old_emit = "  if (sink()) sink()(text.data(), text.size());\n"
+new_emit = "  if (current_sink()) current_sink()(text.data(), text.size());\n"
+assert old_emit in text, "emit_message() sink call not found -- message_sink.cpp changed upstream"
+text = text.replace(old_emit, new_emit, 1)
+
 open(path, "w").write(text)
 EOF
 
