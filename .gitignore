@@ -1,5 +1,6 @@
 .Rproj.user
 **.o
+**.gch
 **.so
 **.dll
 inst/lib

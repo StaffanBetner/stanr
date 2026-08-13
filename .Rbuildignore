@@ -18,6 +18,7 @@ inst/lib
 \.gitignore$
 \.prepare
 .*\.o$
+.*\.gch$
 .*\.a$
 .*\.so$
 .*\.dll$

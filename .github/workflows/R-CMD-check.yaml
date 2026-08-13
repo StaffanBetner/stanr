@@ -10,7 +10,8 @@ name: R-CMD-check
 
 jobs:
   R-CMD-check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.config.os == 'wasm' && 'ubuntu-latest' || matrix.config.os }}
+    container: ${{ matrix.config.os == 'wasm' && 'ghcr.io/r-universe-org/build-wasm' || '' }}
 
     name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
@@ -18,6 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         config:
+          - {os: wasm, r: 'release'}
+
           - {os: macos-latest,   r: 'devel'}
           - {os: macos-latest,   r: 'release'}
           - {os: macos-latest,   r: 'oldrel'}
@@ -38,7 +41,7 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
-      MAKEFLAGS: -j2
+      MAKEFLAGS: -j4
       TESTTHAT_CPUS: 4
 
     steps:
@@ -56,10 +59,11 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::rcmdcheck 
+          extra-packages: any::rcmdcheck ${{ matrix.config.os == 'wasm' && 'github::r-wasm/rwasm' || '' }}
           needs: check
 
       - uses: r-lib/actions/check-r-package@v2
+        if: matrix.config.os != 'wasm'
         with:
           upload-results: true
           check-dir: '"check"'
