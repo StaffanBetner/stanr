@@ -16,7 +16,8 @@ PKG_CPPFLAGS = $(PKG_CPPFLAGS_BASE) -include stan_sundials_printf_override.hpp
 R_CC := $(shell $(R_HOME)/bin$(R_ARCH_BIN)/R CMD config CC)
 
 ifneq ($(findstring emcc,$(R_CC)),)
-  PKG_CPPFLAGS += -pthread
+  CXX20PICFLAGS = -fPIC
+  PKG_CPPFLAGS_BASE += -pthread
   PKG_LIBS += -pthread
 endif
 

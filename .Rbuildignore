@@ -19,6 +19,7 @@ inst/lib
 \.prepare
 .*\.o$
 .*\.gch$
+.*\.pch$
 .*\.a$
 .*\.so$
 .*\.dll$
