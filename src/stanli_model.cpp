@@ -142,7 +142,11 @@ size_t scalar_count(const std::vector<stanli::CompiledModel::ParamView>& views,
 
 }  // namespace
 
-class stanli_model_base final : public stan::model::model_base {
+// Hidden visibility: compiled into libstanr_runner.a, statically linked into
+// both the package .so and (transitively, via the archive) every per-model
+// .so built at runtime -- see stanr/r_data_context.hpp.
+class __attribute__((visibility("hidden"))) stanli_model_base final
+    : public stan::model::model_base {
  public:
   stanli_model_base(const std::string& mir, const stanli::DataMap& data,
                     std::string model_name, unsigned int seed)

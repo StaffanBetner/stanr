@@ -9,7 +9,10 @@ namespace stanr {
 
 // Captures the stepsize/inv_metric pair written once per chain after warmup.
 // Runs on the worker thread -- no R API, only plain C++/Eigen state.
-class r_metric_writer : public stan::callbacks::structured_writer {
+// Hidden visibility: compiled both into the package .so and into every
+// per-model .so via libstanr_runner.a -- see r_data_context.hpp.
+class __attribute__((visibility("hidden"))) r_metric_writer
+    : public stan::callbacks::structured_writer {
  public:
   void write(const std::string& key, double value) override {
     if (key == "stepsize") stepsize_ = value;

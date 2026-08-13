@@ -30,7 +30,13 @@ namespace stanr {
 //     enumerated column-major, each element's leaf payload contiguous.
 //   * a tuple-slot complex leaf uses the windowed vals_c() layout stanc
 //     2.39's reader indexes (see store_complex()).
-class r_data_context : public stan::io::var_context {
+// Hidden visibility: this class (and its vtable/typeinfo) is compiled both
+// into the package's own .so and, via libstanr_runner.a, into every
+// per-model .so built at runtime. Without hidden visibility those two
+// independently-loaded copies are both exported globals with the same
+// mangled name, which AddressSanitizer flags as an ODR violation.
+class __attribute__((visibility("hidden"))) r_data_context
+    : public stan::io::var_context {
  private:
   struct value_entry {
     std::vector<double> reals;

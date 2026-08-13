@@ -16,7 +16,10 @@ namespace stanr {
 
 // Collects parameter samples into an Eigen::MatrixXd. Safe for single-writer
 // access per chain during parallel (multi-chain) sampling.
-class r_sample_writer : public stan::callbacks::writer {
+// Hidden visibility: compiled both into the package .so and into every
+// per-model .so via libstanr_runner.a -- see r_data_context.hpp.
+class __attribute__((visibility("hidden"))) r_sample_writer
+    : public stan::callbacks::writer {
  private:
   std::vector<std::string> colnames_;
   std::vector<std::string> messages_;  // string messages (e.g., from diagnose)

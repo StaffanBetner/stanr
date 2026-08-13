@@ -1,0 +1,81 @@
+TBB_BUILD_DIR = ../inst/tbb-build
+TBB_LIB_DIR = ../inst/lib/$(R_ARCH)
+
+ifneq ($(findstring emcc,$(R_CC)),)
+  TBB_WASM = 1
+endif
+
+TBB_OBJECTS = $(patsubst tbb/%.cpp,$(TBB_BUILD_DIR)/tbb/%.o,$(wildcard tbb/*.cpp))
+ifneq ($(TBB_WASM),1)
+  TBBMALLOC_OBJECTS = $(patsubst tbbmalloc/%.cpp,$(TBB_BUILD_DIR)/tbbmalloc/%.o,$(wildcard tbbmalloc/*.cpp))
+endif
+
+UNAME_S := $(shell uname -s)
+ifeq ($(TBB_WASM),1)
+  TBB_LIB_NAMES = libtbb.a
+  TBB_PIC_FLAG = -fpic
+  TBB_PLATFORM_CXXFLAGS = -pthread -fwasm-exceptions -D__TBB_RESUMABLE_TASKS_USE_THREADS=1 -Oz
+  TBB_PLATFORM_LDFLAGS = -pthread
+  TBB_SONAME_TBB =
+  TBB_SONAME_TBBMALLOC =
+  TBB_RPATH_FLAG =
+else ifeq ($(UNAME_S),Darwin)
+  TBB_LIB_NAMES = libtbb.dylib libtbbmalloc.dylib
+  TBB_PIC_FLAG = -fPIC
+  TBB_PLATFORM_CXXFLAGS = -D_XOPEN_SOURCE -D__TBB_RESUMABLE_TASKS_USE_THREADS=1 -O2
+  TBB_PLATFORM_LDFLAGS = -pthread
+  TBB_SONAME_TBB = -Wl,-install_name,@rpath/libtbb.dylib
+  TBB_SONAME_TBBMALLOC = -Wl,-install_name,@rpath/libtbbmalloc.dylib
+  TBB_RPATH_FLAG = -Wl,-rpath,@loader_path/../lib
+else ifeq ($(UNAME_S),Linux)
+  TBB_LIB_NAMES = libtbb.so.2 libtbbmalloc.so.2
+  TBB_PIC_FLAG = -fPIC
+  TBB_PLATFORM_CXXFLAGS = -D_XOPEN_SOURCE -O2
+  TBB_PLATFORM_LDFLAGS = -pthread -ldl
+  TBB_SONAME_TBB = -Wl,-soname,libtbb.so.2
+  TBB_SONAME_TBBMALLOC = -Wl,-soname,libtbbmalloc.so.2
+  TBB_RPATH_FLAG = -Wl,-rpath,'$$ORIGIN/../lib'
+else
+  TBB_LIB_NAMES = tbb.dll tbbmalloc.dll
+  TBB_PIC_FLAG =
+  TBB_PLATFORM_CXXFLAGS = -O2
+  TBB_PLATFORM_LDFLAGS =
+  TBB_SONAME_TBB =
+  TBB_SONAME_TBBMALLOC =
+  TBB_RPATH_FLAG =
+endif
+
+TBB_COMMON_FLAGS = -std=c++17 $(TBB_PIC_FLAG) $(TBB_PLATFORM_CXXFLAGS) \
+  -I"../inst/include" -DNDEBUG
+
+$(TBB_BUILD_DIR)/tbb/%.o: tbb/%.cpp
+	@mkdir -p $(TBB_BUILD_DIR)/tbb
+	$(CXX) $(TBB_COMMON_FLAGS) -D__TBB_BUILD -c $< -o $@
+
+$(TBB_BUILD_DIR)/tbbmalloc/%.o: tbbmalloc/%.cpp
+	@mkdir -p $(TBB_BUILD_DIR)/tbbmalloc
+	$(CXX) $(TBB_COMMON_FLAGS) -D__TBBMALLOC_BUILD -fno-rtti -fno-exceptions -c $< -o $@
+
+ifeq ($(TBB_WASM),1)
+  TBB_LIBS = -L"$(TBB_LIB_DIR)" -ltbb
+else
+  TBB_LIBS = -L"$(TBB_LIB_DIR)" $(TBB_RPATH_FLAG) -ltbb -ltbbmalloc
+endif
+
+$(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)): $(TBB_OBJECTS) $(TBBMALLOC_OBJECTS)
+	@mkdir -p $(TBB_LIB_DIR)
+ifeq ($(TBB_WASM),1)
+	$(AR) -rs $(TBB_LIB_DIR)/libtbb.a $(TBB_OBJECTS)
+else
+	$(CXX) -shared -o $(TBB_LIB_DIR)/$(word 1,$(TBB_LIB_NAMES)) $(TBB_OBJECTS) \
+	  $(TBB_SONAME_TBB) $(TBB_PLATFORM_LDFLAGS)
+	$(CXX) -shared -o $(TBB_LIB_DIR)/$(word 2,$(TBB_LIB_NAMES)) $(TBBMALLOC_OBJECTS) \
+	  $(TBB_SONAME_TBBMALLOC) $(TBB_PLATFORM_LDFLAGS)
+ifeq ($(UNAME_S),Linux)
+	ln -sf libtbb.so.2 $(TBB_LIB_DIR)/libtbb.so
+	ln -sf libtbbmalloc.so.2 $(TBB_LIB_DIR)/libtbbmalloc.so
+endif
+endif
+	rm -rf $(TBB_BUILD_DIR)
+
+PKG_LIBS += $(TBB_LIBS)

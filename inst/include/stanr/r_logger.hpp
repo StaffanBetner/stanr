@@ -18,7 +18,10 @@ namespace stanr {
 // Log levels: debug/info/warn -> Rcout, error/fatal -> Rcerr. Two gates:
 // show_messages_ (progress) and show_exceptions_ (exception chatter);
 // genuine errors are never suppressed.
-class r_logger : public stan::callbacks::logger {
+// Hidden visibility: compiled both into the package .so and into every
+// per-model .so via libstanr_runner.a -- see r_data_context.hpp.
+class __attribute__((visibility("hidden"))) r_logger
+    : public stan::callbacks::logger {
  public:
   enum class level { debug, info, warn, error, fatal };
 

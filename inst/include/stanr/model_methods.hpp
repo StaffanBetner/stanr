@@ -26,7 +26,10 @@ namespace stanr {
 
   // Generated models keep their constructor's ostream pointer and can write
   // through it on a native/TBB worker; this sink bypasses R's console API.
-  class null_streambuf : public std::streambuf {
+  // Hidden visibility: compiled both into the package .so and into every
+  // per-model .so via libstanr_runner.a -- see r_data_context.hpp.
+  class __attribute__((visibility("hidden"))) null_streambuf
+      : public std::streambuf {
   protected:
     int_type overflow(int_type ch) override { return traits_type::not_eof(ch); }
     std::streamsize xsputn(const char*, std::streamsize n) override { return n; }
@@ -41,7 +44,8 @@ namespace stanr {
   // Exposed-function wrappers run synchronously on the main R thread, so
   // (unlike worker_safe_stream()) Stan print/reject statements should
   // actually reach the R console.
-  class r_console_streambuf : public std::streambuf {
+  class __attribute__((visibility("hidden"))) r_console_streambuf
+      : public std::streambuf {
   protected:
     int_type overflow(int_type ch) override {
       if (ch != traits_type::eof()) {

@@ -80,6 +80,9 @@
     package = "stanr",
     mustWork = TRUE
   )
+  if (R.version$os == "emscripten") {
+    return(paste0("-L", shQuote(tbb_lib_dir), " -ltbb"))
+  }
   paste0(
     "-L",
     shQuote(tbb_lib_dir),

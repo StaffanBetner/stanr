@@ -1,4 +1,4 @@
-.PHONY: all static package
+.PHONY: all clean
 CXX_STD = CXX20
 
 # Must stay the first rule: make's default goal is the first rule seen.
@@ -11,78 +11,14 @@ PKG_CPPFLAGS = -I"../inst/include" \
   -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS \
   -DTBB_INTERFACE_NEW -DEIGEN_NO_DEBUG -DBOOST_DISABLE_ASSERTS
 
-ifneq ($(findstring emcc,$(CC)),)
+R_CC := $(shell $(R_HOME)/bin$(R_ARCH_BIN)/R CMD config CC)
+
+ifneq ($(findstring emcc,$(R_CC)),)
   PKG_CPPFLAGS += -pthread
   PKG_LIBS += -pthread
 endif
 
-TBB_BUILD_DIR = ../inst/tbb-build
-TBB_LIB_DIR = ../inst/lib/$(R_ARCH)
-
-TBB_CXX_SOURCES = address_waiter allocator arena arena_slot concurrent_bounded_queue \
-  dynamic_link exception governor global_control main market tcm_adaptor \
-  misc misc_ex observer_proxy parallel_pipeline private_server profiling rml_tbb \
-  semaphore small_object_pool task task_dispatcher \
-  task_group_context thread_dispatcher thread_request_serializer threading_control \
-  version queuing_rw_mutex
-TBBMALLOC_CXX_SOURCES = backend backref frontend large_objects tbbmalloc
-
-TBB_OBJECTS = $(addprefix $(TBB_BUILD_DIR)/tbb/,$(addsuffix .o,$(TBB_CXX_SOURCES)))
-TBBMALLOC_OBJECTS = $(addprefix $(TBB_BUILD_DIR)/tbbmalloc/,$(addsuffix .o,$(TBBMALLOC_CXX_SOURCES)))
-
-TBB_STD_FLAG = -std=c++17
-
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-  TBB_LIB_NAMES = libtbb.dylib libtbbmalloc.dylib
-  TBB_PIC_FLAG = -fPIC
-  TBB_PLATFORM_CXXFLAGS = -D_XOPEN_SOURCE -D__TBB_RESUMABLE_TASKS_USE_THREADS=1
-  TBB_PLATFORM_LDFLAGS = -pthread
-  TBB_SONAME_TBB = -Wl,-install_name,@rpath/libtbb.dylib
-  TBB_SONAME_TBBMALLOC = -Wl,-install_name,@rpath/libtbbmalloc.dylib
-else ifeq ($(UNAME_S),Linux)
-  # libtbb.so is a linker script needing libtbb.so.2 alongside it.
-  TBB_LIB_NAMES = libtbb.so.2 libtbbmalloc.so.2
-  TBB_PIC_FLAG = -fPIC
-  TBB_PLATFORM_CXXFLAGS = -D_XOPEN_SOURCE
-  TBB_PLATFORM_LDFLAGS = -pthread -ldl
-  TBB_SONAME_TBB = -Wl,-soname,libtbb.so.2
-  TBB_SONAME_TBBMALLOC = -Wl,-soname,libtbbmalloc.so.2
-else
-  TBB_LIB_NAMES = tbb.dll tbbmalloc.dll
-  TBB_PIC_FLAG =
-  TBB_PLATFORM_CXXFLAGS =
-  TBB_PLATFORM_LDFLAGS =
-  TBB_SONAME_TBB =
-  TBB_SONAME_TBBMALLOC =
-endif
-
-TBB_COMMON_FLAGS = $(TBB_STD_FLAG) $(TBB_PIC_FLAG) $(TBB_PLATFORM_CXXFLAGS) \
-  -I"../inst/include" -O2 -DNDEBUG
-
-$(TBB_BUILD_DIR)/tbb/%.o: tbb/%.cpp
-	@mkdir -p $(TBB_BUILD_DIR)/tbb
-	$(CXX) $(TBB_COMMON_FLAGS) -D__TBB_BUILD -c $< -o $@
-
-$(TBB_BUILD_DIR)/tbbmalloc/%.o: tbbmalloc/%.cpp
-	@mkdir -p $(TBB_BUILD_DIR)/tbbmalloc
-	$(CXX) $(TBB_COMMON_FLAGS) -D__TBBMALLOC_BUILD -fno-rtti -fno-exceptions -c $< -o $@
-
-TBB_LIBS = -L"$(TBB_LIB_DIR)" -Wl,-rpath,@loader_path/../lib -ltbb -ltbbmalloc
-
-$(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)): $(TBB_OBJECTS) $(TBBMALLOC_OBJECTS)
-	@mkdir -p $(TBB_LIB_DIR)
-	$(CXX) -shared -o $(TBB_LIB_DIR)/$(word 1,$(TBB_LIB_NAMES)) $(TBB_OBJECTS) \
-	  $(TBB_SONAME_TBB) $(TBB_PLATFORM_LDFLAGS)
-	$(CXX) -shared -o $(TBB_LIB_DIR)/$(word 2,$(TBB_LIB_NAMES)) $(TBBMALLOC_OBJECTS) \
-	  $(TBB_SONAME_TBBMALLOC) $(TBB_PLATFORM_LDFLAGS)
-ifeq ($(UNAME_S),Linux)
-	ln -sf libtbb.so.2 $(TBB_LIB_DIR)/libtbb.so
-	ln -sf libtbbmalloc.so.2 $(TBB_LIB_DIR)/libtbbmalloc.so
-endif
-	rm -rf $(TBB_BUILD_DIR)
-
-PKG_LIBS += $(TBB_LIBS)
+include Makevars.tbb
 
 # CVODES/IDAS/KINSOL (ode_*, dae, algebra_solver) build from these sibling
 # dirs too, not just sundials/ -- mirrors stan-math's own make/libraries
@@ -115,9 +51,7 @@ PKG_LIBS += $(STANLI_RUNNER_ARCHIVE)
 RUNNER_OBJECTS = runner.o model_methods.o r_data_context.o stanli_model.o $(STANLI_OBJECTS)
 OBJECTS = init.o xptr.o hash.o concurrency.o
 
-$(SHLIB): static
-
-static: $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)) $(STANLI_RUNNER_ARCHIVE)
+$(SHLIB): $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)) $(STANLI_RUNNER_ARCHIVE)
 
 $(STANLI_RUNNER_ARCHIVE): $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 	@mkdir -p ../inst/lib/$(R_ARCH)
@@ -126,4 +60,4 @@ $(STANLI_RUNNER_ARCHIVE): $(RUNNER_OBJECTS) $(SUNDIALS_OBJECTS)
 
 clean:
 	rm -rf ../inst/lib ../inst/tbb-build;
-	rm -f $(OBJECTS) $(RUNNER_OBJECTS) $(STANLI_OBJECTS)
+	rm -f stanr.so $(OBJECTS) $(RUNNER_OBJECTS) $(STANLI_OBJECTS) $(SUNDIALS_OBJECTS)

@@ -23,7 +23,10 @@ inline bool user_interrupt_pending() {
 
 // Stan callback::interrupt. Worker-thread users pass an atomic cancellation
 // flag; synchronous R-thread services may opt into R interrupt polling.
-class r_interrupt : public stan::callbacks::interrupt {
+// Hidden visibility: compiled both into the package .so and into every
+// per-model .so via libstanr_runner.a -- see r_data_context.hpp.
+class __attribute__((visibility("hidden"))) r_interrupt
+    : public stan::callbacks::interrupt {
  private:
   const std::atomic<bool>* cancel_requested_;
   const char* what_;

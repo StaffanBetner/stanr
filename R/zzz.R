@@ -7,6 +7,9 @@ private <- self <- NULL
 # No useDynLib (see stanr-package.R): .onLoad loads TBB before stanr.so
 # itself, so its rpath resolves under devtools::load_all(). Mirrors RcppParallel.
 .stanr_tbb_lib_names <- function() {
+  if (R.version$os == "emscripten") {
+    return(character())
+  }
   sysname <- Sys.info()[["sysname"]]
   if (sysname == "Darwin") {
     c("libtbb.dylib", "libtbbmalloc.dylib")
