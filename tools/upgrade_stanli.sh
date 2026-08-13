@@ -1,9 +1,9 @@
 #!/bin/sh
 # Vendors stanli (github.com/seantalts/stanli), following this package's
-# convention for bundled libraries 
+# convention for bundled libraries
 set -e
 
-STANLI_REF="88621f1"
+STANLI_REF="2f56496"
 STANLI_TARBALL="stanli-$STANLI_REF.tar.gz"
 STANLI_URL="https://github.com/seantalts/stanli/archive/$STANLI_REF.tar.gz"
 
@@ -67,12 +67,20 @@ assert old_dims in text, "set_int_array dims assignment not found -- data.hpp ch
 text = text.replace(old_dims, new_dims, 1)
 
 old_from_json = (
+    "  // Each factory lives in its own translation unit -- data.cpp for the JSON\n"
+    "  // pair, data_var_context.cpp for this one -- so a build can drop either.\n"
     "  static DataMap from_json_file(const std::string& path);\n"
     "  static DataMap from_json(const std::string& text);\n"
-    "\n"
+    "  static DataMap from_var_context(const stan::io::var_context& context);\n"
 )
-assert old_from_json in text, "from_json declarations not found -- data.hpp changed upstream"
-text = text.replace(old_from_json, "", 1)
+new_from_json = (
+    "  // data.cpp (the JSON factory pair) is dropped during vendoring -- it\n"
+    "  // pulls in nlohmann_json, which isn't vendored -- leaving this as the\n"
+    "  // only factory built.\n"
+    "  static DataMap from_var_context(const stan::io::var_context& context);\n"
+)
+assert old_from_json in text, "from_json/from_var_context declarations not found -- data.hpp changed upstream"
+text = text.replace(old_from_json, new_from_json, 1)
 
 open(path, "w").write(text)
 EOF

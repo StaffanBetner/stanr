@@ -220,14 +220,19 @@ void r_data_context::add_value(const std::string& name, SEXP value) {
     dims.push_back(static_cast<size_t>(Rf_xlength(value)));
   }
 
-  if (Rf_isInteger(value)) {
-    cpp11::integers input(value);
-    std::vector<int> ints(input.size());
-    for (R_xlen_t j = 0; j < input.size(); ++j) {
-      if (input[j] == NA_INTEGER) {
+  if (Rf_isInteger(value) || Rf_isLogical(value)) {
+    // Rf_isNumeric() also reports TRUE for a logical vector, but cpp11's
+    // doubles() below requires an exact REALSXP, so a logical must be
+    // caught here rather than falling into the numeric branch.
+    const bool is_logical = TYPEOF(value) == LGLSXP;
+    const R_xlen_t n = Rf_xlength(value);
+    std::vector<int> ints(n);
+    for (R_xlen_t j = 0; j < n; ++j) {
+      const int x = is_logical ? LOGICAL_ELT(value, j) : INTEGER_ELT(value, j);
+      if (x == NA_INTEGER) {
         cpp11::stop("Integer variable '%s' contains NA.", name.c_str());
       }
-      ints[j] = input[j];
+      ints[j] = x;
     }
     values_.emplace(name,
                     value_entry{{}, {}, std::move(ints), std::move(dims)});

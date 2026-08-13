@@ -2,6 +2,7 @@
 #include <stan/math/rev/core.hpp>
 #include <stanr/cpp11_tuple_interop.hpp>
 #include <stanr/model_methods.hpp>
+#include <stanr/r_data_context.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/executor_pool.hpp>
 #include <stanli/wa_interp.hpp>
@@ -26,25 +27,21 @@ namespace stanr {
 namespace {
 
 // R's REAL()/INTEGER() buffers are already column-major for up to 3 dims,
-// the same layout stanli::DataMap::Entry expects -- so array data copies
-// straight across with no reshaping (unlike JSON, which nests row-major and
-// needs stanli's parser to transpose it back).
-std::vector<int64_t> value_dims(SEXP value) {
+// the same layout stan::io::var_context (and stanli::DataMap::Entry) expect
+// -- so this restriction is stanr's own, not stanli's or r_data_context's.
+void check_dims(const std::string& name, SEXP value) {
   SEXP dim = Rf_getAttrib(value, R_DimSymbol);
-  const int ndims = Rf_length(dim);
-  if (ndims == 0) return {};
-  if (ndims > 3)
+  if (Rf_length(dim) > 3)
     throw std::runtime_error(
-        "stanli data arrays with more than 3 dimensions are not supported");
-  std::vector<int64_t> dims(ndims);
-  for (int i = 0; i < ndims; ++i) {
-    const int d = INTEGER_ELT(dim, i);
-    if (d < 0) throw std::runtime_error("invalid stanli data dimensions");
-    dims[i] = d;
-  }
-  return dims;
+        "stanli data arrays with more than 3 dimensions are not supported: " +
+        name);
 }
 
+// stanli restricts data to what DataMap::from_var_context() below can
+// actually represent: no tuples (no from_var_context caller has declared
+// types to guide flattening), and no complex (from_var_context reads only
+// vals_r()/vals_i(), so a complex-only r_data_context entry would silently
+// come through empty rather than erroring).
 void check_supported(const std::string& name, SEXP value) {
   if (Rf_isNull(value))
     throw std::runtime_error("stanli data value cannot be NULL: " + name);
@@ -58,86 +55,39 @@ void check_supported(const std::string& name, SEXP value) {
         "stanli data must be numeric, logical, or an array (tuple-typed "
         "data is not yet supported): " + name);
   }
+  check_dims(name, value);
 }
 
-bool whole_number(double x) {
-  return x == std::trunc(x) &&
-         x >= static_cast<double>(std::numeric_limits<int>::min()) &&
-         x <= static_cast<double>(std::numeric_limits<int>::max());
-}
-
-void set_data_entry(stanli::DataMap& out, const std::string& name,
-                    SEXP value) {
-  check_supported(name, value);
-  const std::vector<int64_t> dims = value_dims(value);
+// stanli has no sink for r_data_context's NaN-only check (it silently
+// treats Inf as a valid real), so NA/NaN/Inf get their own stricter,
+// stanli-flavored pass here before that context ever sees the value.
+void check_finite(const std::string& name, SEXP value) {
   const R_xlen_t n = XLENGTH(value);
-  const bool is_real = TYPEOF(value) == REALSXP;
-
-  if (dims.empty() && n == 1) {
-    if (is_real) {
-      const double x = REAL_ELT(value, 0);
-      if (!std::isfinite(x))
-        throw std::runtime_error("stanli data cannot contain NA, NaN, or Inf: " + name);
-      // Matches r_data_context.cpp's store_numeric(): a whole-number real
-      // (the common `y = c(1, 0, 1, ...)` idiom, rather than `1L`) must
-      // also be readable wherever int-declared data is read.
-      if (whole_number(x)) {
-        out.set_int(name, static_cast<int>(x));
-      } else {
-        out.set_real(name, x);
-      }
-    } else {
-      const int x =
-          TYPEOF(value) == LGLSXP ? LOGICAL_ELT(value, 0) : INTEGER_ELT(value, 0);
-      if (x == NA_INTEGER)
-        throw std::runtime_error("stanli data cannot contain NA: " + name);
-      out.set_int(name, x);
-    }
-    return;
-  }
-
-  if (is_real) {
-    std::vector<double> values(n);
-    bool all_whole = true;
+  if (TYPEOF(value) == REALSXP) {
     for (R_xlen_t i = 0; i < n; ++i) {
-      values[i] = REAL_ELT(value, i);
-      if (!std::isfinite(values[i]))
-        throw std::runtime_error("stanli data cannot contain NA, NaN, or Inf: " + name);
-      all_whole = all_whole && whole_number(values[i]);
+      if (!std::isfinite(REAL_ELT(value, i)))
+        throw std::runtime_error(
+            "stanli data cannot contain NA, NaN, or Inf: " + name);
     }
-    // Matches r_data_context.cpp's store_numeric(): a whole-number real
-    // array is also usable wherever int-declared data is read.
-    if (all_whole) {
-      std::vector<int> ints(values.size());
-      for (size_t i = 0; i < values.size(); ++i) {
-        ints[i] = static_cast<int>(values[i]);
-      }
-      out.set_int_array(name, std::move(ints), dims);
-      return;
-    }
-    out.set_real_array(name, std::move(values), dims);
     return;
   }
-
-  std::vector<int> values(n);
   for (R_xlen_t i = 0; i < n; ++i) {
     const int x =
         TYPEOF(value) == LGLSXP ? LOGICAL_ELT(value, i) : INTEGER_ELT(value, i);
     if (x == NA_INTEGER)
       throw std::runtime_error("stanli data cannot contain NA: " + name);
-    values[i] = x;
   }
-  out.set_int_array(name, std::move(values), dims);
 }
 
-// SEXP -> stanli::DataMap, via DataMap's typed setters. No JSON round trip:
-// set_int_array() takes a dims argument (a stanr patch to data.hpp; see
-// tools/upgrade_stanli.sh), so a multi-dimensional integer array -- the one
-// shape that used to force a fallback through QuickJSR::to_json() plus
-// DataMap::from_json() -- now builds directly like everything else.
+// SEXP -> stanli::DataMap. stanli-specific restrictions (no tuples, no
+// complex, no NA/NaN/Inf, at most 3 array dims) are checked up front with
+// stanli's own error messages; once a list clears that, it is exactly what
+// stanr::r_data_context (the same var_context the compiled backend builds
+// from R data) already knows how to read, so DataMap::from_var_context()
+// -- stanli's adapter for a caller that already has a var_context, rather
+// than JSON text -- does the actual conversion.
 stanli::DataMap sexp_to_data_map(SEXP data) {
-  stanli::DataMap out;
-  if (Rf_isNull(data) || XLENGTH(data) == 0) return out;
+  if (Rf_isNull(data) || XLENGTH(data) == 0) return stanli::DataMap();
   SEXP names = Rf_getAttrib(data, R_NamesSymbol);
   if (TYPEOF(data) != VECSXP || Rf_isNull(names))
     throw std::runtime_error("stanli data must be a named list");
@@ -145,9 +95,13 @@ stanli::DataMap sexp_to_data_map(SEXP data) {
     const char* name = CHAR(STRING_ELT(names, i));
     if (name[0] == '\0')
       throw std::runtime_error("stanli data list names must be non-empty");
-    set_data_entry(out, name, VECTOR_ELT(data, i));
+    SEXP value = VECTOR_ELT(data, i);
+    check_supported(name, value);
+    check_finite(name, value);
   }
-  return out;
+  cpp11::list data_list(data);
+  stanr::r_data_context context(data_list);
+  return stanli::DataMap::from_var_context(context);
 }
 
 void append_unc_names(const stanli::CompiledModel::UncParam& p,

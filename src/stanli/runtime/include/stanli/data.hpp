@@ -1,5 +1,5 @@
-// Runtime data container: built programmatically by tests, or parsed from
-// JSON with CmdStan's conventions.
+// Runtime data container: built programmatically by tests, parsed from JSON
+// with CmdStan's conventions, or copied out of a Stan var_context.
 #ifndef STANLI_DATA_HPP
 #define STANLI_DATA_HPP
 
@@ -8,6 +8,15 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// Declared, not included: a caller who never builds a DataMap from a
+// var_context needs neither the stan headers on its include path nor
+// data_var_context.cpp in its build.
+namespace stan {
+namespace io {
+class var_context;
+}
+}  // namespace stan
 
 namespace stanli {
 
@@ -58,6 +67,11 @@ class DataMap {
       throw std::runtime_error("data: variable not provided: " + name);
     return it->second;
   }
+
+  // data.cpp (the JSON factory pair) is dropped during vendoring -- it
+  // pulls in nlohmann_json, which isn't vendored -- leaving this as the
+  // only factory built.
+  static DataMap from_var_context(const stan::io::var_context& context);
 
  private:
   std::map<std::string, Entry> m_;

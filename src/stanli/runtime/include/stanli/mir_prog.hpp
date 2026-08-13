@@ -93,8 +93,8 @@ struct ProgramCompiler {
     return r;
   }
 
-  int emit(Program::Code c, int dst, int a = 0, int b = 0) {
-    p.code.push_back(Program::Instr{c, dst, a, b, 0, 0});
+  int emit(Program::Code c, int dst, int a = 0, int b = 0, int cc = 0) {
+    p.code.push_back(Program::Instr{c, dst, a, b, cc, 0});
     return (int)p.code.size() - 1;
   }
 
@@ -426,6 +426,28 @@ struct ProgramCompiler {
         return {r, 1};
       }
     }
+    if (e.name == "fma" && e.args.size() == 3) {
+      // Fused, elementwise with scalar broadcast, mirroring OP_FMA.
+      const Range a = expr(e.args[0]), b = expr(e.args[1]), c = expr(e.args[2]);
+      int n = 1;
+      Range shaped{0, 1};
+      for (const Range* x : {&a, &b, &c}) {
+        if (x->kind == ViewKind::Array)
+          bail("array arithmetic is unsupported by the register program");
+        if (is_scalar(*x)) continue;
+        if (n != 1 && x->len != n) bail("fma on different lengths");
+        n = x->len;
+        shaped = *x;
+      }
+      const int r = alloc(n);
+      for (int i = 0; i < n; ++i)
+        emit(Program::FMA, r + i, a.reg + (is_scalar(a) ? 0 : i),
+             b.reg + (is_scalar(b) ? 0 : i), c.reg + (is_scalar(c) ? 0 : i));
+      Range out = shaped;
+      out.reg = r;
+      out.len = n;
+      return typed(out, e.type_);
+    }
     if (e.args.size() == 2) {
       const Range a = expr(e.args[0]), b = expr(e.args[1]);
       const bool a_scalar = is_scalar(a);
@@ -601,6 +623,19 @@ struct ProgramCompiler {
         const Range dst = it->second;
         const Range v = expr(s.rhs);
         if (s.lhs_idx.empty()) {
+          if (dst.len == 0 && v.len != 0) {
+            // The zero-length declaration is stanc3's --O1 inliner
+            // leaving a return variable unsized (`vector[0]`) for the
+            // assignment to size; adopt the assigned shape. The inliner
+            // assigns it exactly once, right where the call was, so no
+            // two branch arms can disagree about the size.
+            Range nd = v;
+            nd.reg = alloc(v.len);
+            for (int k = 0; k < v.len; ++k)
+              emit(Program::MOV, nd.reg + k, v.reg + k);
+            it->second = nd;
+            return;
+          }
           if (v.len != dst.len) bail("assignment width mismatch for " + s.lhs);
           if (!same_view(v, dst))
             bail("assignment logical view mismatch for " + s.lhs);

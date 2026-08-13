@@ -477,13 +477,17 @@ void validate_checks(const Stmt& s, Bindings& bindings) {
       throw std::runtime_error("mir: unsupported or malformed FnCheck");
     }
     const Expr& value = s.fn_args[0];
-    const auto binding =
-        value.kind == Expr::Var ? bindings.find(value.name) : bindings.end();
-    if (binding == bindings.end() ||
-        binding->second.depth != value.unsized.depth ||
-        binding->second.leaf != value.unsized.leaf)
-      throw std::runtime_error(
-          "mir: FnCheck value type disagrees with its declaration");
+    // --O1 constant propagation may substitute the checked value itself
+    // (`(var 2)` where the source said `(var K)`); a non-Var value carries
+    // its own type and has no declaration to cross-check.
+    if (value.kind == Expr::Var) {
+      const auto binding = bindings.find(value.name);
+      if (binding == bindings.end() ||
+          binding->second.depth != value.unsized.depth ||
+          binding->second.leaf != value.unsized.leaf)
+        throw std::runtime_error(
+            "mir: FnCheck value type disagrees with its declaration");
+    }
   }
   if (s.kind == Stmt::IfElse) {
     for (const auto& child : s.body) {
@@ -553,6 +557,16 @@ Program read_program(const sexp::Node& root) {
     for (size_t i = 0; i < f.arg_names.size(); ++i)
       args[f.arg_names[i]] = f.arg_views[i];
     validate_checks(f.body, args);
+  }
+  if (const Node* ov = field(root, "output_vars")) {
+    // ((name <opaque> (...)) ...): parameters, transformed parameters and
+    // generated quantities in declaration order -- the order FnWriteParam
+    // statements emit them in. Only the names matter here; they are the
+    // naming fallback for a write whose variable reference the optimizer
+    // replaced with the value itself.
+    const Node& vars = (*ov)[1];
+    for (size_t i = 0; i < vars.size(); ++i)
+      prog.output_vars.push_back(vars[i][0].atom);
   }
   return prog;
 }
