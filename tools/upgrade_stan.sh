@@ -175,6 +175,52 @@ text = text.replace(old, new, 1)
 open(path, "w").write(text)
 EOF
 
+# --- 6c. Shim sundials' remaining raw sprintf calls -------------------------
+# Beyond the vsprintf/errfp/infofp cases in 6b, each solver's return-code-
+# to-name helper (e.g. CVodeGetReturnFlagName) and its default error/info
+# handlers format known-short string literals into a buffer with plain
+# sprintf. There's no overflow risk -- every literal fits the buffer it's
+# copied into -- but the fortified libc still lowers these to the
+# ___sprintf_chk symbol R CMD check flags, same as unbounded vsprintf.
+# Rewrite each to snprintf with that buffer's known size.
+patch_sprintf() {
+  # $1 = file, $2 = destination buffer, $3 = snprintf size arg,
+  # $4 = expected number of call sites (guards against upstream drift)
+  python3 - "$1" "$2" "$3" "$4" << 'EOF'
+import re
+import sys
+
+path, var, size, expected = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+text = open(path).read()
+
+# \b excludes vsprintf(...), already handled in 6b.
+pattern = re.compile(r"\bsprintf\(" + re.escape(var) + r",\s*")
+text, n = pattern.subn(f"snprintf({var}, {size}, ", text)
+assert n == expected, (
+    f"expected {expected} sprintf({var}, ...) call sites in {path}, found {n} "
+    "-- changed upstream"
+)
+
+open(path, "w").write(text)
+EOF
+}
+
+# `name` is a malloc'd pointer (size not recoverable via sizeof), sized
+# per-file at the call site below; the rest are fixed-size local arrays.
+patch_sprintf "../src/idas/idas.c" "err_type" "sizeof err_type" 2
+patch_sprintf "../src/idas/idas_io.c" "name" 24 45
+patch_sprintf "../src/idas/idas_ls.c" "name" 30 11
+patch_sprintf "../src/kinsol/kinsol.c" "err_type" "sizeof err_type" 2
+patch_sprintf "../src/kinsol/kinsol.c" "retstr" "sizeof retstr" 11
+patch_sprintf "../src/kinsol/kinsol.c" "msg1" "sizeof msg1" 1
+patch_sprintf "../src/kinsol/kinsol.c" "msg" "sizeof msg" 1
+patch_sprintf "../src/kinsol/kinsol_io.c" "name" 24 17
+patch_sprintf "../src/kinsol/kinsol_ls.c" "name" 30 10
+patch_sprintf "../src/cvodes/cvodes.c" "err_type" "sizeof err_type" 2
+patch_sprintf "../src/cvodes/cvodes_io.c" "name" 24 43
+patch_sprintf "../src/cvodes/cvodes_diag.c" "name" 30 10
+patch_sprintf "../src/cvodes/cvodes_ls.c" "name" 30 13
+
 # --- 7. TBB ------------------------------------------------------------
 # TBB is not vendored from the CmdStan/math bundle -- see tools/upgrade_tbb.sh,
 # which vendors a standalone oneTBB release (headers into inst/include,
@@ -205,6 +251,13 @@ cp -Rf "$MATH_SRC"/lib/boost_*/boost/circular_buffer "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/accumulators "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/parameter "$INC/boost"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/mp11 "$INC/boost"
+# odeint and boost::math each probe __has_include(<boost/predef/other/endian.h>)
+# to decide whether to fall back to a "standalone" build (see their
+# tools/is_standalone.hpp). Without this vendored, both silently switch to
+# raw assert() instead of the overridable BOOST_ASSERT, so R CMD check's
+# compiled-code scan flags ___assert_rtn no matter what PKG_CPPFLAGS says.
+cp -Rf "$MATH_SRC"/lib/boost_*/boost/predef "$INC/boost"
+cp -f "$MATH_SRC"/lib/boost_*/boost/predef.h "$INC/boost/"
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/*.hpp "$INC/boost"
 
 cp -Rf "$MATH_SRC"/lib/boost_*/boost/lexical_cast "$INC/boost"

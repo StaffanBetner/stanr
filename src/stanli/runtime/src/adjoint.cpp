@@ -493,6 +493,8 @@ void run_adjoint(const Program& fwd, const AdjProgram& ap, const double* val,
     // instruction index instead, the jumps, is what gen_adjoint refuses.
     const double t = adj[I.dst];
     switch (I.code) {
+      case Program::CALL:
+        break;  // handled above with `continue`; unreachable here
       case Program::CONST:
         adj[I.dst] = 0.0;
         break;

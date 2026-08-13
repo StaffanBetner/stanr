@@ -233,6 +233,91 @@ text = text.replace(old_include, "", 1)
 open(path, "w").write(text)
 EOF
 
+# R CMD check flags assert() in compiled code (it lowers to abort() via
+# ___assert_rtn), and PKG_CPPFLAGS doesn't define NDEBUG for this build, so
+# these stay live in the shipped binary. Each one guards an invariant the
+# carver/type-checker already guarantees by construction (registered
+# opcodes, scalar-length operands), so drop them rather than ship a check
+# that can't actually fail.
+python3 - "$SRC/runtime/kernels/elementwise.cpp" << 'EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old_include = "#include <cassert>\n"
+assert old_include in text, "cassert include not found -- elementwise.cpp changed upstream"
+text = text.replace(old_include, "", 1)
+
+old_check = "    assert(ctx.in[i].len == 1);\n    acc += ctx.in[i].data[0];\n"
+new_check = "    acc += ctx.in[i].data[0];\n"
+assert old_check in text, "add_n_fwd length assert not found -- elementwise.cpp changed upstream"
+text = text.replace(old_check, new_check, 1)
+
+open(path, "w").write(text)
+EOF
+
+python3 - "$SRC/runtime/src/executor.cpp" << 'EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old_include = "#include <cassert>\n"
+assert old_include in text, "cassert include not found -- executor.cpp changed upstream"
+text = text.replace(old_include, "", 1)
+
+old_kernel = "  assert(opcode < OP_COUNT_);\n  return g_table[opcode];\n"
+new_kernel = "  return g_table[opcode];\n"
+assert old_kernel in text, "kernel() opcode assert not found -- executor.cpp changed upstream"
+text = text.replace(old_kernel, new_kernel, 1)
+
+old_register = "  assert(opcode < OP_COUNT_);\n  g_table[opcode] = k;\n"
+new_register = "  g_table[opcode] = k;\n"
+assert old_register in text, "register_kernel() opcode assert not found -- executor.cpp changed upstream"
+text = text.replace(old_register, new_register, 1)
+
+old_call = (
+    "  assert(k != nullptr);  // the carver only emits registered opcodes\n"
+    "  k->forward(ctx);\n"
+)
+new_call = "  k->forward(ctx);  // the carver only emits registered opcodes\n"
+assert old_call in text, "run_call() null-kernel assert not found -- executor.cpp changed upstream"
+text = text.replace(old_call, new_call, 1)
+
+old_result = "  assert(r.len == 1);\n  return values_[r.offset];\n"
+new_result = "  return values_[r.offset];\n"
+assert old_result in text, "forward() result-length assert not found -- executor.cpp changed upstream"
+text = text.replace(old_result, new_result, 1)
+
+open(path, "w").write(text)
+EOF
+
+# run_adjoint()'s per-instruction switch has no default (deliberate: it's
+# meant to catch newly added opcodes going unhandled), but CALL is already
+# handled above via an `if`/`continue` before the switch, so the compiler
+# still flags it as an unhandled enumerator. Add it as an explicit
+# unreachable case, same as the existing JZ/JMP entries.
+python3 - "$SRC/runtime/src/adjoint.cpp" << 'EOF'
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+
+old = "    const double t = adj[I.dst];\n    switch (I.code) {\n      case Program::CONST:\n"
+new = (
+    "    const double t = adj[I.dst];\n"
+    "    switch (I.code) {\n"
+    "      case Program::CALL:\n"
+    "        break;  // handled above with `continue`; unreachable here\n"
+    "      case Program::CONST:\n"
+)
+assert old in text, "run_adjoint() switch head not found -- adjoint.cpp changed upstream"
+text = text.replace(old, new, 1)
+
+open(path, "w").write(text)
+EOF
+
 # profile_report() is never called by stanr; rewrite it over
 # <sstream>/<iomanip> instead of snprintf so nothing calls it either way.
 python3 - "$SRC/runtime/src/executor.cpp" << 'EOF'

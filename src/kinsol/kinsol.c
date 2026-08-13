@@ -2300,44 +2300,44 @@ void KINPrintInfo(KINMem kin_mem,
 
     switch(ret) {
     case KIN_SUCCESS:
-      sprintf(retstr, "KIN_SUCCESS");
+      snprintf(retstr, sizeof retstr, "KIN_SUCCESS");
       break;
     case KIN_SYSFUNC_FAIL:
-      sprintf(retstr, "KIN_SYSFUNC_FAIL");
+      snprintf(retstr, sizeof retstr, "KIN_SYSFUNC_FAIL");
       break;
     case KIN_REPTD_SYSFUNC_ERR:
-      sprintf(retstr, "KIN_REPTD_SYSFUNC_ERR");
+      snprintf(retstr, sizeof retstr, "KIN_REPTD_SYSFUNC_ERR");
       break;
     case KIN_STEP_LT_STPTOL:
-      sprintf(retstr, "KIN_STEP_LT_STPTOL");
+      snprintf(retstr, sizeof retstr, "KIN_STEP_LT_STPTOL");
       break;
     case KIN_LINESEARCH_NONCONV:
-      sprintf(retstr, "KIN_LINESEARCH_NONCONV");
+      snprintf(retstr, sizeof retstr, "KIN_LINESEARCH_NONCONV");
       break;
     case KIN_LINESEARCH_BCFAIL:
-      sprintf(retstr, "KIN_LINESEARCH_BCFAIL");
+      snprintf(retstr, sizeof retstr, "KIN_LINESEARCH_BCFAIL");
       break;
     case KIN_MAXITER_REACHED:
-      sprintf(retstr, "KIN_MAXITER_REACHED");
+      snprintf(retstr, sizeof retstr, "KIN_MAXITER_REACHED");
       break;
     case KIN_MXNEWT_5X_EXCEEDED:
-      sprintf(retstr, "KIN_MXNEWT_5X_EXCEEDED");
+      snprintf(retstr, sizeof retstr, "KIN_MXNEWT_5X_EXCEEDED");
       break;
     case KIN_LINSOLV_NO_RECOVERY:
-      sprintf(retstr, "KIN_LINSOLV_NO_RECOVERY");
+      snprintf(retstr, sizeof retstr, "KIN_LINSOLV_NO_RECOVERY");
       break;
     case KIN_LSETUP_FAIL:
-      sprintf(retstr, "KIN_PRECONDSET_FAILURE");
+      snprintf(retstr, sizeof retstr, "KIN_PRECONDSET_FAILURE");
       break;
     case KIN_LSOLVE_FAIL:
-      sprintf(retstr, "KIN_PRECONDSOLVE_FAILURE");
+      snprintf(retstr, sizeof retstr, "KIN_PRECONDSOLVE_FAILURE");
       break;
     }
 
     /* Compose the message */
 
-    sprintf(msg1, msgfmt, ret);
-    sprintf(msg,"%s (%s)",msg1,retstr);
+    snprintf(msg1, sizeof msg1, msgfmt, ret);
+    snprintf(msg, sizeof msg, "%s (%s)",msg1,retstr);
 
 
   } else {
@@ -2450,9 +2450,9 @@ void KINErrHandler(int error_code, const char *module,
   kin_mem = (KINMem) data;
 
   if (error_code == KIN_WARNING)
-    sprintf(err_type,"WARNING");
+    snprintf(err_type, sizeof err_type, "WARNING");
   else
-    sprintf(err_type,"ERROR");
+    snprintf(err_type, sizeof err_type, "ERROR");
 
 #ifndef NO_FPRINTF_OUTPUT
   if (kin_mem->kin_errfp != NULL) {

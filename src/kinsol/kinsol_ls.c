@@ -557,34 +557,34 @@ char *KINGetLinReturnFlagName(long int flag)
 
   switch(flag) {
   case KINLS_SUCCESS:
-    sprintf(name, "KINLS_SUCCESS");
+    snprintf(name, 30, "KINLS_SUCCESS");
     break;
   case KINLS_MEM_NULL:
-    sprintf(name, "KINLS_MEM_NULL");
+    snprintf(name, 30, "KINLS_MEM_NULL");
     break;
   case KINLS_LMEM_NULL:
-    sprintf(name, "KINLS_LMEM_NULL");
+    snprintf(name, 30, "KINLS_LMEM_NULL");
     break;
   case KINLS_ILL_INPUT:
-    sprintf(name, "KINLS_ILL_INPUT");
+    snprintf(name, 30, "KINLS_ILL_INPUT");
     break;
   case KINLS_MEM_FAIL:
-    sprintf(name, "KINLS_MEM_FAIL");
+    snprintf(name, 30, "KINLS_MEM_FAIL");
     break;
   case KINLS_PMEM_NULL:
-    sprintf(name, "KINLS_PMEM_NULL");
+    snprintf(name, 30, "KINLS_PMEM_NULL");
     break;
   case KINLS_JACFUNC_ERR:
-    sprintf(name,"KINLS_JACFUNC_ERR");
+    snprintf(name, 30, "KINLS_JACFUNC_ERR");
     break;
   case KINLS_SUNMAT_FAIL:
-    sprintf(name,"KINLS_SUNMAT_FAIL");
+    snprintf(name, 30, "KINLS_SUNMAT_FAIL");
     break;
   case KINLS_SUNLS_FAIL:
-    sprintf(name,"KINLS_SUNLS_FAIL");
+    snprintf(name, 30, "KINLS_SUNLS_FAIL");
     break;
   default:
-    sprintf(name, "NONE");
+    snprintf(name, 30, "NONE");
   }
 
   return(name);

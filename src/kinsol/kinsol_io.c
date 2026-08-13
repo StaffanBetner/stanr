@@ -1143,55 +1143,55 @@ char *KINGetReturnFlagName(long int flag)
 
   switch(flag) {
   case KIN_SUCCESS:
-    sprintf(name, "KIN_SUCCESS");
+    snprintf(name, 24, "KIN_SUCCESS");
     break;
   case KIN_INITIAL_GUESS_OK:
-    sprintf(name, "KIN_INITIAL_GUESS_OK");
+    snprintf(name, 24, "KIN_INITIAL_GUESS_OK");
     break;
   case KIN_STEP_LT_STPTOL:
-    sprintf(name, "KIN_STEP_LT_STPTOL");
+    snprintf(name, 24, "KIN_STEP_LT_STPTOL");
     break;
   case KIN_WARNING:
-    sprintf(name, "KIN_WARNING");
+    snprintf(name, 24, "KIN_WARNING");
     break;
   case KIN_MEM_NULL:
-    sprintf(name, "KIN_MEM_NULL");
+    snprintf(name, 24, "KIN_MEM_NULL");
     break;
   case KIN_ILL_INPUT:
-    sprintf(name, "KIN_ILL_INPUT");
+    snprintf(name, 24, "KIN_ILL_INPUT");
     break;
   case KIN_NO_MALLOC:
-    sprintf(name, "KIN_NO_MALLOC");
+    snprintf(name, 24, "KIN_NO_MALLOC");
     break;
   case KIN_MEM_FAIL:
-    sprintf(name, "KIN_MEM_FAIL");
+    snprintf(name, 24, "KIN_MEM_FAIL");
     break;
   case KIN_LINESEARCH_NONCONV:
-    sprintf(name, "KIN_LINESEARCH_NONCONV");
+    snprintf(name, 24, "KIN_LINESEARCH_NONCONV");
     break;
   case KIN_MAXITER_REACHED:
-    sprintf(name, "KIN_MAXITER_REACHED");
+    snprintf(name, 24, "KIN_MAXITER_REACHED");
     break;
   case KIN_MXNEWT_5X_EXCEEDED:
-    sprintf(name, "KIN_MXNEWT_5X_EXCEEDED");
+    snprintf(name, 24, "KIN_MXNEWT_5X_EXCEEDED");
     break;
   case KIN_LINESEARCH_BCFAIL:
-    sprintf(name, "KIN_LINESEARCH_BCFAIL");
+    snprintf(name, 24, "KIN_LINESEARCH_BCFAIL");
     break;
   case KIN_LINSOLV_NO_RECOVERY:
-    sprintf(name, "KIN_LINSOLV_NO_RECOVERY");
+    snprintf(name, 24, "KIN_LINSOLV_NO_RECOVERY");
     break;
   case KIN_LINIT_FAIL:
-    sprintf(name, "KIN_LINIT_FAIL");
+    snprintf(name, 24, "KIN_LINIT_FAIL");
     break;
   case KIN_LSETUP_FAIL:
-    sprintf(name, "KIN_LSETUP_FAIL");
+    snprintf(name, 24, "KIN_LSETUP_FAIL");
     break;
   case KIN_LSOLVE_FAIL:
-    sprintf(name, "KIN_LSOLVE_FAIL");
+    snprintf(name, 24, "KIN_LSOLVE_FAIL");
     break;
   default:
-    sprintf(name, "NONE");
+    snprintf(name, 24, "NONE");
   }
 
   return(name);

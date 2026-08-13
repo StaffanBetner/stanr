@@ -7923,9 +7923,9 @@ void IDAErrHandler(int error_code, const char *module,
   IDA_mem = (IDAMem) data;
 
   if (error_code == IDA_WARNING)
-    sprintf(err_type,"WARNING");
+    snprintf(err_type, sizeof err_type, "WARNING");
   else
-    sprintf(err_type,"ERROR");
+    snprintf(err_type, sizeof err_type, "ERROR");
 
 #ifndef NO_FPRINTF_OUTPUT
   if (IDA_mem->ida_errfp != NULL) {

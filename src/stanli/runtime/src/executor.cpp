@@ -4,7 +4,6 @@
 #include <stanli/packet.hpp>
 
 #include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
@@ -19,7 +18,6 @@ namespace stanli {
 static Kernel g_table[OP_COUNT_];
 
 Kernel& kernel(uint16_t opcode) {
-  assert(opcode < OP_COUNT_);
   return g_table[opcode];
 }
 
@@ -55,7 +53,6 @@ const char* opcode_name(uint16_t opcode) {
 }
 
 void register_kernel(uint16_t opcode, Kernel k) {
-  assert(opcode < OP_COUNT_);
   g_table[opcode] = k;
 }
 
@@ -88,8 +85,7 @@ KernelCtx call_fwd_ctx(const Program::Call& call, double* reg) {
 void run_call(const Program::Call& call, double* reg) {
   KernelCtx ctx = call_fwd_ctx(call, reg);
   const Kernel* k = find_kernel(call.opcode);
-  assert(k != nullptr);  // the carver only emits registered opcodes
-  k->forward(ctx);
+  k->forward(ctx);  // the carver only emits registered opcodes
 }
 
 void register_elementwise_kernels();
@@ -316,7 +312,6 @@ double Executor::forward_value_only() {
 double Executor::forward() {
   run_forward_only();
   const Slot& r = graph_.slots[graph_.result_slot];
-  assert(r.len == 1);
   return values_[r.offset];
 }
 

@@ -9142,9 +9142,9 @@ void cvErrHandler(int error_code, const char *module,
   cv_mem = (CVodeMem) data;
 
   if (error_code == CV_WARNING)
-    sprintf(err_type,"WARNING");
+    snprintf(err_type, sizeof err_type, "WARNING");
   else
-    sprintf(err_type,"ERROR");
+    snprintf(err_type, sizeof err_type, "ERROR");
 
 #ifndef NO_FPRINTF_OUTPUT
   if (cv_mem->cv_errfp!=NULL) {

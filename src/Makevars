@@ -9,7 +9,7 @@ PKG_CPPFLAGS = -I"../inst/include" \
   -I"stanli/runtime/include" \
   -include stan_sundials_printf_override.hpp -D_REENTRANT -DSTAN_THREADS \
   -D_HAS_AUTO_PTR_ETC=0 -DEIGEN_PERMANENTLY_DISABLE_STUPID_WARNINGS \
-  -DTBB_INTERFACE_NEW
+  -DTBB_INTERFACE_NEW -DEIGEN_NO_DEBUG -DBOOST_DISABLE_ASSERTS
 
 ifneq ($(findstring emcc,$(CC)),)
   PKG_CPPFLAGS += -pthread

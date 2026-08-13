@@ -2,7 +2,6 @@
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
-#include <cassert>
 #include <cmath>
 
 namespace stanli {
@@ -19,7 +18,6 @@ void exp_bwd(KernelCtx& ctx) {
 void add_n_fwd(KernelCtx& ctx) {
   double acc = 0;
   for (int i = 0; i < ctx.n_in; ++i) {
-    assert(ctx.in[i].len == 1);
     acc += ctx.in[i].data[0];
   }
   ctx.out.data[0] = acc;

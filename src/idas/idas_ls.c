@@ -769,37 +769,37 @@ char *IDAGetLinReturnFlagName(long int flag)
 
   switch(flag) {
   case IDALS_SUCCESS:
-    sprintf(name,"IDALS_SUCCESS");
+    snprintf(name, 30, "IDALS_SUCCESS");
     break;
   case IDALS_MEM_NULL:
-    sprintf(name,"IDALS_MEM_NULL");
+    snprintf(name, 30, "IDALS_MEM_NULL");
     break;
   case IDALS_LMEM_NULL:
-    sprintf(name,"IDALS_LMEM_NULL");
+    snprintf(name, 30, "IDALS_LMEM_NULL");
     break;
   case IDALS_ILL_INPUT:
-    sprintf(name,"IDALS_ILL_INPUT");
+    snprintf(name, 30, "IDALS_ILL_INPUT");
     break;
   case IDALS_MEM_FAIL:
-    sprintf(name,"IDALS_MEM_FAIL");
+    snprintf(name, 30, "IDALS_MEM_FAIL");
     break;
   case IDALS_PMEM_NULL:
-    sprintf(name,"IDALS_PMEM_NULL");
+    snprintf(name, 30, "IDALS_PMEM_NULL");
     break;
   case IDALS_JACFUNC_UNRECVR:
-    sprintf(name,"IDALS_JACFUNC_UNRECVR");
+    snprintf(name, 30, "IDALS_JACFUNC_UNRECVR");
     break;
   case IDALS_JACFUNC_RECVR:
-    sprintf(name,"IDALS_JACFUNC_RECVR");
+    snprintf(name, 30, "IDALS_JACFUNC_RECVR");
     break;
   case IDALS_SUNMAT_FAIL:
-    sprintf(name,"IDALS_SUNMAT_FAIL");
+    snprintf(name, 30, "IDALS_SUNMAT_FAIL");
     break;
   case IDALS_SUNLS_FAIL:
-    sprintf(name,"IDALS_SUNLS_FAIL");
+    snprintf(name, 30, "IDALS_SUNLS_FAIL");
     break;
   default:
-    sprintf(name,"NONE");
+    snprintf(name, 30, "NONE");
   }
 
   return(name);
