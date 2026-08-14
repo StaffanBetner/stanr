@@ -49,7 +49,12 @@ jobs:
             echo "en_AU.UTF-8 UTF-8" >> /etc/locale.gen
             locale-gen en_AU.UTF-8
             mkdir -p ~/.R
-            printf 'CC=clang\nCXX=clang++\nCXX11=clang++\nCXX14=clang++\nCXX17=clang++\nCXX20=clang++\n' > ~/.R/Makevars
+            echo "CC=clang
+            CXX=clang++
+            CXX11=clang++
+            CXX14=clang++
+            CXX17=clang++
+            CXX20=clang++" > ~/.R/Makevars
             Rscript -e 'install.packages(c("pak"), repos = "https://cloud.r-project.org", Ncpus=4)'
             Rscript -e 'pak::pak(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"))'
             Rscript -e 'rcmdcheck::rcmdcheck("/stanr", args = c("--no-manual", "--as-cran"), check_dir = "/stanr/check")'
@@ -62,7 +67,12 @@ jobs:
           prepare: |
             pkg install -y R R-cran-rcmdcheck gmake
             mkdir -p ~/.R
-            printf 'CC=clang\nCXX=clang++\nCXX11=clang++\nCXX14=clang++\nCXX17=clang++\nCXX20=clang++\n' > ~/.R/Makevars
+            echo "CC=clang
+            CXX=clang++
+            CXX11=clang++
+            CXX14=clang++
+            CXX17=clang++
+            CXX20=clang++" > ~/.R/Makevars
             Rscript -e 'install.packages(c("pak"), repos = "https://cloud.r-project.org", Ncpus=4)'
             Rscript -e 'pak::pak(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"))'
           run: |
