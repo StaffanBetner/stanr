@@ -50,7 +50,8 @@ jobs:
             locale-gen en_AU.UTF-8
             mkdir -p ~/.R
             printf 'CC=clang\nCXX=clang++\nCXX11=clang++\nCXX14=clang++\nCXX17=clang++\nCXX20=clang++\n' > ~/.R/Makevars
-            Rscript -e 'install.packages(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"), repos = "https://cloud.r-project.org", Ncpus=4)'
+            Rscript -e 'install.packages(c("pak"), repos = "https://cloud.r-project.org", Ncpus=4)'
+            Rscript -e 'pak::pak(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"))'
             Rscript -e 'rcmdcheck::rcmdcheck("/stanr", args = c("--no-manual", "--as-cran"), check_dir = "/stanr/check")'
 
       - name: Test in FreeBSD
@@ -62,7 +63,8 @@ jobs:
             pkg install -y R R-cran-rcmdcheck gmake
             mkdir -p ~/.R
             printf 'CC=clang\nCXX=clang++\nCXX11=clang++\nCXX14=clang++\nCXX17=clang++\nCXX20=clang++\n' > ~/.R/Makevars
-            Rscript -e 'install.packages(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"), repos = "https://cloud.r-project.org", Ncpus=4)'
+            Rscript -e 'install.packages(c("pak"), repos = "https://cloud.r-project.org", Ncpus=4)'
+            Rscript -e 'pak::pak(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"))'
           run: |
             Rscript -e 'rcmdcheck::rcmdcheck("/root/work/stanr/stanr", args = c("--no-manual", "--as-cran"), check_dir = "/root/work/stanr/stanr/check")'
 
