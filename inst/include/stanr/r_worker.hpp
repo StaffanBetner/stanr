@@ -7,11 +7,9 @@
 #include <stan/services/error_codes.hpp>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <exception>
-#include <mutex>
+#include <future>
 #include <string>
-#include <thread>
 #include <utility>
 #include "r_interrupt.hpp"
 #include "r_logger.hpp"
@@ -22,8 +20,7 @@ namespace stanr {
 template <class F>
 int run_on_worker_thread(stanr::r_logger& logger, const char* what,
                           F&& fn) {
-  std::atomic<bool> cancel_requested{false};
-  stanr::r_interrupt interrupt(&cancel_requested, what);
+  stanr::r_interrupt interrupt(&logger, what);
 
   stan::math::ChainableStack autodiff_stack;
   stan::math::ad_tape_observer autodiff_observer;
@@ -47,57 +44,44 @@ int run_on_worker_thread(stanr::r_logger& logger, const char* what,
   std::atomic<bool> cancel_requested{false};
   stanr::r_interrupt interrupt(&cancel_requested, what);
 
-  std::atomic<bool> finished{false};
-  std::mutex completion_mutex;
-  std::condition_variable completion_cv;
-  std::exception_ptr worker_error;
-  int return_code = stan::services::error_codes::CONFIG;
-
-  std::thread worker([&] {
+  // std::launch::async must be explicit: the default policy (async |
+  // deferred) permits the implementation to defer the call, in which case
+  // wait_for() below would return future_status::deferred forever instead
+  // of timeout/ready.
+  std::future<int> worker = std::async(std::launch::async, [&] {
     // AD stack plus tape observer for this job.
     stan::math::ChainableStack autodiff_stack;
     stan::math::ad_tape_observer autodiff_observer;
-    try {
-      return_code = fn(interrupt);
-    } catch (...) {
-      worker_error = std::current_exception();
-    }
-    finished.store(true, std::memory_order_release);
-    completion_cv.notify_one();
+    return fn(interrupt);
   });
 
   // Keep the R thread responsive for console output and Ctrl-C; on Ctrl-C
-  // cancel and join the worker before propagating the interrupt to R.
+  // cancel and wait for the worker to unwind before propagating the
+  // interrupt to R.
   bool interrupted = false;
-  while (!finished.load(std::memory_order_acquire)) {
+  while (worker.wait_for(std::chrono::milliseconds(50)) !=
+         std::future_status::ready) {
     logger.flush();
     if (!interrupted && user_interrupt_pending()) {
       interrupted = true;
       cancel_requested.store(true, std::memory_order_release);
     }
-
-    std::unique_lock<std::mutex> lock(completion_mutex);
-    completion_cv.wait_for(lock, std::chrono::milliseconds(50), [&] {
-      return finished.load(std::memory_order_acquire);
-    });
   }
-  worker.join();
   logger.flush();
 
-  if (worker_error) {
-    try {
-      std::rethrow_exception(worker_error);
-    } catch (const std::exception& e) {
-      cpp11::stop("%s", e.what());
-    } catch (...) {
-      cpp11::stop("Unknown exception in %s worker.", what);
+  // get() blocks only long enough to retrieve the already-ready result, and
+  // rethrows any exception the task threw.
+  try {
+    int return_code = worker.get();
+    if (interrupted) {
+      cpp11::stop("%s interrupted.", what);
     }
+    return return_code;
+  } catch (const std::exception& e) {
+    cpp11::stop("%s", e.what());
+  } catch (...) {
+    cpp11::stop("Unknown exception in %s worker.", what);
   }
-  if (interrupted) {
-    cpp11::stop("%s interrupted.", what);
-  }
-
-  return return_code;
 }
 #endif  // __EMSCRIPTEN__ && !__EMSCRIPTEN_PTHREADS__
 

@@ -18,5 +18,6 @@ tools/stanli-*
 **.stanrc
 .posit
 **.DS_Store
+node_modules
 *.Rcheck/
 *.tar.gz

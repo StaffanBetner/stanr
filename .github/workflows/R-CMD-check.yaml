@@ -68,8 +68,24 @@ jobs:
           upload-results: true
           check-dir: '"check"'
 
-      - name: Check WASM build
+      - name: Build WASM package
         if: matrix.config.os == 'wasm'
         run: |
-          rwasm::build("local::.")
+          rwasm::build("local::.", out_dir = "wasm-repo")
         shell: Rscript {0}
+
+      - uses: actions/setup-node@v4
+        if: matrix.config.os == 'wasm'
+        with:
+          node-version: '22'
+
+      - name: Install webR test harness dependencies
+        if: matrix.config.os == 'wasm'
+        working-directory: tools/webr-test
+        run: npm ci
+
+      - name: Run stanli-backend tests under webR (Node)
+        if: matrix.config.os == 'wasm'
+        run: |
+          node tools/webr-test/run-stanli-tests.mjs \
+            wasm-repo/stanr_*.tgz . stanli-backend
