@@ -57,7 +57,7 @@ $(TBB_BUILD_DIR)/tbbmalloc/%.o: tbbmalloc/%.cpp
 	$(CXX) $(TBB_COMMON_FLAGS) -D__TBBMALLOC_BUILD -fno-rtti -fno-exceptions -c $< -o $@
 
 ifeq ($(TBB_WASM),1)
-  TBB_LIBS = -L"$(TBB_LIB_DIR)" -ltbb
+  TBB_LIBS = $(TBB_LIB_DIR)/libtbb.a
 else
   TBB_LIBS = -L"$(TBB_LIB_DIR)" $(TBB_RPATH_FLAG) -ltbb -ltbbmalloc
 endif

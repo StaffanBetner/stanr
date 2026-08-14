@@ -81,7 +81,7 @@
     mustWork = TRUE
   )
   if (R.version$os == "emscripten") {
-    return(paste0("-L", shQuote(tbb_lib_dir), " -ltbb"))
+    return(shQuote(file.path(tbb_lib_dir, "libtbb.a")))
   }
   paste0(
     "-L",
