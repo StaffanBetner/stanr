@@ -1,0 +1,73 @@
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: main
+
+name: R-CMD-check-crossplatform
+
+jobs:
+  R-CMD-check:
+    runs-on: ubuntu-latest
+
+    name: Check (${{ matrix.config.platform }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          -  { platform: 386 }
+          -  { platform: armhf }
+          -  { platform: ppc64le }
+          -  { platform: s390x }
+          -  { platform: riscv64 }
+          -  { platform: FreeBSD }
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Setup QEMU
+        if: matrix.config.platform != 'FreeBSD'
+        uses: docker/setup-qemu-action@master
+
+      - name: Check package
+        if: matrix.config.platform != 'FreeBSD'
+        uses: addnab/docker-run-action@v3
+        with:
+          image: debian:sid-slim
+          options: -v ${{ github.workspace }}:/stanr --platform=linux/${{ matrix.config.platform }} -e DEBIAN_FRONTEND=noninteractive -e TZ=Etc/UTC -e LANG=en_AU.UTF-8
+          run: |
+            apt-get update
+            apt-get install --no-install-recommends -y clang \
+              r-base-core locales pandoc qpdf r-cran-rcmdcheck make
+            echo "en_AU.UTF-8 UTF-8" >> /etc/locale.gen
+            locale-gen en_AU.UTF-8
+            mkdir -p ~/.R
+            printf 'CC=clang\nCXX=clang++\nCXX11=clang++\nCXX14=clang++\nCXX17=clang++\nCXX20=clang++\n' > ~/.R/Makevars
+            Rscript -e 'install.packages(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"), repos = "https://cloud.r-project.org")'
+            Rscript -e 'rcmdcheck::rcmdcheck("/stanr", args = c("--no-manual", "--as-cran"), check_dir = "/stanr/check")'
+
+      - name: Test in FreeBSD
+        if: matrix.config.platform == 'FreeBSD'
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y R R-cran-rcmdcheck gmake
+            mkdir -p ~/.R
+            printf 'CC=clang\nCXX=clang++\nCXX11=clang++\nCXX14=clang++\nCXX17=clang++\nCXX20=clang++\n' > ~/.R/Makevars
+            Rscript -e 'install.packages(c("R6", "QuickJSR", "posterior", "withr", "testthat", "loo"), repos = "https://cloud.r-project.org")'
+          run: |
+            Rscript -e 'rcmdcheck::rcmdcheck("/root/work/stanr/stanr", args = c("--no-manual", "--as-cran"), check_dir = "/root/work/stanr/stanr/check")'
+
+      - name: Upload check results
+        uses: actions/upload-artifact@v7
+        with:
+          name: arch-${{ matrix.config.platform }}-results
+          path: check
