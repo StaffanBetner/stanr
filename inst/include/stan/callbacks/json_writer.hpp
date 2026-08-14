@@ -4,6 +4,8 @@
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <stan/math/prim/meta.hpp>
 #include <stan/callbacks/structured_writer.hpp>
+#include <climits>
+#include <cstdint>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -315,6 +317,7 @@ class json_writer final : public structured_writer {
     write_int_like(key, value);
   }
 
+#if SIZE_MAX != UINT_MAX
   /**
    * Write a key-value pair where the value is an `unsigned int`.
    * @param key Name of the value pair
@@ -323,6 +326,7 @@ class json_writer final : public structured_writer {
   void write(const std::string& key, unsigned int value) {
     write_int_like(key, value);
   }
+#endif
 
   /**
    * Write a key-value pair where the value is a double.

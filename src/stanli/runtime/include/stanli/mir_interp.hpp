@@ -30,6 +30,7 @@
 
 #include <stan/math.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -110,6 +111,7 @@ class MirInterp {
                       const std::vector<std::vector<T>>& args,
                       const std::vector<std::vector<int>>& int_args) {
     MirInterp sub(funs_, where_, hooks_);
+    sub.propto_ctx_ = propto_ctx_;
     size_t ai = 0, ii = 0;
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
       const bool is_int = f.arg_types[k].find("UInt") != std::string::npos;
@@ -118,10 +120,10 @@ class MirInterp {
         v.is_int = true;
         v.i = int_args[ii++];
         v.r.assign(v.i.begin(), v.i.end());
-        v.dims = {(int64_t)v.i.size()};
+        if (f.arg_types[k] != "UInt") v.dims = {(int64_t)v.i.size()};
       } else if (ai < args.size()) {
         v.r = args[ai++];
-        v.dims = {(int64_t)v.r.size()};
+        if (f.arg_types[k] != "UReal") v.dims = {(int64_t)v.r.size()};
       }
       sub.env_[f.arg_names[k]] = std::move(v);
     }
@@ -264,7 +266,11 @@ class MirInterp {
           // The flat read buffer is consumed with sequential 1-D indexing
           // regardless of the source variable's shape.
           Value flat = read_data(read_name, st.raw);
-          flat.dims = {(int64_t)std::max(flat.r.size(), flat.i.size())};
+          const auto declared = decl_dims_.find(st.lhs);
+          if (declared != decl_dims_.end() && declared->second.empty())
+            flat.dims.clear();
+          else
+            flat.dims = {(int64_t)std::max(flat.r.size(), flat.i.size())};
           env_[st.lhs] = std::move(flat);
           return;
         }
@@ -449,6 +455,7 @@ class MirInterp {
   std::map<std::string, Value> env_;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
   int udf_depth_ = 0;
+  bool propto_ctx_ = true;
 
   [[noreturn]] void fail(const std::string& msg,
                          const std::string& raw = "") const {
@@ -637,6 +644,7 @@ class MirInterp {
     // Function bodies see their arguments and nothing else.
     MirInterp sub(funs_, where_, hooks_);
     sub.udf_depth_ = udf_depth_ + 1;
+    sub.propto_ctx_ = propto_ctx_ && e.fn_propto;
     for (size_t i = 0; i < e.args.size(); ++i)
       sub.env_[f.arg_names[i]] = eval(e.args[i]);
     try {
@@ -800,21 +808,37 @@ class MirInterp {
   Value eval_fun(const mir::Expr& e) {
     Value r;
     if (e.fn_lib == mir::Expr::Lib::UserDefined) return call_udf(e);
+    const auto is_scalar = [](const Value& v) {
+      return v.dims.empty() && v.r.size() == 1;
+    };
+    const auto broadcast_dims = [](const Value& a, const Value& b) {
+      if (a.dims.empty() != b.dims.empty())
+        return a.dims.empty() ? b.dims : a.dims;
+      if (a.r.size() > b.r.size()) return a.dims;
+      if (b.r.size() > a.r.size()) return b.dims;
+      return a.dims.empty() ? b.dims : a.dims;
+    };
+    const auto broadcast_size = [&](const Value& a, const Value& b) {
+      if (is_scalar(a)) return b.r.size();
+      if (is_scalar(b)) return a.r.size();
+      return a.r.size();
+    };
+    const auto shapes_match = [&](const Value& a, const Value& b) {
+      return is_scalar(a) || is_scalar(b) ||
+             (a.dims == b.dims && a.r.size() == b.r.size());
+    };
     // Elementwise with scalar broadcasting; results of real math are real
     // even on int inputs, and binary int results stay int only when both
     // sides are int scalars.
     auto bin = [&](auto f) {
       Value a = eval(e.args[0]), b = eval(e.args[1]);
       Value o;
-      if (a.r.size() != b.r.size() && a.r.size() != 1 && b.r.size() != 1)
-        fail(e.name + ": incompatible lengths " + std::to_string(a.r.size()) +
-                 " vs " + std::to_string(b.r.size()),
-             e.raw);
-      const size_t n = std::max(a.r.size(), b.r.size());
+      if (!shapes_match(a, b)) fail(e.name + ": incompatible shapes", e.raw);
+      const size_t n = broadcast_size(a, b);
       o.r.resize(n);
       for (size_t i = 0; i < n; ++i)
         o.r[i] = f(a.r[a.r.size() == 1 ? 0 : i], b.r[b.r.size() == 1 ? 0 : i]);
-      o.dims = a.r.size() >= b.r.size() ? a.dims : b.dims;
+      o.dims = broadcast_dims(a, b);
       if (a.is_int && b.is_int && a.i.size() == 1 && b.i.size() == 1) {
         o.is_int = true;
         o.i = {(int)val(f(T((double)a.i[0]), T((double)b.i[0])))};
@@ -845,7 +869,7 @@ class MirInterp {
       // a scalar operand (either side) scales elementwise.
       Value a = eval(e.args[0]), b = eval(e.args[1]);
       const bool a_mat = a.dims.size() == 2, b_mat = b.dims.size() == 2;
-      if (a.r.size() != 1 && b.r.size() != 1 && (a_mat || b_mat)) {
+      if (!is_scalar(a) && !is_scalar(b) && (a_mat || b_mat)) {
         const int64_t Ra = a_mat ? a.dims[0] : 1;
         const int64_t Ca = a_mat ? a.dims[1] : (int64_t)a.r.size();
         const int64_t Rb = b_mat ? b.dims[0] : (int64_t)b.r.size();
@@ -866,7 +890,7 @@ class MirInterp {
           r.dims = {(int64_t)r.r.size()};
         return r;
       }
-      if (a.r.size() != 1 && b.r.size() != 1 && !a_mat && !b_mat) {
+      if (!is_scalar(a) && !is_scalar(b) && !a_mat && !b_mat) {
         // vector * row_vector is an outer product when the result is a
         // matrix; row_vector * vector is a dot product when it is a scalar.
         if (e.type_ == "UMatrix") {
@@ -888,13 +912,13 @@ class MirInterp {
       }
       // Scalar scale, elementwise on the already-evaluated operands (an
       // argument may hold an RNG call; evaluating twice would draw twice).
-      if (a.r.size() != b.r.size() && a.r.size() != 1 && b.r.size() != 1)
+      if (a.r.size() != b.r.size() && !is_scalar(a) && !is_scalar(b))
         fail("Times__: incompatible lengths", e.raw);
-      const size_t n = std::max(a.r.size(), b.r.size());
+      const size_t n = broadcast_size(a, b);
       r.r.resize(n);
       for (size_t i = 0; i < n; ++i)
         r.r[i] = a.r[a.r.size() == 1 ? 0 : i] * b.r[b.r.size() == 1 ? 0 : i];
-      r.dims = a.r.size() >= b.r.size() ? a.dims : b.dims;
+      r.dims = broadcast_dims(a, b);
       if (a.is_int && b.is_int && a.i.size() == 1 && b.i.size() == 1) {
         r.is_int = true;
         r.i = {a.i[0] * b.i[0]};
@@ -923,20 +947,21 @@ class MirInterp {
     if (e.name == "fma" && e.args.size() == 3) {
       Value a = eval(e.args[0]), b = eval(e.args[1]), c = eval(e.args[2]);
       Value o;
-      const size_t n = std::max(a.r.size(), std::max(b.r.size(), c.r.size()));
-      for (const Value* x : {&a, &b, &c})
-        if (x->r.size() != n && x->r.size() != 1)
-          fail("fma: incompatible lengths", e.raw);
+      size_t n = 1;
+      bool have_container = false;
+      for (const Value* x : {&a, &b, &c}) {
+        if (is_scalar(*x)) continue;
+        if (have_container && (x->dims != o.dims || x->r.size() != n))
+          fail("fma: incompatible shapes", e.raw);
+        n = x->r.size();
+        o.dims = x->dims;
+        have_container = true;
+      }
       o.r.resize(n);
       for (size_t i = 0; i < n; ++i)
         o.r[i] = stan::math::fma(a.r[a.r.size() == 1 ? 0 : i],
                                  b.r[b.r.size() == 1 ? 0 : i],
                                  c.r[c.r.size() == 1 ? 0 : i]);
-      for (const Value* x : {&a, &b, &c})
-        if (x->r.size() == n && !x->dims.empty()) {
-          o.dims = x->dims;
-          break;
-        }
       return o;
     }
     if (e.name == "PMinus__") return un([](const T& x) { return -x; });
@@ -1367,6 +1392,45 @@ class MirInterp {
   }
     STANLI_SCALAR_UNARY_LIST(STANLI_INTERP_UNARY)
 #undef STANLI_INTERP_UNARY
+
+    // Categorical arguments are containers as a whole, not elementwise
+    // broadcasts. Preserve scalar-vs-array outcome overloads and the
+    // caller's propto instantiation exactly as the graph kernel does.
+    if ((e.name == "categorical_lpmf" || e.name == "categorical_logit_lpmf") &&
+        e.args.size() == 2) {
+      Value outcome = eval(e.args[0]);
+      Value value = eval(e.args[1]);
+      std::vector<int> outcomes = outcome.i;
+      if (outcomes.empty() && !outcome.r.empty()) {
+        outcomes.reserve(outcome.r.size());
+        for (const T& x : outcome.r) {
+          const double v = val(x);
+          if (!std::isfinite(v) || std::trunc(v) != v ||
+              v < std::numeric_limits<int>::min() ||
+              v > std::numeric_limits<int>::max())
+            fail("malformed integer categorical outcome", e.raw);
+          outcomes.push_back(static_cast<int>(v));
+        }
+      }
+      const bool scalar = e.args[0].unsized.depth == 0;
+      if (scalar && outcomes.size() != 1)
+        fail("categorical scalar outcome has wrong width", e.raw);
+      if (value.dims.size() != 1)
+        fail("categorical probability argument is not a vector", e.raw);
+      Eigen::Matrix<T, Eigen::Dynamic, 1> arg(value.r.size());
+      for (size_t k = 0; k < value.r.size(); ++k)
+        arg((Eigen::Index)k) = value.r[k];
+      const bool propto = e.fn_propto && propto_ctx_;
+      const auto density = [&](const auto& n) -> T {
+        if (e.name == "categorical_logit_lpmf")
+          return propto ? stan::math::categorical_logit_lpmf<true>(n, arg)
+                        : stan::math::categorical_logit_lpmf<false>(n, arg);
+        return propto ? stan::math::categorical_lpmf<true>(n, arg)
+                      : stan::math::categorical_lpmf<false>(n, arg);
+      };
+      r.r = {scalar ? density(outcomes[0]) : density(outcomes)};
+      return r;
+    }
 
     // The continuous scalar ones come from the shared list, so this can
     // never be narrower than what the register-machine compiler accepts

@@ -3,6 +3,8 @@
 
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <vector>
+#include <climits>
+#include <cstdint>
 #include <string>
 
 namespace stan {
@@ -80,12 +82,14 @@ class structured_writer {
                      long long int value  // NOLINT(runtime/int)
   ) {}
 
+#if SIZE_MAX != UINT_MAX
   /**
    * Write a key-value pair where the value is an `unsigned int`.
    * @param key Name of the value pair
    * @param value `unsigned int` to write.
    */
   virtual void write(const std::string& key, unsigned int value) {}
+#endif
 
   /**
    * Write a key-value pair where the value is a double.

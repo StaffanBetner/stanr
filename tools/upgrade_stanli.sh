@@ -3,7 +3,7 @@
 # convention for bundled libraries
 set -e
 
-STANLI_REF="2f56496"
+STANLI_REF="b12266a"
 STANLI_TARBALL="stanli-$STANLI_REF.tar.gz"
 STANLI_URL="https://github.com/seantalts/stanli/archive/$STANLI_REF.tar.gz"
 
@@ -112,59 +112,6 @@ for code, fn, nargs, tier in entries:
         template.format(code=code, fn=fn, nargs=nargs, tier=tier))
 EOF
 
-# stanli::DataMap::set_int_array() only ever built a 1-D entry
-python3 - "$SRC/runtime/include/stanli/data.hpp" << 'EOF'
-import sys
-
-path = sys.argv[1]
-text = open(path).read()
-
-old_sig = "  void set_int_array(const std::string& name, std::vector<int> v) {\n"
-new_sig = (
-    "  void set_int_array(const std::string& name, std::vector<int> v,\n"
-    "                     std::vector<int64_t> dims = {}) {\n"
-)
-assert old_sig in text, "set_int_array signature not found -- data.hpp changed upstream"
-text = text.replace(old_sig, new_sig, 1)
-
-old_dims = "    e.dims = {static_cast<int64_t>(v.size())};\n"
-new_dims = (
-    "    e.dims = dims.empty() ? std::vector<int64_t>{static_cast<int64_t>(v.size())}\n"
-    "                          : std::move(dims);\n"
-)
-assert old_dims in text, "set_int_array dims assignment not found -- data.hpp changed upstream"
-text = text.replace(old_dims, new_dims, 1)
-
-old_from_json = (
-    "  // Each factory lives in its own translation unit -- data.cpp for the JSON\n"
-    "  // pair, data_var_context.cpp for this one -- so a build can drop either.\n"
-    "  static DataMap from_json_file(const std::string& path);\n"
-    "  static DataMap from_json(const std::string& text);\n"
-    "  static DataMap from_var_context(const stan::io::var_context& context);\n"
-)
-new_from_json = (
-    "  // data.cpp (the JSON factory pair) is dropped during vendoring -- it\n"
-    "  // pulls in nlohmann_json, which isn't vendored -- leaving this as the\n"
-    "  // only factory built.\n"
-    "  static DataMap from_var_context(const stan::io::var_context& context);\n"
-)
-assert old_from_json in text, "from_json/from_var_context declarations not found -- data.hpp changed upstream"
-text = text.replace(old_from_json, new_from_json, 1)
-
-open(path, "w").write(text)
-EOF
-
-# R CMD check flags raw stdio in compiled code (calls that write to
-# stdout/stderr instead of R's console, or that use unbounded formatting).
-# None of what follows is reachable through stanr: the STANLI_DEBUG_*
-# traces are gated behind env vars stanr never sets, and profile_report()
-# is never called -- so these are patched out/around rather than left to
-# trip the check.
-
-# print()/reject() with no sink installed fell back to raw stdout. stanr
-# does not install a sink (chains run across TBB worker threads, where
-# calling back into R's console API would not be safe), so drop the
-# message instead of writing around R's console.
 python3 - "$SRC/runtime/src/message_sink.cpp" << 'EOF'
 import sys
 
@@ -321,12 +268,6 @@ text = text.replace(old_include, "", 1)
 open(path, "w").write(text)
 EOF
 
-# R CMD check flags assert() in compiled code (it lowers to abort() via
-# ___assert_rtn), and PKG_CPPFLAGS doesn't define NDEBUG for this build, so
-# these stay live in the shipped binary. Each one guards an invariant the
-# carver/type-checker already guarantees by construction (registered
-# opcodes, scalar-length operands), so drop them rather than ship a check
-# that can't actually fail.
 python3 - "$SRC/runtime/kernels/elementwise.cpp" << 'EOF'
 import sys
 
@@ -402,65 +343,6 @@ new = (
 )
 assert old in text, "run_adjoint() switch head not found -- adjoint.cpp changed upstream"
 text = text.replace(old, new, 1)
-
-open(path, "w").write(text)
-EOF
-
-# profile_report() is never called by stanr; rewrite it over
-# <sstream>/<iomanip> instead of snprintf so nothing calls it either way.
-python3 - "$SRC/runtime/src/executor.cpp" << 'EOF'
-import sys
-
-path = sys.argv[1]
-text = open(path).read()
-
-old_include = "#include <cstdio>\n"
-new_include = "#include <iomanip>\n#include <sstream>\n"
-assert old_include in text, "cstdio include not found -- executor.cpp changed upstream"
-text = text.replace(old_include, new_include, 1)
-
-old_report = """  char line[160];
-  std::string out;
-  std::snprintf(line, sizeof line, "%-22s %10s %12s %12s %6s %12s\\n", "opcode",
-                "calls", "fwd ns", "bwd ns", "%", "elems");
-  out += line;
-  for (uint16_t op : order) {
-    const ProfEntry& e = prof_[op];
-    std::snprintf(line, sizeof line,
-                  "%-22s %10lld %12lld %12lld %5.1f%% %12lld\\n",
-                  opcode_name(op), (long long)e.calls, (long long)e.fwd_ns,
-                  (long long)e.bwd_ns,
-                  100.0 * (double)(e.fwd_ns + e.bwd_ns) / (double)grand,
-                  (long long)e.elems);
-    out += line;
-  }
-  std::snprintf(line, sizeof line, "%-22s %10s %12lld ns total\\n", "", "",
-                (long long)grand);
-  out += line;
-  return out;
-}
-"""
-new_report = """  std::ostringstream out;
-  out << std::left << std::setw(22) << "opcode" << ' ' << std::right
-      << std::setw(10) << "calls" << ' ' << std::setw(12) << "fwd ns" << ' '
-      << std::setw(12) << "bwd ns" << ' ' << std::setw(6) << "%" << ' '
-      << std::setw(12) << "elems" << '\\n';
-  for (uint16_t op : order) {
-    const ProfEntry& e = prof_[op];
-    const double pct = 100.0 * (double)(e.fwd_ns + e.bwd_ns) / (double)grand;
-    out << std::left << std::setw(22) << opcode_name(op) << ' ' << std::right
-        << std::setw(10) << (long long)e.calls << ' ' << std::setw(12)
-        << (long long)e.fwd_ns << ' ' << std::setw(12) << (long long)e.bwd_ns
-        << ' ' << std::setw(5) << std::fixed << std::setprecision(1) << pct
-        << '%' << ' ' << std::setw(12) << (long long)e.elems << '\\n';
-  }
-  out << std::left << std::setw(22) << "" << ' ' << std::right << std::setw(10)
-      << "" << ' ' << std::setw(12) << (long long)grand << " ns total\\n";
-  return out.str();
-}
-"""
-assert old_report in text, "profile_report body not found -- executor.cpp changed upstream"
-text = text.replace(old_report, new_report, 1)
 
 open(path, "w").write(text)
 EOF

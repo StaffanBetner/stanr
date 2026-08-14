@@ -41,12 +41,10 @@ class DataMap {
     e.r = {v};
     m_[name] = std::move(e);
   }
-  void set_int_array(const std::string& name, std::vector<int> v,
-                     std::vector<int64_t> dims = {}) {
+  void set_int_array(const std::string& name, std::vector<int> v) {
     Entry e;
     e.is_int = true;
-    e.dims = dims.empty() ? std::vector<int64_t>{static_cast<int64_t>(v.size())}
-                          : std::move(dims);
+    e.dims = {static_cast<int64_t>(v.size())};
     e.r.assign(v.begin(), v.end());  // ints are also usable as reals
     e.i = std::move(v);
     m_[name] = std::move(e);
@@ -68,9 +66,10 @@ class DataMap {
     return it->second;
   }
 
-  // data.cpp (the JSON factory pair) is dropped during vendoring -- it
-  // pulls in nlohmann_json, which isn't vendored -- leaving this as the
-  // only factory built.
+  // Each factory lives in its own translation unit -- data.cpp for the JSON
+  // pair, data_var_context.cpp for this one -- so a build can drop either.
+  static DataMap from_json_file(const std::string& path);
+  static DataMap from_json(const std::string& text);
   static DataMap from_var_context(const stan::io::var_context& context);
 
  private:

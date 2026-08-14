@@ -70,11 +70,11 @@ test_that("sampling a stanli-backend model produces a usable fit", {
 # ---------------------------------------------------------------------------
 # Data marshaling: every shape the stanli backend accepts.
 #
-# SEXP -> stanli::DataMap goes entirely through DataMap's typed setters, no
-# JSON involved (see sexp_to_data_map(), src/stanli_model.cpp) -- including
-# multi-dimensional integer arrays (im/iar3 below), via the dims-aware
-# set_int_array() overload stanr patches into the vendored data.hpp (see
-# tools/upgrade_stanli.sh).
+# SEXP -> stanli::DataMap goes through an r_data_context (a stan::io::
+# var_context) and DataMap::from_var_context(), no JSON involved (see
+# sexp_to_data_map(), src/stanli_model.cpp) -- including multi-dimensional
+# integer arrays (im/iar3 below), whose dims come from r_data_context's own
+# dims_i().
 #
 # Values are read back through indexed transformed-data expressions rather
 # than by echoing whole arrays through generated quantities: stanli's own
@@ -180,7 +180,7 @@ test_that("a bare logical scalar round-trips through set_int()", {
   expect_equal(fit$summary()$mean[fit$summary()$variable == "flag_out"], 0)
 })
 
-test_that("a logical matrix round-trips through set_int_array() as 0/1", {
+test_that("a logical matrix round-trips through from_var_context() as 0/1", {
   code <- "
     data { array[2, 2] int lm; }
     transformed data { int chk = lm[2, 1]; }

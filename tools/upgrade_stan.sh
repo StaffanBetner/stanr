@@ -221,6 +221,67 @@ patch_sprintf "../src/cvodes/cvodes_io.c" "name" 24 43
 patch_sprintf "../src/cvodes/cvodes_diag.c" "name" 30 10
 patch_sprintf "../src/cvodes/cvodes_ls.c" "name" 30 13
 
+# --- 6d. Fix the size_t/unsigned int write() overload collision on ILP32 ---
+patch_size_t_overload() {
+  # $1 = file, $2 = true if the overload has a real (non-empty) body
+  python3 - "$1" "$2" << 'EOF'
+import sys
+
+path, has_body = sys.argv[1], sys.argv[2] == "1"
+text = open(path).read()
+
+old_includes = "#include <string>\n"
+new_includes = "#include <climits>\n#include <cstdint>\n#include <string>\n"
+assert old_includes in text, f"'#include <string>' not found -- {path} changed upstream"
+text = text.replace(old_includes, new_includes, 1)
+
+if has_body:
+    old = """  /**
+   * Write a key-value pair where the value is an `unsigned int`.
+   * @param key Name of the value pair
+   * @param value `unsigned int` to write.
+   */
+  void write(const std::string& key, unsigned int value) {
+    write_int_like(key, value);
+  }
+"""
+    new = """#if SIZE_MAX != UINT_MAX
+  /**
+   * Write a key-value pair where the value is an `unsigned int`.
+   * @param key Name of the value pair
+   * @param value `unsigned int` to write.
+   */
+  void write(const std::string& key, unsigned int value) {
+    write_int_like(key, value);
+  }
+#endif
+"""
+else:
+    old = """  /**
+   * Write a key-value pair where the value is an `unsigned int`.
+   * @param key Name of the value pair
+   * @param value `unsigned int` to write.
+   */
+  virtual void write(const std::string& key, unsigned int value) {}
+"""
+    new = """#if SIZE_MAX != UINT_MAX
+  /**
+   * Write a key-value pair where the value is an `unsigned int`.
+   * @param key Name of the value pair
+   * @param value `unsigned int` to write.
+   */
+  virtual void write(const std::string& key, unsigned int value) {}
+#endif
+"""
+assert old in text, f"unsigned int write() overload not found -- {path} changed upstream"
+text = text.replace(old, new, 1)
+
+open(path, "w").write(text)
+EOF
+}
+patch_size_t_overload "$INC/stan/callbacks/structured_writer.hpp" 0
+patch_size_t_overload "$INC/stan/callbacks/json_writer.hpp" 1
+
 # --- 7. TBB ------------------------------------------------------------
 # TBB is not vendored from the CmdStan/math bundle -- see tools/upgrade_tbb.sh,
 # which vendors a standalone oneTBB release (headers into inst/include,
