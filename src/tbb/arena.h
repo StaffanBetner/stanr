@@ -398,7 +398,7 @@ public:
     std::pair</*min workers = */ int, /*max workers = */ int> update_request(int mandatory_delta, int workers_delta);
 
     /** Must be the last data field */
-    arena_slot my_slots[1];
+    arena_slot my_slots[];
 }; // class arena
 
 template <arena::new_work_type work_type>

@@ -79,7 +79,7 @@ struct BackRefMain {
     std::atomic <intptr_t> lastUsed; // index of the last used block
     bool           rawMemUsed;
     MallocMutex    requestNewSpaceMutex;
-    BackRefBlock  *backRefBl[1];   // the real size of the array is dataSz
+    BackRefBlock  *backRefBl[];    // the real size of the array is dataSz
 
     BackRefBlock *findFreeBlock();
     void          addToForUseList(BackRefBlock *bl);
@@ -88,7 +88,7 @@ struct BackRefMain {
 };
 
 const int BackRefMain::dataSz
-    = 1+(BackRefMain::bytes-sizeof(BackRefMain))/sizeof(BackRefBlock*);
+    = (BackRefMain::bytes-sizeof(BackRefMain))/sizeof(BackRefBlock*);
 
 static MallocMutex mainMutex;
 static std::atomic<BackRefMain*> backRefMain;

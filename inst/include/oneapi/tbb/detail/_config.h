@@ -335,15 +335,6 @@
 
 #define __TBB_TSX_INTRINSICS_PRESENT (__RTM__ || __INTEL_COMPILER || (_MSC_VER>=1700 && (__TBB_x86_64 || __TBB_x86_32)))
 
-// Unlike __TBB_TSX_INTRINSICS_PRESENT above (gated on __RTM__, which the
-// compiler only predefines given -mrtm), this only checks compiler
-// *version* -- not whether the translation unit is actually being compiled
-// with -mwaitpkg. _tpause() is an always_inline intrinsic requiring the
-// waitpkg target feature, so GCC/Clang error inlining it into
-// prolonged_pause() (compiled at the default target, same portability
-// reasoning as never passing -mrtm above). prolonged_pause_impl() is the
-// always-available fallback, so force this off rather than carry per-file
-// target-attribute plumbing for an optional pause-loop optimization.
 #define __TBB_WAITPKG_INTRINSICS_PRESENT (0 && ((__INTEL_COMPILER >= 1900 || (__TBB_GCC_VERSION >= 110000 && __TBB_GNU_ASM_VERSION >= 2032) || __TBB_CLANG_VERSION >= 120000) \
                                          && (_WIN32 || _WIN64 || __unix__ || __APPLE__) && (__TBB_x86_32 || __TBB_x86_64) && !__ANDROID__))
 

@@ -281,7 +281,7 @@ arena::arena(threading_control* control, unsigned num_slots, unsigned num_reserv
 arena& arena::allocate_arena(threading_control* control, unsigned num_slots, unsigned num_reserved_slots,
                               unsigned priority_level)
 {
-    __TBB_ASSERT( sizeof(base_type) + sizeof(arena_slot) == sizeof(arena), "All arena data fields must go to arena_base" );
+    __TBB_ASSERT( sizeof(base_type) == sizeof(arena), "All arena data fields must go to arena_base" );
     __TBB_ASSERT( sizeof(base_type) % cache_line_size() == 0, "arena slots area misaligned: wrong padding" );
     __TBB_ASSERT( sizeof(mail_outbox) == max_nfs_size, "Mailbox padding is wrong" );
     std::size_t n = allocation_size(num_arena_slots(num_slots, num_reserved_slots));

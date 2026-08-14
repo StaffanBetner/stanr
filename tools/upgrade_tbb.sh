@@ -42,31 +42,33 @@ rm -f "$SRC/tbb/CMakeLists.txt" "$SRC/tbbmalloc/CMakeLists.txt"
 # trips R CMD check's non-portable-flags NOTE), so these are never compiled.
 rm -f "$SRC/tbb/rtm_mutex.cpp" "$SRC/tbb/rtm_rw_mutex.cpp"
 
-# WAITPKG (_tpause/_umwait) pause-loop fast path: __TBB_WAITPKG_INTRINSICS_PRESENT
-# is gated only on compiler version, unlike __TBB_TSX_INTRINSICS_PRESENT above
-# (gated on __RTM__, which is only predefined given -mrtm) -- so on a
-# sufficiently new GCC/Clang it's "on" even though we never pass -mwaitpkg,
-# and _tpause() (an always_inline intrinsic requiring that target feature)
-# fails to inline into prolonged_pause() with a hard compile error. Force it
-# off; prolonged_pause_impl() is the always-available fallback.
-# Adds one open paren after the macro name and one matching close paren at
-# the expression's end (`&& !__ANDROID__)` -> `&& !__ANDROID__))`) to wrap
-# the whole thing in `(0 && (...))`.
 sed -i.bak \
   -e 's/#define __TBB_WAITPKG_INTRINSICS_PRESENT (/#define __TBB_WAITPKG_INTRINSICS_PRESENT (0 \&\& (/' \
-  -e 's/\&\& !__ANDROID__)/\&\& !__ANDROID__))/' \
+  -e '/__TBB_x86_32 || __TBB_x86_64/ s/\&\& !__ANDROID__)/\&\& !__ANDROID__))/' \
   "$INST_INCLUDE/oneapi/tbb/detail/_config.h"
 rm -f "$INST_INCLUDE/oneapi/tbb/detail/_config.h.bak"
 
 rm -f "$SRC/tbb/itt_notify.cpp"
 rm -rf "$SRC/tbb/tools_api"
 
-# Upstream's include assumes its own nested src/tbbmalloc + src/tbb layout
-# (".." lands on "src", then descends back into "tbb"); we vendor tbb/ and
-# tbbmalloc/ as flat siblings under src/, so fix it to match every other
-# cross-reference in this file (e.g. "../tbb/itt_notify.h").
+
 sed -i.bak 's#\.\./src/tbb/environment\.h#../tbb/environment.h#' "$SRC/tbbmalloc/large_objects.cpp"
 rm -f "$SRC/tbbmalloc/large_objects.cpp.bak"
+
+
+sed -i.bak \
+  -e 's/\*backRefBl\[1\];   /*backRefBl[];    /' \
+  -e 's/= 1+(BackRefMain::bytes-sizeof(BackRefMain))/= (BackRefMain::bytes-sizeof(BackRefMain))/' \
+  "$SRC/tbbmalloc/backref.cpp"
+rm -f "$SRC/tbbmalloc/backref.cpp.bak"
+
+# arena::allocation_size() already sizes from sizeof(base_type) rather than
+# sizeof(arena), so my_slots needs no arithmetic fix -- only the assertion that
+# spelled out the old layout (compiled out anyway under -DNDEBUG).
+sed -i.bak 's/arena_slot my_slots\[1\];/arena_slot my_slots[];/' "$SRC/tbb/arena.h"
+rm -f "$SRC/tbb/arena.h.bak"
+sed -i.bak 's/sizeof(base_type) + sizeof(arena_slot) == sizeof(arena)/sizeof(base_type) == sizeof(arena)/' "$SRC/tbb/arena.cpp"
+rm -f "$SRC/tbb/arena.cpp.bak"
 
 # R CMD check flags non-portable diagnostic-suppression pragmas.
 files_list=(
