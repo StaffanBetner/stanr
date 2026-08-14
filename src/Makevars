@@ -45,7 +45,7 @@ ifneq ($(findstring clang,$(R_CC))$(findstring emcc,$(R_CC)),)
 STANLI_PCH = include/stanli_pch.hpp.pch
 STANLI_CXXFLAGS = $(PKG_CPPFLAGS_BASE) -include-pch include/stanli_pch.hpp.pch
 $(STANLI_PCH): include/stanli_pch.hpp
-	env (CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS_BASE) -fPIC -fpch-instantiate-templates -x c++-header $< -o $@
+	env $(CXX) $(CXX20FLAGS) $(PKG_CPPFLAGS_BASE) -fPIC -fpch-instantiate-templates -x c++-header $< -o $@
 else
 STANLI_PCH = include/stanli_pch.hpp.gch
 STANLI_CXXFLAGS = $(PKG_CPPFLAGS_BASE) -include include/stanli_pch.hpp
