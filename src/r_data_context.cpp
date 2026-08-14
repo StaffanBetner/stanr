@@ -1,4 +1,5 @@
 #include <stanr/r_data_context.hpp>
+#include <stanr/r_vector_copy.hpp>
 #include <stanr/tuple_declarations.hpp>
 
 #include <numeric>
@@ -21,7 +22,10 @@ bool has_nonempty_names(SEXP x) {
 // otherwise its length if > 1, otherwise empty (a bare scalar).
 std::vector<int> payload_shape(SEXP x) {
   SEXP dim = Rf_getAttrib(x, R_DimSymbol);
-  if (Rf_length(dim) > 0) return cpp11::as_cpp<std::vector<int>>(dim);
+  if (Rf_length(dim) > 0) {
+    cpp11::integers dimensions(dim);
+    return internal::copy_integer_values(dimensions);
+  }
   if (Rf_xlength(x) > 1) return {static_cast<int>(Rf_xlength(x))};
   return {};
 }
@@ -238,8 +242,7 @@ void r_data_context::add_value(const std::string& name, SEXP value) {
                     value_entry{{}, {}, std::move(ints), std::move(dims)});
   } else if (Rf_isNumeric(value)) {
     cpp11::doubles input(value);
-    store_numeric(name, std::vector<double>(input.begin(), input.end()),
-                  std::move(dims));
+    store_numeric(name, internal::copy_real_values(input), std::move(dims));
   } else if (Rf_isComplex(value)) {
     const R_xlen_t n = Rf_xlength(value);
     std::vector<std::complex<double>> complexes;
@@ -465,7 +468,7 @@ void r_data_context::flatten_leaf(const std::string& name,
         cpp11::stop("`%s` must contain numeric values.", name.c_str());
       }
       cpp11::doubles coerced(cpp11::safe[Rf_coerceVector](payload, REALSXP));
-      values.insert(values.end(), coerced.begin(), coerced.end());
+      internal::append_real_values(coerced, values);
     }
     store_numeric(name, std::move(values), std::move(dims));
   }

@@ -28,9 +28,11 @@ functions {
   expect_equal(env$vec_add(c(1, 2), c(3, 4)), c(4, 6))
 })
 
-test_that("tuple/complex functions compile and round-trip through cpp11 marshalling", {
+test_that("numeric-array/tuple/complex functions round-trip through cpp11 marshalling", {
   code <- "
 functions {
+  array[] real real_array_id(array[] real x) { return x; }
+  array[] int int_array_id(array[] int x) { return x; }
   tuple(real, vector) split_stat(vector x) { return (mean(x), head(x, 2)); }
   complex_vector rotate(complex_vector z, complex phase) { return z * phase; }
   complex_matrix cmat_id(complex_matrix m) { return m; }
@@ -53,6 +55,13 @@ functions {
 }
 "
   env <- stanr:::.compile_standalone_functions_environment(code)
+
+  # Long compact sequences exercise the region-copy input path without
+  # materializing cpp11's large buffered iterators.
+  real_sequence <- as.double(seq_len(5000))
+  integer_sequence <- seq_len(5000)
+  expect_equal(env$real_array_id(real_sequence), real_sequence)
+  expect_equal(env$int_array_id(integer_sequence), integer_sequence)
 
   # tuple(real, vector) return: unnamed list, element 2 shaped as the
   # declared vector.

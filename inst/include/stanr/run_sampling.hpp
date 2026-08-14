@@ -3,6 +3,7 @@
 
 #include <cpp11.hpp>
 #include <stanr/cpp11_tuple_interop.hpp>
+#include <stanr/r_vector_copy.hpp>
 #include <memory>
 #include <stan/io/array_var_context.hpp>
 #include <stan/io/var_context.hpp>
@@ -67,7 +68,7 @@ namespace stanr {
       std::vector<size_t> dimensions;
       if (metric == "diag_e") {
         cpp11::doubles vector(metric_value);
-        values.assign(vector.begin(), vector.end());
+        values = internal::copy_real_values(vector);
         dimensions = {static_cast<size_t>(vector.size())};
       } else {
         cpp11::doubles_matrix<> matrix(metric_value);

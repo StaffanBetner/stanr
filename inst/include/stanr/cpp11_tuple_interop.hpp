@@ -3,6 +3,7 @@
 
 #include <cpp11.hpp>
 #include <stanr/cpp11_eigen_interop.hpp>
+#include <stanr/r_vector_copy.hpp>
 #include <complex>
 #include <cstddef>
 #include <string>
@@ -50,8 +51,13 @@ T as_cpp(SEXP from) {
     }(std::make_index_sequence<std::tuple_size_v<T>>{});
   } else if constexpr (is_std_vector<T>::value) {
     using Elem = typename T::value_type;
-    if constexpr (std::is_same_v<Elem, int> || std::is_same_v<Elem, double>
-                  || std::is_same_v<Elem, std::string>) {
+    if constexpr (std::is_same_v<Elem, int>) {
+      cpp11::integers x(from);
+      return internal::copy_integer_values(x);
+    } else if constexpr (std::is_same_v<Elem, double>) {
+      cpp11::doubles x(from);
+      return internal::copy_real_values(x);
+    } else if constexpr (std::is_same_v<Elem, std::string>) {
       return cpp11::as_cpp<T>(from);
     } else if constexpr (std::is_same_v<Elem, std::complex<double>>) {
       R_xlen_t n = Rf_xlength(from);
