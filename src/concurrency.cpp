@@ -1,5 +1,5 @@
-#include <cpp11.h>
-#include <cpp11/declarations.h>
+#include <cpp11.hpp>
+#include <cpp11/declarations.hpp>
 #include <tbb/task_arena.h>
 
 extern "C" SEXP stanr_max_concurrency(void) {

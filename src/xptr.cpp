@@ -1,5 +1,5 @@
-#include <cpp11.h>
-#include <cpp11/declarations.h>
+#include <cpp11.hpp>
+#include <cpp11/declarations.hpp>
 
 extern "C" SEXP stanr_xptr_is_null(SEXP ptr) {
   BEGIN_CPP11
