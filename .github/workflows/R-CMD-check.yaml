@@ -71,7 +71,7 @@ jobs:
       - name: Build WASM package
         if: matrix.config.os == 'wasm'
         run: |
-          rwasm::build("local::.", out_dir = "wasm-repo")
+          rwasm::build("local::.", out_dir = ".")
         shell: Rscript {0}
 
       - uses: actions/setup-node@v4
@@ -88,4 +88,4 @@ jobs:
         if: matrix.config.os == 'wasm'
         run: |
           node tools/webr-test/run-stanli-tests.mjs \
-            wasm-repo/stanr_*.tgz . stanli-backend
+            ./stanr_*.tgz . stanli-backend
