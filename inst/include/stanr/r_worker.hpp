@@ -18,14 +18,29 @@
 
 namespace stanr {
 
-// Sampling/pathfinder block synchronously with no way to yield to R's event
-// loop, so their Stan service runs on a native coordinator std::thread while
-// the R main thread polls every 50ms to flush the logger and check Ctrl-C.
-// The worker lambda must: (1) never touch the R API; (2) construct a
-// ChainableStack + ad_tape_observer at its top; (3) on Ctrl-C the main
-// thread sets an atomic flag and joins before raising the interrupt; (4)
-// capture exceptions via std::exception_ptr and rethrow on the main thread.
-// fn is int fn(stanr::r_interrupt&); `what` names the operation.
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+template <class F>
+int run_on_worker_thread(stanr::r_logger& logger, const char* what,
+                          F&& fn) {
+  std::atomic<bool> cancel_requested{false};
+  stanr::r_interrupt interrupt(&cancel_requested, what);
+
+  stan::math::ChainableStack autodiff_stack;
+  stan::math::ad_tape_observer autodiff_observer;
+  int return_code = stan::services::error_codes::CONFIG;
+  try {
+    return_code = fn(interrupt);
+  } catch (const std::exception& e) {
+    logger.flush();
+    cpp11::stop("%s", e.what());
+  } catch (...) {
+    logger.flush();
+    cpp11::stop("Unknown exception in %s worker.", what);
+  }
+  logger.flush();
+  return return_code;
+}
+#else
 template <class F>
 int run_on_worker_thread(stanr::r_logger& logger, const char* what,
                           F&& fn) {
@@ -84,6 +99,7 @@ int run_on_worker_thread(stanr::r_logger& logger, const char* what,
 
   return return_code;
 }
+#endif  // __EMSCRIPTEN__ && !__EMSCRIPTEN_PTHREADS__
 
 }  // namespace stanr
 

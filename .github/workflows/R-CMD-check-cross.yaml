@@ -1,6 +1,6 @@
 on:
   push:
-    branches: cross
+    branches: main
   pull_request:
     branches: main
 

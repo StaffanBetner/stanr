@@ -17,8 +17,6 @@ R_CC := $(shell $(R_HOME)/bin$(R_ARCH_BIN)/R CMD config CC)
 
 ifneq ($(findstring emcc,$(R_CC)),)
   CXX20PICFLAGS = -fPIC
-  PKG_CPPFLAGS_BASE += -pthread
-  PKG_LIBS += -pthread
 endif
 
 include Makevars.tbb
