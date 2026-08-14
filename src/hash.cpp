@@ -1,4 +1,5 @@
-#include <cpp11.hpp>
+#include <cpp11.h>
+#include <cpp11/declarations.h>
 #include <cstdint>
 #include <cstdio>
 
@@ -25,6 +26,7 @@ std::uint64_t mix_length(std::uint64_t hash, std::size_t len) {
 }  // namespace
 
 extern "C" SEXP stanr_hash_strings(SEXP strings_sexp) {
+  BEGIN_CPP11
   cpp11::strings strings(strings_sexp);
   std::uint64_t hash = kOffsetBasis;
   for (const auto& element : strings) {
@@ -36,4 +38,5 @@ extern "C" SEXP stanr_hash_strings(SEXP strings_sexp) {
   char buf[17];
   std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(hash));
   return cpp11::as_sexp(std::string(buf));
+  END_CPP11
 }
