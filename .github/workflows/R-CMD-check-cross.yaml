@@ -1,6 +1,6 @@
 on:
   push:
-    branches: main
+    branches: cross
   pull_request:
     branches: main
 
@@ -45,7 +45,8 @@ jobs:
           run: |
             apt-get update
             apt-get install --no-install-recommends -y clang g++ \
-              r-base-core locales pandoc qpdf r-cran-rcmdcheck make
+              r-base-core locales pandoc qpdf r-cran-rcmdcheck make \
+              libcurl4-openssl-dev
             echo "en_AU.UTF-8 UTF-8" >> /etc/locale.gen
             locale-gen en_AU.UTF-8
             mkdir -p ~/.R
