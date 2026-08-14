@@ -67,9 +67,9 @@ $(TBB_LIB_DIR)/$(firstword $(TBB_LIB_NAMES)): $(TBB_OBJECTS) $(TBBMALLOC_OBJECTS
 ifeq ($(TBB_WASM),1)
 	$(AR) -rs $(TBB_LIB_DIR)/libtbb.a $(TBB_OBJECTS)
 else
-	$(CXX) -shared -o $(TBB_LIB_DIR)/$(word 1,$(TBB_LIB_NAMES)) $(TBB_OBJECTS) \
+	env $(CXX) -shared -o $(TBB_LIB_DIR)/$(word 1,$(TBB_LIB_NAMES)) $(TBB_OBJECTS) \
 	  $(TBB_SONAME_TBB) $(TBB_PLATFORM_LDFLAGS)
-	$(CXX) -shared -o $(TBB_LIB_DIR)/$(word 2,$(TBB_LIB_NAMES)) $(TBBMALLOC_OBJECTS) \
+	env $(CXX) -shared -o $(TBB_LIB_DIR)/$(word 2,$(TBB_LIB_NAMES)) $(TBBMALLOC_OBJECTS) \
 	  $(TBB_SONAME_TBBMALLOC) $(TBB_PLATFORM_LDFLAGS)
 ifeq ($(UNAME_S),Linux)
 	ln -sf libtbb.so.2 $(TBB_LIB_DIR)/libtbb.so
