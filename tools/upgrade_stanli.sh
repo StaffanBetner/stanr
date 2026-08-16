@@ -3,7 +3,7 @@
 # convention for bundled libraries
 set -e
 
-STANLI_REF="b12266a"
+STANLI_REF="1db1c8d"
 STANLI_TARBALL="stanli-$STANLI_REF.tar.gz"
 STANLI_URL="https://github.com/seantalts/stanli/archive/$STANLI_REF.tar.gz"
 
@@ -32,9 +32,13 @@ rm -f "$SRC/runtime/src/capi.cpp" \
       "$SRC/runtime/src/estimate.cpp" \
       "$SRC/runtime/src/diagnose.cpp" \
       "$SRC/runtime/src/walnuts.cpp" \
+      "$SRC/runtime/src/pathfinder.cpp" \
       "$SRC/runtime/src/data.cpp" \
       "$SRC/runtime/src/README.md" \
       "$SRC/runtime/src/OPTIMIZATIONS.md"
+# Private helper for nuts.cpp/estimate.cpp/pathfinder.cpp only -- dead once
+# all three algorithm frontends above are stripped.
+rm -f "$SRC/runtime/src/initialize.hpp"
 rm -f "$SRC/runtime/include/stanli/capi.h" \
       "$SRC/runtime/include/stanli/bridgestan_internal.hpp" \
       "$SRC/runtime/include/stanli/nuts.hpp" \
@@ -318,31 +322,6 @@ old_result = "  assert(r.len == 1);\n  return values_[r.offset];\n"
 new_result = "  return values_[r.offset];\n"
 assert old_result in text, "forward() result-length assert not found -- executor.cpp changed upstream"
 text = text.replace(old_result, new_result, 1)
-
-open(path, "w").write(text)
-EOF
-
-# run_adjoint()'s per-instruction switch has no default (deliberate: it's
-# meant to catch newly added opcodes going unhandled), but CALL is already
-# handled above via an `if`/`continue` before the switch, so the compiler
-# still flags it as an unhandled enumerator. Add it as an explicit
-# unreachable case, same as the existing JZ/JMP entries.
-python3 - "$SRC/runtime/src/adjoint.cpp" << 'EOF'
-import sys
-
-path = sys.argv[1]
-text = open(path).read()
-
-old = "    const double t = adj[I.dst];\n    switch (I.code) {\n      case Program::CONST:\n"
-new = (
-    "    const double t = adj[I.dst];\n"
-    "    switch (I.code) {\n"
-    "      case Program::CALL:\n"
-    "        break;  // handled above with `continue`; unreachable here\n"
-    "      case Program::CONST:\n"
-)
-assert old in text, "run_adjoint() switch head not found -- adjoint.cpp changed upstream"
-text = text.replace(old, new, 1)
 
 open(path, "w").write(text)
 EOF

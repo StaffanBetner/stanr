@@ -95,6 +95,23 @@ namespace stanli {
   X(OP_TANHV)                       \
   X(OP_CUMSUM)                      \
   X(OP_FMA)                         \
+  X(OP_ATAN2)                       \
+  X(OP_BETA_FN)                     \
+  X(OP_FDIM)                        \
+  X(OP_FMAX)                        \
+  X(OP_FMIN)                        \
+  X(OP_FMOD)                        \
+  X(OP_GAMMA_P)                     \
+  X(OP_GAMMA_Q)                     \
+  X(OP_HYPOT)                       \
+  X(OP_LBETA)                       \
+  X(OP_LCHOOSE)                     \
+  X(OP_LMULTIPLY)                   \
+  X(OP_LOG_FALLING_FACTORIAL)       \
+  X(OP_LOG_INV_LOGIT_DIFF)          \
+  X(OP_LOG_MODIFIED_BESSEL_1)       \
+  X(OP_LOG_RISING_FACTORIAL)        \
+  X(OP_OWENS_T)                     \
   X(OP_CONSTRAIN_LOWER)             \
   X(OP_CONSTRAIN_UPPER)             \
   X(OP_CONSTRAIN_LU)                \
@@ -368,8 +385,8 @@ namespace stanli {
 // Eigen::Map<const VectorXi> cannot give it.
 //
 // reroll.cpp must never fuse these: element n of a shared cutpoint
-// vector is not observation n's cutpoints. They are absent from both of
-// its opt-in lists, which is the whole guard.
+// vector is not observation n's cutpoints. They opt in to neither re-roll
+// density trait, which is the whole guard.
 #define STANLI_ORDERED_DENSITY_LIST(X) \
   X(OP_ORDERED_LOGISTIC_LPMF, ordered_logistic_lpmf, 2, 0x2)
 // A unary may either always chain, chain only away from zero (abs), or be
@@ -473,6 +490,35 @@ constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
   X(OP_TRUNC, trunc, std::trunc(x), 0.0, UnaryTopology::Disconnected)        \
   X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0, UnaryTopology::Disconnected)
 
+// Two-argument scalar math: opcode, language name, stan-math function.
+// Unlike the unary list, no hand-written derivative: the kernel evaluates
+// stan-math's own var overload on a nested tape, so the value and every
+// partial are the reference's by construction. That trade is deliberate --
+// these are long-tail functions (lchoose alone has a stability recursion
+// and five gradient edge cases), and a transcription error here is exactly
+// the class of bug the conformance sweep exists to catch. The language
+// name feeds the lowering table and the MIR interpreter; lchoose is
+// stanc3's name for stan-math's binomial_coefficient_log.
+#define STANLI_SCALAR_BINARY_LIST(X)                                        \
+  X(OP_ATAN2, atan2, atan2)                                                 \
+  X(OP_BETA_FN, beta, beta)                                                 \
+  X(OP_FDIM, fdim, fdim)                                                    \
+  X(OP_FMAX, fmax, fmax)                                                    \
+  X(OP_FMIN, fmin, fmin)                                                    \
+  X(OP_FMOD, fmod, fmod)                                                    \
+  X(OP_GAMMA_P, gamma_p, gamma_p)                                           \
+  X(OP_GAMMA_Q, gamma_q, gamma_q)                                           \
+  X(OP_HYPOT, hypot, hypot)                                                 \
+  X(OP_LBETA, lbeta, lbeta)                                                 \
+  X(OP_LCHOOSE, lchoose, binomial_coefficient_log)                          \
+  X(OP_LMULTIPLY, lmultiply, lmultiply)                                     \
+  X(OP_LOG_FALLING_FACTORIAL, log_falling_factorial, log_falling_factorial) \
+  X(OP_LOG_INV_LOGIT_DIFF, log_inv_logit_diff, log_inv_logit_diff)          \
+  X(OP_LOG_MODIFIED_BESSEL_1, log_modified_bessel_first_kind,               \
+    log_modified_bessel_first_kind)                                         \
+  X(OP_LOG_RISING_FACTORIAL, log_rising_factorial, log_rising_factorial)    \
+  X(OP_OWENS_T, owens_t, owens_t)
+
 // The tier a density is actually built at. STANLI_LITE_LP drops the
 // propto family from every one of them: about half the library, at the
 // cost of an lp__ that differs from CmdStan's by a per-model constant on
@@ -523,6 +569,89 @@ enum Opcode : uint16_t {
 #undef STANLI_UNARY_ENUM
       OP_COUNT_
 };
+
+// Opt-in facts shared by graph rewrites. An unknown/new opcode has none.
+namespace op_trait {
+constexpr uint8_t kRerollDensity = 1 << 0;
+constexpr uint8_t kRerollIdataDensity = 1 << 1;
+constexpr uint8_t kRerollAnyDensity = kRerollDensity | kRerollIdataDensity;
+constexpr uint8_t kRerollWidenable = 1 << 2;
+constexpr uint8_t kBackwardValueFree = 1 << 3;
+}  // namespace op_trait
+
+constexpr uint8_t op_traits(uint16_t opcode) {
+  switch (opcode) {
+    // Real-argument lpdfs whose vector kernel returns a summed lp with
+    // per-element partials. The long-tail density kernels deliberately do
+    // not opt in until their vectorized path is supported by re-roll.
+    case OP_NORMAL_LPDF:
+    case OP_CAUCHY_LPDF:
+    case OP_STUDENT_T_LPDF:
+    case OP_GAMMA_LPDF:
+    case OP_BETA_LPDF:
+    case OP_LOGNORMAL_LPDF:
+    case OP_UNIFORM_LPDF:
+    case OP_DOUBLE_EXP_LPDF:
+    case OP_EXPONENTIAL_LPDF:
+    case OP_INV_GAMMA_LPDF:
+    case OP_STD_NORMAL_LPDF:
+      return op_trait::kRerollDensity;
+
+    // Integer-outcome lpmfs whose scalar-lane idata can be concatenated.
+    // Ordered densities are intentionally absent: their cutpoint vector is
+    // shared by lanes and cannot be fused this way.
+    case OP_BERNOULLI_LPMF:
+    case OP_BERNOULLI_LOGIT_LPMF:
+    case OP_POISSON_LPMF:
+    case OP_POISSON_LOG_LPMF:
+    case OP_NEG_BINOMIAL_2_LPMF:
+#define STANLI_INT_DENSITY_TRAIT(code, fn, nreal, tier) case code:
+      STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TRAIT)
+#undef STANLI_INT_DENSITY_TRAIT
+      return op_trait::kRerollIdataDensity;
+
+    // Native mixture kernels both widen lane-wise and stash all partials
+    // needed by reverse mode, so their backward does not reread inputs.
+    case OP_LOG_MIX:
+    case OP_LSE2:
+      return op_trait::kRerollWidenable | op_trait::kBackwardValueFree;
+
+    // Shape-dispatched elementwise ops that can widen scalar lanes in place.
+    case OP_ADD:
+    case OP_SUB:
+    case OP_MUL:
+    case OP_DIV:
+    case OP_FMA:
+    case OP_NEG:
+    case OP_EXPV:
+    case OP_LOGV:
+    case OP_INV_LOGIT:
+    case OP_SQRT:
+    case OP_SQUARE:
+    case OP_LOG1M:
+    case OP_TANHV:
+    case OP_LOG_INV_LOGIT:
+    case OP_LOG1M_INV_LOGIT:
+      return op_trait::kRerollWidenable;
+
+    // Backward routes adjoints without rereading input values. This permits
+    // a later destructive update to reuse the input buffer safely.
+    case OP_INDEX:
+    case OP_SLICE:
+    case OP_SLICE_STRIDED:
+    case OP_GATHER:
+    case OP_SET_INDEX:
+    case OP_SET_INDEX_INPLACE:
+    case OP_LOG_SUM_EXP:
+      return op_trait::kBackwardValueFree;
+    default:
+      return 0;
+  }
+}
+
+constexpr bool has_op_trait(uint16_t opcode, uint8_t trait) {
+  return (op_traits(opcode) & trait) != 0;
+}
 
 // "OP_NORMAL_LPDF" for a known opcode, "OP_?" otherwise. Diagnostics and
 // tooling only; never on a hot path.
