@@ -4,8 +4,11 @@
 // Shape dispatch is runtime: len==1 broadcasts.
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/packet.hpp>
 
 #include <stan/math/prim.hpp>
+
+#include <cmath>
 
 namespace stanli {
 namespace {
@@ -220,11 +223,22 @@ void pow_fwd(KernelCtx& ctx) {
     ctx.out.data[i] =
         std::pow(ctx.in[0].data[s0 ? 0 : i], ctx.in[1].data[s1 ? 0 : i]);
 }
+// A zero base contributes nothing to either partial. Every one of
+// stan-math's four rev pow overloads says so -- the scalar and the
+// (scalar base, matrix exponent) ones return early on
+// `value_of(base) == 0.0`, the two matrix ones `select` on
+// `value_of(base) != 0.0` -- and both partials would otherwise be
+// nonfinite there: b*v/a is 0/0 when a is 0, and log(a) is -inf meeting
+// v = 0. The skip is elementwise because the base is, and it is a skip
+// rather than a multiply by a zero mask for the reason sqrtv_bwd's is:
+// multiplying an inf by zero is the NaN being avoided. A NaN base still
+// propagates, since `NaN == 0.0` is false.
 void pow_bwd(KernelCtx& ctx) {
   const bool s0 = scal(ctx, 0), s1 = scal(ctx, 1);
   if (ctx.out.len == 1) {
     const double a = ctx.in[0].data[0], b = ctx.in[1].data[0];
     const double v = ctx.out.data[0];
+    if (a == 0.0) return;
     if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += ctx.out_adj * b * v / a;
     if (ctx.in_adj[1].data)
       ctx.in_adj[1].data[0] += ctx.out_adj * std::log(a) * v;
@@ -235,6 +249,7 @@ void pow_bwd(KernelCtx& ctx) {
     const double b = ctx.in[1].data[s1 ? 0 : i];
     const double v = ctx.out.data[i];
     const double dout = ctx.out_adj_vec.data[i];
+    if (a == 0.0) continue;
     if (ctx.in_adj[0].data) ctx.in_adj[0].data[s0 ? 0 : i] += dout * b * v / a;
     if (ctx.in_adj[1].data)
       ctx.in_adj[1].data[s1 ? 0 : i] += dout * std::log(a) * v;
@@ -326,13 +341,33 @@ void logv_bwd(KernelCtx& ctx) {
   else
     dx_a(ctx, 0) += dout_a(ctx) / in_a(ctx, 0);
 }
-// Matrix<var> inv_logit resolves to a vectorized overload (packet values);
-// scalar var inv_logit uses libm. Match the vectorized path for len > 1.
+// The one unary here whose two stan-math overloads compute DIFFERENT
+// expressions, so its two shapes cannot share a formula -- exactly the split
+// clu_fwd makes, and for the same reason (see constrain.cpp's header):
+//   scalar var  -> stan's `inv_logit(double)`, which branches on sign;
+//   Matrix<var> -> `x.val().array().logistic()`, Eigen's logistic functor,
+//                  `e/(1+e)` with an inf guard, no sign branch.
+// They disagree by a ulp on about a third of positive arguments.
+//
+// The len > 1 branch used to hand `logistic()` a CONTIGUOUS temporary, on the
+// belief that the Matrix<var> overload vectorized. It does not -- `.val()` is
+// strided, so Eigen runs the functor's SCALAR body with libm exp. Contiguous
+// doubles select Eigen's `pexp` instead, a ulp off libm on ~7% of arguments,
+// and that was the entire divergence: forward only, with the backward's exact
+// multiplies inheriting it. So the default spells the scalar functor out and
+// the vectorized form stays behind packet_math(), whose reference is varmat.
 void invlogit_fwd(KernelCtx& ctx) {
-  if (ctx.out.len == 1) {
+  const int64_t n = ctx.out.len;
+  if (n == 1) {
     ctx.out.data[0] = stan::math::inv_logit(ctx.in[0].data[0]);
-  } else {
+  } else if (packet_math()) {
     out_a(ctx) = stan::math::inv_logit(in_a(ctx, 0).matrix().eval().array());
+  } else {
+    const double* x = ctx.in[0].data;
+    for (int64_t i = 0; i < n; ++i) {
+      const double e = std::exp(x[i]);
+      ctx.out.data[i] = std::isinf(e) ? 1.0 : e / (1.0 + e);
+    }
   }
 }
 void invlogit_bwd(KernelCtx& ctx) {
@@ -348,10 +383,20 @@ void sqrtv_fwd(KernelCtx& ctx) { out_a(ctx) = in_a(ctx, 0).sqrt(); }
 void sqrtv_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   CMapA out_v(ctx.out.data, ctx.out.len);
-  if (ctx.out.len == 1)
-    ctx.in_adj[0].data[0] += ctx.out_adj / (2.0 * ctx.out.data[0]);
-  else
-    dx_a(ctx, 0) += dout_a(ctx) / (2.0 * out_v);
+  // sqrt(0) contributes nothing rather than 1/(2*0) = inf. That is what
+  // stan-math's rev overload does (rev/fun/sqrt.hpp guards on
+  // `vi.val() != 0.0`), and matching it is what keeps a model whose input
+  // underflows to exact zero differentiable: the inf would meet the zero
+  // value on the way back through the op that produced it and become NaN.
+  // accel_gp is the corpus case -- spd_cov_exp_quad's exp() underflows for
+  // the largest Laplacian eigenvalue. select, not a mask multiply, because
+  // multiplying an inf by zero is the NaN we are avoiding.
+  if (ctx.out.len == 1) {
+    if (ctx.out.data[0] != 0.0)
+      ctx.in_adj[0].data[0] += ctx.out_adj / (2.0 * ctx.out.data[0]);
+  } else {
+    dx_a(ctx, 0) += (out_v != 0.0).select(dout_a(ctx) / (2.0 * out_v), 0.0);
+  }
 }
 void squarev_fwd(KernelCtx& ctx) { out_a(ctx) = in_a(ctx, 0).square(); }
 void squarev_bwd(KernelCtx& ctx) {

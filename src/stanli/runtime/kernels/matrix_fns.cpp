@@ -12,6 +12,7 @@
 
 #include <stan/math.hpp>
 
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -303,6 +304,109 @@ void gemm_bwd(KernelCtx& ctx) {
     MapM(ctx.in_adj[0].data, ra, ca) += dO * B.transpose();
   if (ctx.in_adj[1].data)
     MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * dO;
+}
+
+// ---- matrix solves: `A \ B` and `B / A` -----------------------------------
+// Argument order is the operator's, so in = {A, B} for the left solve and
+// {B, A} for the right one; idata = {n, k} with n the divisor's order and k
+// the dividend's other extent. Output has the dividend's shape.
+//
+// Both operand types are part of the answer here, not just of the speed,
+// because stan-math solves through whatever it is handed:
+//
+//   * scalar type. mdivide_left at double is prim, a FullPivLU solve; at var
+//     it is the hand-written rev overload, whose value is a HouseholderQR
+//     solve instead. mdivide_right has no rev overload at all, so the prim
+//     template runs at whatever scalar type reaches it. Variant bit 0 says
+//     CmdStan would have typed this expression `var`.
+//   * Eigen shape. A vector dividend passed as a one-column matrix takes
+//     Eigen's matrix code paths, which reassociate: 1 ULP on the value and
+//     on the adjoint, measured on `A \ v`. Variant bit 1 says the dividend
+//     is a vector (a column under `\`, a row under `/`) rather than a
+//     matrix that happens to be narrow.
+//
+// The MIR interpreter makes both distinctions too -- the scalar one falls
+// out of overload resolution on its own T -- which is what keeps the two
+// halves of the runtime answering the same thing.
+template <bool Left, typename A, typename B>
+auto solve_at(const A& a, const B& b) {
+  if constexpr (Left) {
+    return stan::math::mdivide_left(a, b);
+  } else {
+    return stan::math::mdivide_right(b, a);
+  }
+}
+
+// The Eigen type of a dividend: a matrix, or the vector its side implies.
+template <bool Left, bool Vec, typename T>
+using Dividend = std::conditional_t<
+    !Vec, Eigen::Matrix<T, -1, -1>,
+    std::conditional_t<Left, Eigen::Matrix<T, -1, 1>, Eigen::Matrix<T, 1, -1>>>;
+
+// Promote both operands on a nested tape, write the value out, and -- when
+// the caller wants gradients -- seed the output adjoints and scatter back.
+// The var replay is the whole point: it is the call CmdStan makes.
+template <bool Left, bool Vec, bool Grad>
+void solve_var(KernelCtx& ctx) {
+  using stan::math::var;
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
+  const int64_t br = Left ? n : k, bc = Left ? k : n;
+  stan::math::nested_rev_autodiff nested;
+  VarM a = tail_m(ctx, ai, n, n);
+  Dividend<Left, Vec, var> b(br, bc);
+  for (int64_t i = 0; i < br * bc; ++i) b.data()[i] = ctx.in[bi].data[i];
+  auto out = solve_at<Left>(a, b);
+  for (Eigen::Index i = 0; i < out.size(); ++i)
+    ctx.out.data[i] = out.data()[i].val();
+  if constexpr (Grad) {
+    // Seeding through stan-math ops rather than by copying keeps the tape
+    // connection, the same reason nary_bwd above does it this way.
+    MatD seed(out.rows(), out.cols());
+    for (Eigen::Index i = 0; i < out.size(); ++i)
+      seed.data()[i] = ctx.out_adj_vec.data[i];
+    var j = stan::math::sum(stan::math::elt_multiply(out, seed));
+    stan::math::grad(j.vi_);
+    if (ctx.in_adj[ai].data)
+      for (int64_t i = 0; i < n * n; ++i)
+        ctx.in_adj[ai].data[i] += a.data()[i].adj();
+    if (ctx.in_adj[bi].data)
+      for (int64_t i = 0; i < br * bc; ++i)
+        ctx.in_adj[bi].data[i] += b.data()[i].adj();
+  }
+}
+
+template <bool Left, bool Vec>
+void solve_double(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
+  const int64_t br = Left ? n : k, bc = Left ? k : n;
+  MatD a = CMapM(ctx.in[ai].data, n, n);
+  Dividend<Left, Vec, double> b(br, bc);
+  for (int64_t i = 0; i < br * bc; ++i) b.data()[i] = ctx.in[bi].data[i];
+  auto out = solve_at<Left>(a, b);
+  for (Eigen::Index i = 0; i < out.size(); ++i) ctx.out.data[i] = out.data()[i];
+}
+
+template <bool Left>
+void solve_fwd(KernelCtx& ctx) {
+  const bool vec = (ctx.variant & 2u) != 0;
+  if (ctx.variant & 1u) {
+    vec ? solve_var<Left, true, false>(ctx)
+        : solve_var<Left, false, false>(ctx);
+  } else {
+    vec ? solve_double<Left, true>(ctx) : solve_double<Left, false>(ctx);
+  }
+}
+
+template <bool Left>
+void solve_bwd(KernelCtx& ctx) {
+  // Reached only from a gradient, which is a var context by definition.
+  if (ctx.variant & 2u) {
+    solve_var<Left, true, true>(ctx);
+  } else {
+    solve_var<Left, false, true>(ctx);
+  }
 }
 
 // ---- lkj_corr_cholesky_lpdf(L | eta) --------------------------------------
@@ -759,6 +863,79 @@ void olglm_fwd(KernelCtx& ctx) {
 }
 void olglm_bwd(KernelCtx& ctx) { tglm_eval<true, kOrdLogisticGlm>(ctx); }
 
+// ---- the cdfs the recorder cannot take ---------------------------------
+// Same reason ordered_probit and wiener are here, one step further out:
+// von_mises_cdf writes `res *= 0.0` and compares `x_n == -pi` on the
+// scalar type, and neg_binomial_2_lcdf forms `phi / (phi + mu)`. Neither
+// builds its result through stan-math's partials propagator, so neither
+// can be handed an rvar. See STANLI_TAIL_CDF_LIST in optable.hpp.
+//
+// A length-1 slot enters stan-math as a scalar rather than a
+// one-element vector: the sequence views broadcast a scalar but require
+// vectors to match sizes. That is the same rule bind_args_m follows in
+// densities_impl.hpp, and getting it wrong is not a size error -- it is
+// every observation evaluated with element 0's parameters, which is what
+// the sweep caught in the old scalar-only wiener tail.
+using TailArg = std::variant<stan::math::var, VarV>;
+TailArg tail_arg(const KernelCtx& ctx, int k) {
+  if (ctx.in[k].len == 1) return stan::math::var(ctx.in[k].data[0]);
+  return tail_v(ctx, k, ctx.in[k].len);
+}
+
+// finish_tail_density's shape, over arguments that are variants: one
+// visit picks the scalar-or-vector instantiation, a second scatters each
+// argument's adjoints back through the overload its own alternative
+// selects.
+template <bool Grad, typename F, typename... A>
+double tail_visit(KernelCtx& ctx, F&& f, const A&... a) {
+  stan::math::var out = std::visit(
+      [&](const auto&... x) -> stan::math::var { return f(x...); }, a...);
+  const double value = out.val();
+  if constexpr (Grad) {
+    stan::math::var seeded = out * ctx.out_adj;
+    stan::math::grad(seeded.vi_);
+    int slot = 0;
+    ((std::visit([&](const auto& x) { tail_scatter(ctx, slot, x); }, a),
+      ++slot),
+     ...);
+  }
+  return value;
+}
+
+#define STANLI_TAIL_CDF_KERNEL(code, fn, nreal, tier)                        \
+  template <bool Grad>                                                       \
+  double fn##_eval(KernelCtx& ctx) {                                         \
+    stan::math::nested_rev_autodiff nested;                                  \
+    const TailArg a0 = tail_arg(ctx, 0), a1 = tail_arg(ctx, 1),              \
+                  a2 = tail_arg(ctx, 2);                                     \
+    return tail_visit<Grad>(                                                 \
+        ctx, [](const auto&... x) { return stan::math::fn(x...); }, a0, a1,  \
+        a2);                                                                 \
+  }                                                                          \
+  void fn##_fwd(KernelCtx& ctx) { ctx.out.data[0] = fn##_eval<false>(ctx); } \
+  void fn##_bwd(KernelCtx& ctx) { fn##_eval<true>(ctx); }
+STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_KERNEL)
+#undef STANLI_TAIL_CDF_KERNEL
+
+// The integer outcome rides in idata as one whole group, the way the
+// other integer-outcome cdfs read theirs; the lowering has already
+// replicated a language-level scalar to the lane count.
+#define STANLI_TAIL_INT_CDF_KERNEL(code, fn, nreal, tier)                    \
+  template <bool Grad>                                                       \
+  double fn##_eval(KernelCtx& ctx) {                                         \
+    stan::math::nested_rev_autodiff nested;                                  \
+    Eigen::Map<const Eigen::VectorXi> y(                                     \
+        ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));                  \
+    const TailArg a0 = tail_arg(ctx, 0), a1 = tail_arg(ctx, 1);              \
+    return tail_visit<Grad>(                                                 \
+        ctx, [&](const auto&... x) { return stan::math::fn(y, x...); }, a0,  \
+        a1);                                                                 \
+  }                                                                          \
+  void fn##_fwd(KernelCtx& ctx) { ctx.out.data[0] = fn##_eval<false>(ctx); } \
+  void fn##_bwd(KernelCtx& ctx) { fn##_eval<true>(ctx); }
+STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_KERNEL)
+#undef STANLI_TAIL_INT_CDF_KERNEL
+
 }  // namespace
 
 void register_matrix_kernels() {
@@ -781,6 +958,11 @@ void register_matrix_kernels() {
   register_kernel(OP_ORDERED_PROBIT_LPMF,
                   Kernel{oprobit_fwd, oprobit_bwd, nullptr});
   register_kernel(OP_WIENER_LPDF, Kernel{wiener_fwd, wiener_bwd, nullptr});
+#define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
+  register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
+  STANLI_TAIL_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
+  STANLI_TAIL_INT_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
+#undef STANLI_REGISTER_TAIL_CDF
   register_kernel(OP_LKJ_COV_LPDF, Kernel{lkjcov_fwd, lkjcov_bwd, nullptr});
   register_kernel(OP_BINOMIAL_LOGIT_GLM_LPMF,
                   Kernel{blglm_fwd, blglm_bwd, nullptr});
@@ -795,6 +977,10 @@ void register_matrix_kernels() {
   register_kernel(OP_MULTI_NORMAL_PREC_LPDF,
                   Kernel{mnprec_fwd, mnprec_bwd, nullptr});
   register_kernel(OP_GEMM, Kernel{gemm_fwd, gemm_bwd, nullptr});
+  register_kernel(OP_MDIVIDE_LEFT,
+                  Kernel{solve_fwd<true>, solve_bwd<true>, nullptr});
+  register_kernel(OP_MDIVIDE_RIGHT,
+                  Kernel{solve_fwd<false>, solve_bwd<false>, nullptr});
   register_kernel(OP_EIGENVALUES_SYM,
                   Kernel{eigvals_fwd, eigvals_bwd, nullptr});
   register_kernel(OP_EIGENVECTORS_SYM,

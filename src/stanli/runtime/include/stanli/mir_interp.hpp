@@ -463,7 +463,60 @@ class MirInterp {
                        (raw.empty() ? "" : " | in: " + raw));
   }
 
+  // The .at() reads in eval_indexed would throw a bare
+  // std::out_of_range("vector"); check first so an out-of-range index
+  // names the index and the extent instead.
+  void bounds(long i, int64_t n, const mir::Expr& e) const {
+    if (i < 1 || i > n)
+      fail("index " + std::to_string(i) + " out of bounds for size " +
+               std::to_string(n),
+           e.raw);
+  }
+
   static double val(const T& x) { return stan::math::value_of(x); }
+
+  // Arity of a bound transform called as a function, or 0 for any other
+  // name. The three directions of one transform share an arity, so the name
+  // alone decides how many arguments to expect.
+  static size_t bound_transform_arity(const std::string& name) {
+    static const std::pair<const char*, size_t> kStems[] = {
+        {"lower_bound_", 2},
+        {"upper_bound_", 2},
+        {"lower_upper_bound_", 3},
+        {"offset_multiplier_", 3}};
+    for (const auto& stem : kStems) {
+      const std::string prefix(stem.first);
+      if (name.compare(0, prefix.size(), prefix) != 0) continue;
+      const std::string tail = name.substr(prefix.size());
+      if (tail == "constrain" || tail == "jacobian" || tail == "unconstrain")
+        return stem.second;
+    }
+    return 0;
+  }
+
+  // One element of a bound transform, through stan-math's own scalar
+  // overloads: the free direction is stan-math's inverse rather than a
+  // hand-written one, so the two directions cannot drift apart here. `b2` is
+  // unread by the two-argument transforms.
+  static T bound_transform(const std::string& name, const T& x, const T& b1,
+                           const T& b2) {
+    if (name == "lower_bound_unconstrain") return stan::math::lb_free(x, b1);
+    if (name == "upper_bound_unconstrain") return stan::math::ub_free(x, b1);
+    if (name == "lower_upper_bound_unconstrain")
+      return stan::math::lub_free(x, b1, b2);
+    if (name == "offset_multiplier_unconstrain")
+      return stan::math::offset_multiplier_free(x, b1, b2);
+    // The constrain and jacobian directions differ only in a target
+    // increment, and this path has no target.
+    if (name == "lower_bound_constrain" || name == "lower_bound_jacobian")
+      return stan::math::lb_constrain(x, b1);
+    if (name == "upper_bound_constrain" || name == "upper_bound_jacobian")
+      return stan::math::ub_constrain(x, b1);
+    if (name == "lower_upper_bound_constrain" ||
+        name == "lower_upper_bound_jacobian")
+      return stan::math::lub_constrain(x, b1, b2);
+    return stan::math::offset_multiplier_constrain(x, b1, b2);
+  }
 
   static bool check_scalar_type(const mir::Expr& e) {
     return e.unsized.depth == 0 && (e.unsized.leaf == mir::UnsizedLeaf::Int ||
@@ -671,6 +724,7 @@ class MirInterp {
     if (e.args.size() == 2 && e.args[1].name == "IndexSingle" &&
         base.dims.size() <= 1) {
       const long ix = as_int(e.args[1].args[0]);
+      bounds(ix, (int64_t)base.r.size(), e);
       r.is_int = base.is_int;
       if (base.is_int) r.i = {base.i.at(ix - 1)};
       r.r = {base.r.at(ix - 1)};
@@ -684,6 +738,7 @@ class MirInterp {
           e.args[2].name == "IndexAll"))) {
       const long i = as_int(e.args[1].args[0]);
       const int64_t R = base.dims[0], C = base.dims[1];
+      bounds(i, R, e);
       r.is_int = base.is_int;
       r.dims = {C};
       for (int64_t j = 0; j < C; ++j) {
@@ -701,7 +756,9 @@ class MirInterp {
       if (all_single) {
         int64_t flatpos = 0, stride = 1;
         for (size_t d = 0; d < base.dims.size(); ++d) {
-          flatpos += (as_int(e.args[1 + d].args[0]) - 1) * stride;
+          const long ixd = as_int(e.args[1 + d].args[0]);
+          bounds(ixd, base.dims[d], e);
+          flatpos += (ixd - 1) * stride;
           stride *= base.dims[d];
         }
         r.is_int = base.is_int;
@@ -715,6 +772,7 @@ class MirInterp {
         e.args[2].name == "IndexSingle" && base.dims.size() == 2) {
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
+      bounds(j, base.dims[1], e);
       r.is_int = base.is_int;
       r.dims = {R};
       r.r.assign(base.r.begin() + (j - 1) * R, base.r.begin() + j * R);
@@ -729,6 +787,7 @@ class MirInterp {
         base.dims.size() > 2) {
       const long i = as_int(e.args[1].args[0]);
       const int64_t d0 = base.dims[0];
+      bounds(i, d0, e);
       int64_t rest = 1;
       for (size_t d = 1; d < base.dims.size(); ++d) rest *= base.dims[d];
       r.is_int = base.is_int;
@@ -748,6 +807,7 @@ class MirInterp {
       r.dims = {(int64_t)n};
       for (size_t k = 0; k < n; ++k) {
         const long p = k < ix.i.size() ? ix.i[k] : (long)val(ix.r.at(k));
+        bounds(p, (int64_t)base.r.size(), e);
         r.r.push_back(base.r.at((size_t)(p - 1)));
         if (base.is_int) r.i.push_back(base.i.at((size_t)(p - 1)));
       }
@@ -758,8 +818,12 @@ class MirInterp {
         base.dims.size() <= 1) {
       const long a = as_int(e.args[1].args[0]);
       const long b = as_int(e.args[1].args[1]);
+      if (b >= a) {
+        bounds(a, (int64_t)base.r.size(), e);
+        bounds(b, (int64_t)base.r.size(), e);
+      }
       r.is_int = base.is_int;
-      r.dims = {b - a + 1};
+      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long k = a; k <= b; ++k) {
         r.r.push_back(base.r.at(k - 1));
         if (base.is_int) r.i.push_back(base.i.at(k - 1));
@@ -773,8 +837,13 @@ class MirInterp {
       const long a = as_int(e.args[2].args[0]);
       const long b = as_int(e.args[2].args[1]);
       const int64_t R = base.dims[0];
+      bounds(i, R, e);
+      if (b >= a) {
+        bounds(a, base.dims[1], e);
+        bounds(b, base.dims[1], e);
+      }
       r.is_int = base.is_int;
-      r.dims = {b - a + 1};
+      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long j = a; j <= b; ++j) {
         r.r.push_back(base.r.at((j - 1) * R + (i - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (i - 1)));
@@ -788,8 +857,13 @@ class MirInterp {
       const long b = as_int(e.args[1].args[1]);
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
+      bounds(j, base.dims[1], e);
+      if (b >= a) {
+        bounds(a, R, e);
+        bounds(b, R, e);
+      }
       r.is_int = base.is_int;
-      r.dims = {b - a + 1};
+      r.dims = {b >= a ? b - a + 1 : 0};  // b < a is an empty range
       for (long k = a; k <= b; ++k) {
         r.r.push_back(base.r.at((j - 1) * R + (k - 1)));
         if (base.is_int) r.i.push_back(base.i.at((j - 1) * R + (k - 1)));
@@ -845,6 +919,40 @@ class MirInterp {
       }
       return o;
     };
+    // Two-argument scalar math with one int argument (bessel_first_kind
+    // and friends): bin's broadcast and shape rules, but the int side
+    // reaches stan-math as an int, which is what those overloads take.
+    // `int_first` says which position holds it. No layout correction like
+    // the graph kernel's -- every container here is column-major, arrays
+    // included, so a matrix and an int array of the same dims already pair
+    // element for element, which is the pairing stan-math makes.
+    auto bin_int = [&](bool int_first, auto f) {
+      Value a = eval(e.args[0]), b = eval(e.args[1]);
+      if (!shapes_match(a, b)) fail(e.name + ": incompatible shapes", e.raw);
+      const Value& re = int_first ? b : a;
+      const Value& iv = int_first ? a : b;
+      Value o;
+      const size_t n = broadcast_size(a, b);
+      o.r.resize(n);
+      o.dims = broadcast_dims(a, b);
+      const bool rs = re.r.size() == 1, is = iv.r.size() == 1;
+      for (size_t i = 0; i < n; ++i) {
+        const size_t k = is ? 0 : i;
+        const int q = iv.is_int && k < iv.i.size()
+                          ? iv.i[k]
+                          : (int)std::llround(val(iv.r[k]));
+        o.r[i] = f(re.r[rs ? 0 : i], q);
+      }
+      // Only falling_factorial and rising_factorial have an int,int
+      // overload that answers int; everywhere else two int arguments still
+      // make a real, so stanc's own result type decides rather than the
+      // arguments.
+      if (e.type_ == "UInt" && n == 1) {
+        o.is_int = true;
+        o.i = {(int)val(o.r[0])};
+      }
+      return o;
+    };
     auto un = [&](auto f) {
       Value a = eval(e.args[0]);
       Value o;
@@ -860,11 +968,17 @@ class MirInterp {
         return T(f(val(x), val(y)) ? 1.0 : 0.0);
       });
     };
-    if (e.name == "Plus__")
+    // add/subtract/multiply/elt_multiply/divide/elt_divide are the named
+    // spellings of the binary operators, and they are taught here beside
+    // the operators rather than in a table of their own: the graph
+    // lowering knows them too, and teaching only one side is what let a
+    // vectorized log_sum_exp answer transformed data with the wrong value
+    // and no exception.
+    if (e.name == "Plus__" || e.name == "add")
       return bin([](const T& x, const T& y) { return x + y; });
-    if (e.name == "Minus__")
+    if (e.name == "Minus__" || e.name == "subtract")
       return bin([](const T& x, const T& y) { return x - y; });
-    if (e.name == "Times__") {
+    if (e.name == "Times__" || e.name == "multiply") {
       // Times on shaped operands is linear algebra, not elementwise; only
       // a scalar operand (either side) scales elementwise.
       Value a = eval(e.args[0]), b = eval(e.args[1]);
@@ -874,7 +988,7 @@ class MirInterp {
         const int64_t Ca = a_mat ? a.dims[1] : (int64_t)a.r.size();
         const int64_t Rb = b_mat ? b.dims[0] : (int64_t)b.r.size();
         const int64_t Cb = b_mat ? b.dims[1] : 1;
-        if (Ca != Rb) fail("Times__: inner dimension mismatch", e.raw);
+        if (Ca != Rb) fail(e.name + ": inner dimension mismatch", e.raw);
         // Col-major storage on both sides.
         r.r.assign((size_t)(Ra * Cb), T(0.0));
         for (int64_t j = 0; j < Cb; ++j)
@@ -903,7 +1017,7 @@ class MirInterp {
         }
         if (e.type_ == "UReal" || e.type_ == "UInt") {
           if (a.r.size() != b.r.size())
-            fail("Times__: dot product length mismatch", e.raw);
+            fail(e.name + ": dot product length mismatch", e.raw);
           T s = T(0.0);
           for (size_t i = 0; i < a.r.size(); ++i) s += a.r[i] * b.r[i];
           r.r = {s};
@@ -913,7 +1027,7 @@ class MirInterp {
       // Scalar scale, elementwise on the already-evaluated operands (an
       // argument may hold an RNG call; evaluating twice would draw twice).
       if (a.r.size() != b.r.size() && !is_scalar(a) && !is_scalar(b))
-        fail("Times__: incompatible lengths", e.raw);
+        fail(e.name + ": incompatible lengths", e.raw);
       const size_t n = broadcast_size(a, b);
       r.r.resize(n);
       for (size_t i = 0; i < n; ++i)
@@ -925,10 +1039,113 @@ class MirInterp {
       }
       return r;
     }
-    if (e.name == "EltTimes__")
+    if (e.name == "EltTimes__" || e.name == "elt_multiply")
       return bin([](const T& x, const T& y) { return x * y; });
-    if (e.name == "Divide__" || e.name == "EltDivide__")
+    // `A \ v` and `rv / A` are linear solves. stanc spells them with the
+    // ordinary division operators, so the divisor's type is what tells a
+    // solve from elementwise division by a scalar; `./` is never a solve.
+    if (e.name == "LDivide__" ||
+        (e.name == "Divide__" && e.args.at(1).type_ == "UMatrix")) {
+      const bool left = e.name == "LDivide__";
+      Value a = eval(e.args[0]), b = eval(e.args[1]);
+      const Value& divisor = left ? a : b;
+      const Value& dividend = left ? b : a;
+      if (divisor.dims.size() != 2)
+        fail(e.name + ": divisor is not a matrix", e.raw);
+      using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+      // A non-matrix operand is the vector its side implies -- a column
+      // under `\`, a row under `/` -- the same rule Times__ follows.
+      const auto shaped = [](const Value& v, bool column) {
+        const Eigen::Index rows = v.dims.size() == 2
+                                      ? (Eigen::Index)v.dims[0]
+                                      : (column ? (Eigen::Index)v.r.size() : 1);
+        const Eigen::Index cols = v.dims.size() == 2
+                                      ? (Eigen::Index)v.dims[1]
+                                      : (column ? 1 : (Eigen::Index)v.r.size());
+        Mat m(rows, cols);
+        for (Eigen::Index j = 0; j < cols; ++j)
+          for (Eigen::Index i = 0; i < rows; ++i)
+            m(i, j) = v.r.at((size_t)(j * rows + i));
+        return m;
+      };
+      const Mat d = shaped(divisor, true);
+      // stan-math solves through whatever Eigen type it is handed, and a
+      // vector passed as a one-column matrix takes the matrix code paths,
+      // which reassociate -- 1 ULP against CmdStan, measured on `A \ v`. So
+      // a vector goes in as a vector, which is also what the graph kernels
+      // do (runtime/kernels/matrix_fns.cpp).
+      //
+      // stan-math checks squareness and the shared extent, and throws the
+      // std::invalid_argument CmdStan would.
+      Mat out;
+      if (dividend.dims.size() == 2) {
+        out = left ? stan::math::mdivide_left(d, shaped(dividend, left))
+                   : stan::math::mdivide_right(shaped(dividend, left), d);
+      } else if (left) {
+        Eigen::Matrix<T, Eigen::Dynamic, 1> x(dividend.r.size());
+        for (size_t i = 0; i < dividend.r.size(); ++i)
+          x((Eigen::Index)i) = dividend.r[i];
+        out = stan::math::mdivide_left(d, x);
+      } else {
+        Eigen::Matrix<T, 1, Eigen::Dynamic> x(dividend.r.size());
+        for (size_t i = 0; i < dividend.r.size(); ++i)
+          x((Eigen::Index)i) = dividend.r[i];
+        out = stan::math::mdivide_right(x, d);
+      }
+      r.r.resize((size_t)(out.rows() * out.cols()));
+      for (Eigen::Index j = 0; j < out.cols(); ++j)
+        for (Eigen::Index i = 0; i < out.rows(); ++i)
+          r.r[(size_t)(j * out.rows() + i)] = out(i, j);
+      if (e.type_ == "UMatrix")
+        r.dims = {(int64_t)out.rows(), (int64_t)out.cols()};
+      else
+        r.dims = {(int64_t)r.r.size()};
+      return r;
+    }
+    // `divide` reaches here and never the solve above: stan::math::divide
+    // divides by a scalar or divides a scalar elementwise, and has no
+    // matrix-divisor overload at all.
+    //
+    // Its int,int overload is the exception to that elementwise reading:
+    // it truncates and refuses a zero denominator, where the real
+    // division below would answer 3.5 for `divide(7, 2)`. The value the
+    // caller sees is `r`, not `i` -- lower.cpp's fold_const takes r[0]
+    // for a UInt result -- so the truncation has to land in both.
+    if ((e.name == "divide" || e.name == "elt_divide") && e.type_ == "UInt") {
+      const int x = (int)as_int(e.args[0]), y = (int)as_int(e.args[1]);
+      // divide is the one with the zero check; elt_divide is a bare `/`,
+      // so a zero denominator there is undefined behavior and refused.
+      if (e.name == "elt_divide" && y == 0)
+        fail("integer division by zero", e.raw);
+      const int q = e.name == "divide" ? stan::math::divide(x, y) : x / y;
+      r.is_int = true;
+      r.i = {q};
+      r.r = {T((double)q)};
+      return r;
+    }
+    if (e.name == "Divide__" || e.name == "EltDivide__" || e.name == "divide" ||
+        e.name == "elt_divide")
       return bin([](const T& x, const T& y) { return x / y; });
+    // `%` and `%/%`. Both operands are int by stanc's typing, so these are
+    // C++ integer operators -- truncated toward zero -- and not fmod and
+    // real division rounded afterwards, which disagree on negatives.
+    // stan::math::modulus is what CmdStan calls, down to the exception it
+    // throws on a zero divisor; `%/%` becomes a bare C++ `/`, where a zero
+    // divisor is undefined behavior, so this refuses it instead.
+    if (e.name == "Modulo__" || e.name == "IntDivide__") {
+      const long x = as_int(e.args[0]), y = as_int(e.args[1]);
+      long q;
+      if (e.name == "Modulo__") {
+        q = stan::math::modulus((int)x, (int)y);
+      } else {
+        if (y == 0) fail("integer division by zero", e.raw);
+        q = x / y;
+      }
+      r.is_int = true;
+      r.i = {(int)q};
+      r.r = {T((double)q)};
+      return r;
+    }
     if (e.name == "Pow__" || e.name == "pow")
       return bin([](const T& x, const T& y) { return stan::math::pow(x, y); });
     if (e.name == "fmax")
@@ -979,6 +1196,40 @@ class MirInterp {
     if (e.name == "owens_t")
       return bin(
           [](const T& x, const T& y) { return stan::math::owens_t(x, y); });
+    if (e.name == "bessel_first_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::bessel_first_kind(k, x);
+      });
+    if (e.name == "bessel_second_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::bessel_second_kind(k, x);
+      });
+    if (e.name == "modified_bessel_first_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::modified_bessel_first_kind(k, x);
+      });
+    if (e.name == "modified_bessel_second_kind")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::modified_bessel_second_kind(k, x);
+      });
+    if (e.name == "binary_log_loss")
+      return bin_int(true, [](const T& x, int k) {
+        return stan::math::binary_log_loss(k, x);
+      });
+    if (e.name == "lmgamma")
+      return bin_int(
+          true, [](const T& x, int k) { return stan::math::lmgamma(k, x); });
+    if (e.name == "falling_factorial")
+      return bin_int(false, [](const T& x, int k) {
+        return stan::math::falling_factorial(x, k);
+      });
+    if (e.name == "rising_factorial")
+      return bin_int(false, [](const T& x, int k) {
+        return stan::math::rising_factorial(x, k);
+      });
+    if (e.name == "ldexp")
+      return bin_int(false,
+                     [](const T& x, int k) { return stan::math::ldexp(x, k); });
     // --O1 partial evaluation rewrites `x * log(y)` to lmultiply(x, y);
     // multiply_log computes exactly x * log(y), so the value is bitwise
     // what the unoptimized form produced.
@@ -1008,8 +1259,37 @@ class MirInterp {
                                  c.r[c.r.size() == 1 ? 0 : i]);
       return o;
     }
-    if (e.name == "PMinus__") return un([](const T& x) { return -x; });
-    if (e.name == "PPlus__") return un([](const T& x) { return x; });
+    // Stan's bound transforms, callable as functions rather than written on
+    // a declaration: elementwise over every container shape, with each bound
+    // either one value for the whole container or one value per element.
+    // The interpreter serves transformed data and the interpreted
+    // write_array, both of which the generated model instantiates with
+    // `jacobian__ = false`, so the `_jacobian` direction is the constrained
+    // value and nothing else -- there is no target here to increment.
+    const size_t bound_arity = bound_transform_arity(e.name);
+    if (bound_arity != 0 && bound_arity == e.args.size()) {
+      std::vector<Value> a;
+      a.reserve(e.args.size());
+      for (const mir::Expr& arg : e.args) a.push_back(eval(arg));
+      const auto at = [&](size_t k, size_t i) {
+        return a[k].r[a[k].r.size() == 1 ? 0 : i];
+      };
+      Value o;
+      o.dims = a[0].dims;
+      o.r.resize(a[0].r.size());
+      for (size_t i = 0; i < o.r.size(); ++i)
+        o.r[i] = bound_transform(e.name, at(0, i), at(1, i),
+                                 a.size() > 2 ? at(2, i) : T(0));
+      return o;
+    }
+    // minus and plus are the named spellings of the unary operators, so
+    // they are the same identity and the same negation over the same
+    // shapes. The graph lowering knows them too; teaching only one side is
+    // what let a vectorized log_sum_exp leave elements uninitialized here.
+    if (e.name == "PMinus__" || (e.name == "minus" && e.args.size() == 1))
+      return un([](const T& x) { return -x; });
+    if (e.name == "PPlus__" || (e.name == "plus" && e.args.size() == 1))
+      return un([](const T& x) { return x; });
     if (e.name == "exp")
       return un([](const T& x) { return stan::math::exp(x); });
     if (e.name == "log")
@@ -1159,6 +1439,24 @@ class MirInterp {
       }
       return r;
     }
+    // squared_distance is dot_self of the difference, which is how the
+    // graph lowers it too (lower.cpp); the two spellings agreeing keeps
+    // transformed data and the log density on the same summation order.
+    // A vector may be paired with a row_vector, and neither view carries
+    // anything but a length, so there is nothing to reorder. No
+    // broadcasting: the language has no scalar-against-container overload.
+    if (e.name == "squared_distance" && e.args.size() == 2) {
+      Value a = eval(e.args[0]), b = eval(e.args[1]);
+      if (a.r.size() != b.r.size())
+        fail("squared_distance: length mismatch", e.raw);
+      T s = T(0.0);
+      for (size_t i = 0; i < a.r.size(); ++i) {
+        const T d = a.r[i] - b.r[i];
+        s += d * d;
+      }
+      r.r = {s};
+      return r;
+    }
     if ((e.name == "dot_product" || e.name == "dot_self")) {
       Value a = eval(e.args[0]);
       Value b = e.name == "dot_self" ? a : eval(e.args[1]);
@@ -1203,12 +1501,18 @@ class MirInterp {
       r.r = {m};
       return r;
     }
+    // Two arguments is the elementwise form, which Stan vectorizes over
+    // every container shape with scalar broadcast, so it belongs with the
+    // binaries above; only one-argument log_sum_exp is a reduction, and
+    // log_diff_exp has no reduction form at all.
+    if (e.name == "log_sum_exp" && e.args.size() == 2)
+      return bin(
+          [](const T& x, const T& y) { return stan::math::log_sum_exp(x, y); });
+    if (e.name == "log_diff_exp" && e.args.size() == 2)
+      return bin([](const T& x, const T& y) {
+        return stan::math::log_diff_exp(x, y);
+      });
     if (e.name == "log_sum_exp") {
-      if (e.args.size() == 2) {
-        r.r = {stan::math::log_sum_exp(eval(e.args[0]).r.at(0),
-                                       eval(e.args[1]).r.at(0))};
-        return r;
-      }
       Value a = eval(e.args[0]);
       r.r = {lse(a.r)};
       return r;
@@ -1291,12 +1595,14 @@ class MirInterp {
       o.is_int = true;
       bool rows_mode = false;
       int64_t row_len = 0;
+      std::vector<int64_t> elem_dims;  // shape of one element, once known
       for (const auto& a : e.args) {
         Value v2 = eval(a);
         if (v2.r.size() > 1 || rows_mode) {
           // Row-vector elements: build a matrix, row-major.
           rows_mode = true;
           row_len = (int64_t)v2.r.size();
+          elem_dims = v2.dims;
           o.is_int = false;
           o.r.insert(o.r.end(), v2.r.begin(), v2.r.end());
           continue;
@@ -1309,17 +1615,37 @@ class MirInterp {
       }
       if (!o.is_int) o.i.clear();
       if (rows_mode) {
-        // Rows arrived row-by-row; store column-major.
+        // Rows arrived row-by-row; store column-major. Each element is
+        // already first-index-fastest in itself, so sending its cell j to
+        // j*R+i makes the whole result first-index-fastest over {R} ++ the
+        // element's extents, at any rank.
         const int64_t R = (int64_t)e.args.size(), C = row_len;
         std::vector<T> cm(R * C);
         for (int64_t i = 0; i < R; ++i)
           for (int64_t j = 0; j < C; ++j) cm[j * R + i] = o.r[i * C + j];
         o.r = std::move(cm);
       }
-      if (rows_mode)
-        o.dims = {(int64_t)e.args.size(), row_len};
-      else
+      if (rows_mode) {
+        // Keep the element's own extents instead of collapsing them into
+        // one. The placement above does not pin them down -- Fortran order
+        // over {2,4} is byte-for-byte Fortran order over {2,2,2} -- but
+        // graph_order permutes by exactly these extents on the way to a
+        // slot, and eval_indexed strides by them, so a collapsed shape
+        // silently transposes the trailing two axes of every array literal
+        // of rank 3 or deeper.
+        // The extents still have to multiply out to the storage, because
+        // graph_order walks them to place every cell; one axis is the
+        // honest answer for anything that cannot say more.
+        o.dims = {(int64_t)e.args.size()};
+        int64_t elem_n = 1;
+        for (int64_t d : elem_dims) elem_n *= d;
+        if (elem_dims.empty() || elem_n != row_len)
+          o.dims.push_back(row_len);
+        else
+          o.dims.insert(o.dims.end(), elem_dims.begin(), elem_dims.end());
+      } else {
         o.dims = {(int64_t)o.r.size()};
+      }
       return o;
     }
     if (e.name == "Transpose__") {
@@ -1354,11 +1680,27 @@ class MirInterp {
         e.name == "num_elements" || e.name == "FnLength") {
       Value a = eval(e.args[0]);
       long v = 0;
-      if (e.name == "rows")
-        v = a.dims.size() == 2 ? a.dims[0] : (long)a.r.size();
-      else if (e.name == "cols")
-        v = a.dims.size() == 2 ? a.dims[1] : 1;
-      else
+      if (e.name == "rows" || e.name == "cols") {
+        // A vector's orientation is type-level, not storage-level: both
+        // kinds are stored rank-1, so dims cannot say which way one points.
+        // The MIR type can, and it is where the graph keeps orientation too
+        // -- lower.cpp stamps ViewKind::RowVector from this same string and
+        // its logical_dims answers {1, len} off the view, never off dims.
+        // This restates that function, so the two paths cannot drift.
+        // Reading rows() off the storage rank alone made every row_vector an
+        // n-by-1 column, and through a transformed-data `int r = rows(rv)`
+        // that is a silently wrong log density.
+        const long n = (long)a.r.size();
+        std::pair<long, long> rc =
+            a.dims.size() == 2
+                ? std::pair<long, long>{(long)a.dims[0], (long)a.dims[1]}
+                : std::pair<long, long>{n, 1};
+        if (e.args[0].type_ == "URowVector")
+          rc = {1, n};
+        else if (e.args[0].type_ == "UVector")
+          rc = {n, 1};
+        v = e.name == "rows" ? rc.first : rc.second;
+      } else
         v = a.dims.empty() ? (long)std::max(a.r.size(), a.i.size())
                            : (long)a.dims[0];
       if (e.name == "num_elements" || e.name == "FnLength")
@@ -1436,6 +1778,17 @@ class MirInterp {
   }
     STANLI_SCALAR_UNARY_LIST(STANLI_INTERP_UNARY)
 #undef STANLI_INTERP_UNARY
+
+    // The two unaries the shared list cannot generate. std_normal_qf is
+    // stanc3's alias for inv_Phi (Lower_expr.ml maps it onto
+    // stan::math::inv_Phi), and trigamma's derivative is the derivative of
+    // AS121's recurrence rather than a formula, so both take Math's own
+    // overload: on doubles that is the prim call, on var it is the tape the
+    // graph kernel replays.
+    if (e.name == "std_normal_qf" && e.args.size() == 1)
+      return un([](const T& x) { return stan::math::inv_Phi(x); });
+    if (e.name == "trigamma" && e.args.size() == 1)
+      return un([](const T& x) { return stan::math::trigamma(x); });
 
     // Categorical arguments are containers as a whole, not elementwise
     // broadcasts. Preserve scalar-vs-array outcome overloads and the

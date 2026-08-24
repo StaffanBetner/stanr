@@ -46,6 +46,8 @@ namespace stanli {
   X(OP_MULTI_NORMAL_LPDF)           \
   X(OP_MULTI_NORMAL_PREC_LPDF)      \
   X(OP_GEMM)                        \
+  X(OP_MDIVIDE_LEFT)                \
+  X(OP_MDIVIDE_RIGHT)               \
   X(OP_LOG_SOFTMAX)                 \
   X(OP_CONSTRAIN_CHOL_CORR)         \
   X(OP_LKJ_CORR_CHOL_LPDF)          \
@@ -93,6 +95,7 @@ namespace stanli {
   X(OP_SQUARE)                      \
   X(OP_LOG1M)                       \
   X(OP_TANHV)                       \
+  X(OP_TRIGAMMA)                    \
   X(OP_CUMSUM)                      \
   X(OP_FMA)                         \
   X(OP_ATAN2)                       \
@@ -112,6 +115,15 @@ namespace stanli {
   X(OP_LOG_MODIFIED_BESSEL_1)       \
   X(OP_LOG_RISING_FACTORIAL)        \
   X(OP_OWENS_T)                     \
+  X(OP_BESSEL_1)                    \
+  X(OP_BESSEL_2)                    \
+  X(OP_MODIFIED_BESSEL_1)           \
+  X(OP_MODIFIED_BESSEL_2)           \
+  X(OP_BINARY_LOG_LOSS)             \
+  X(OP_LMGAMMA)                     \
+  X(OP_FALLING_FACTORIAL)           \
+  X(OP_RISING_FACTORIAL)            \
+  X(OP_LDEXP)                       \
   X(OP_CONSTRAIN_LOWER)             \
   X(OP_CONSTRAIN_UPPER)             \
   X(OP_CONSTRAIN_LU)                \
@@ -355,9 +367,9 @@ namespace stanli {
 // arguments behave as above. Field 3 is the count of REAL arguments, so
 // the lowering entry is one more than that with one int group.
 //
-// Not every discrete cdf fits: binomial and beta_binomial carry a second
-// int group (the trial count) and discrete_range is integers all the way
-// down, so those nine keep waiting for a layout rather than a list line.
+// Not every discrete cdf fits: discrete_range is integers all the way
+// down, so those three keep waiting for a layout rather than a list line.
+// The binomials carry a second int group and have their own list below.
 #define STANLI_INT_CDF_LIST(X)                                 \
   X(OP_BERNOULLI_CDF, bernoulli_cdf, 1, 0)                     \
   X(OP_BERNOULLI_LCCDF, bernoulli_lccdf, 1, 0)                 \
@@ -368,12 +380,56 @@ namespace stanli {
   X(OP_NEG_BINOMIAL_CDF, neg_binomial_cdf, 2, 0)               \
   X(OP_NEG_BINOMIAL_LCCDF, neg_binomial_lccdf, 2, 0)           \
   X(OP_NEG_BINOMIAL_LCDF, neg_binomial_lcdf, 2, 0)             \
+  X(OP_NEG_BINOMIAL_2_CDF, neg_binomial_2_cdf, 2, 0)           \
   X(OP_POISSON_CDF, poisson_cdf, 1, 0)                         \
   X(OP_POISSON_LCCDF, poisson_lccdf, 1, 0)                     \
   X(OP_POISSON_LCDF, poisson_lcdf, 1, 0)                       \
   X(OP_YULE_SIMON_CDF, yule_simon_cdf, 1, 0)                   \
   X(OP_YULE_SIMON_LCCDF, yule_simon_lccdf, 1, 0)               \
   X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1, 0)
+
+// The binomials: an outcome group AND a trials group, so idata is the
+// [len, vals...] pair their lpmfs already write rather than raw values,
+// and the kernel unpacks it with with_int_group. Field 3 is again the
+// count of REAL arguments, so the lowering entry is two more than that
+// with two int groups.
+//
+// Neither group is a lane broadcast the lowering can do on its own: a
+// scalar is spelled with a length of -1 and stan-math broadcasts it,
+// which is what keeps `binomial_lcdf(n | N, theta)` with a bare int `n`
+// from arriving as a size-1 container.
+#define STANLI_TWO_INT_CDF_LIST(X)                     \
+  X(OP_BETA_BINOMIAL_CDF, beta_binomial_cdf, 2, 0)     \
+  X(OP_BETA_BINOMIAL_LCCDF, beta_binomial_lccdf, 2, 0) \
+  X(OP_BETA_BINOMIAL_LCDF, beta_binomial_lcdf, 2, 0)   \
+  X(OP_BINOMIAL_CDF, binomial_cdf, 1, 0)               \
+  X(OP_BINOMIAL_LCCDF, binomial_lccdf, 1, 0)           \
+  X(OP_BINOMIAL_LCDF, binomial_lcdf, 1, 0)
+
+// The distribution functions that cannot go through the recorder at all,
+// whatever list they are put on. These build their result with arithmetic
+// on the autodiff scalar rather than through stan-math's partials
+// propagator -- von_mises_cdf writes `res *= 0.0` and compares
+// `x_n == -pi`, neg_binomial_2_lcdf forms `phi_vec[i] / (phi_vec[i] +
+// mu_vec[i])` -- and rvar deliberately has no operators (recorder.hpp),
+// so listing them above produces a compile error rather than a wrong
+// answer. The discriminator is mechanical: `grep -c
+// operands_and_partials` on the prim header is 2 for everything on the
+// lists above and 0 for these five.
+//
+// They get the nested var tape ordered_probit and wiener get, in
+// matrix_fns.cpp, which has no restriction on what a density does with
+// its scalar type and costs a tape per gradient call. Field 3 is the
+// count of REAL arguments; the int list carries one integer group on top
+// of that, exactly as STANLI_INT_CDF_LIST does.
+#define STANLI_TAIL_CDF_LIST(X)                \
+  X(OP_VON_MISES_CDF, von_mises_cdf, 3, 0)     \
+  X(OP_VON_MISES_LCCDF, von_mises_lccdf, 3, 0) \
+  X(OP_VON_MISES_LCDF, von_mises_lcdf, 3, 0)
+
+#define STANLI_TAIL_INT_CDF_LIST(X)                      \
+  X(OP_NEG_BINOMIAL_2_LCCDF, neg_binomial_2_lccdf, 2, 0) \
+  X(OP_NEG_BINOMIAL_2_LCDF, neg_binomial_2_lcdf, 2, 0)
 
 // Ordinal regression. Two things make these different from the list
 // above, and both are expressed in the kernel rather than here: the
@@ -419,75 +475,96 @@ constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
 // written out rather than obtained by instantiating an autodiff template.
 // fn_sweep.py checks every one against CmdStan, which is what makes
 // hand-written derivatives safe to write at this rate.
-#define STANLI_SCALAR_UNARY_LIST(X)                                          \
-  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), seed* stan::math::digamma(x),  \
-    UnaryTopology::Chained)                                                  \
-  X(OP_DIGAMMA, digamma, stan::math::digamma(x),                             \
-    seed* stan::math::trigamma(x), UnaryTopology::Chained)                   \
-  X(OP_LOG1P, log1p, stan::math::log1p(x), seed / (1.0 + x),                 \
-    UnaryTopology::Chained)                                                  \
-  X(OP_EXPM1, expm1, stan::math::expm1(x), seed*(y + 1.0),                   \
-    UnaryTopology::Chained)                                                  \
-  X(OP_PHI, Phi, stan::math::Phi(x),                                         \
-    (seed * stan::math::INV_SQRT_TWO_PI) * std::exp(-0.5 * x * x),           \
-    UnaryTopology::Chained)                                                  \
-  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x),                             \
-    seed* std::exp(-stan::math::std_normal_lpdf(y)), UnaryTopology::Chained) \
-  X(OP_ERF, erf, std::erf(x),                                                \
-    seed*(stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x)),                  \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ERFC, erfc, std::erfc(x),                                             \
-    -(seed * (stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x))),             \
-    UnaryTopology::Chained)                                                  \
-  X(OP_INV, inv, 1.0 / x, -(seed / (x * x)), UnaryTopology::Chained)         \
-  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x),                          \
-    -((0.5 * seed) / (x * std::sqrt(x))), UnaryTopology::Chained)            \
-  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -((2.0 * seed) / (x * x * x)), \
-    UnaryTopology::Chained)                                                  \
-  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x),                       \
-    -(seed / std::expm1(-x)), UnaryTopology::Chained)                        \
-  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x),                       \
-    seed* stan::math::inv_logit(x), UnaryTopology::Chained)                  \
-  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x),           \
-    seed* stan::math::inv_logit(-x), UnaryTopology::Chained)                 \
-  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x),     \
-    seed * -stan::math::inv_logit(x), UnaryTopology::Chained)                \
-  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x),                 \
-    seed* std::exp(x - std::exp(x)), UnaryTopology::Chained)                 \
-  X(OP_SIN, sin, std::sin(x), seed* std::cos(x), UnaryTopology::Chained)     \
-  X(OP_COS, cos, std::cos(x), -(seed * std::sin(x)), UnaryTopology::Chained) \
-  X(OP_TAN, tan, std::tan(x), seed * (1.0 + y * y), UnaryTopology::Chained)  \
-  X(OP_ASIN, asin, std::asin(x), seed / std::sqrt(1.0 - (x * x)),            \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ACOS, acos, std::acos(x), -(seed / std::sqrt(1.0 - (x * x))),         \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ATAN, atan, std::atan(x), seed / (1.0 + (x * x)),                     \
-    UnaryTopology::Chained)                                                  \
-  X(OP_SINH, sinh, std::sinh(x), seed* std::cosh(x), UnaryTopology::Chained) \
-  X(OP_COSH, cosh, std::cosh(x), seed* std::sinh(x), UnaryTopology::Chained) \
-  X(OP_ASINH, asinh, std::asinh(x), seed / std::sqrt(x * x + 1.0),           \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ACOSH, acosh, stan::math::acosh(x), seed / std::sqrt(x * x - 1.0),    \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ATANH, atanh, stan::math::atanh(x), seed / (1.0 - x * x),             \
-    UnaryTopology::Chained)                                                  \
-  X(OP_CBRT, cbrt, std::cbrt(x), seed / ((3.0 * y) * y),                     \
-    UnaryTopology::Chained)                                                  \
-  X(OP_EXP2, exp2, std::exp2(x), (seed * y) * stan::math::LOG_TWO,           \
-    UnaryTopology::Chained)                                                  \
-  X(OP_LOG2, log2, stan::math::log2(x), seed / (stan::math::LOG_TWO * x),    \
-    UnaryTopology::Chained)                                                  \
-  X(OP_LOG10, log10, std::log10(x), seed / (stan::math::LOG_TEN * x),        \
-    UnaryTopology::Chained)                                                  \
-  X(OP_ABS, abs, std::fabs(x),                                               \
-    x < 0.0   ? -seed                                                        \
-    : x > 0.0 ? seed                                                         \
-              : std::numeric_limits<double>::quiet_NaN(),                    \
-    UnaryTopology::Nonzero)                                                  \
-  X(OP_FLOOR, floor, std::floor(x), 0.0, UnaryTopology::Disconnected)        \
-  X(OP_CEIL, ceil, std::ceil(x), 0.0, UnaryTopology::Disconnected)           \
-  X(OP_ROUND, round, std::round(x), 0.0, UnaryTopology::Disconnected)        \
-  X(OP_TRUNC, trunc, std::trunc(x), 0.0, UnaryTopology::Disconnected)        \
+#define STANLI_SCALAR_UNARY_LIST(X)                                            \
+  X(OP_LGAMMA, lgamma, stan::math::lgamma(x), seed* stan::math::digamma(x),    \
+    UnaryTopology::Chained)                                                    \
+  X(OP_DIGAMMA, digamma, stan::math::digamma(x),                               \
+    seed* stan::math::trigamma(x), UnaryTopology::Chained)                     \
+  X(OP_LOG1P, log1p, stan::math::log1p(x), seed / (1.0 + x),                   \
+    UnaryTopology::Chained)                                                    \
+  X(OP_EXPM1, expm1, stan::math::expm1(x), seed*(y + 1.0),                     \
+    UnaryTopology::Chained)                                                    \
+  X(OP_PHI, Phi, stan::math::Phi(x),                                           \
+    (seed * stan::math::INV_SQRT_TWO_PI) * std::exp(-0.5 * x * x),             \
+    UnaryTopology::Chained)                                                    \
+  X(OP_INV_PHI, inv_Phi, stan::math::inv_Phi(x),                               \
+    seed* std::exp(-stan::math::std_normal_lpdf(y)), UnaryTopology::Chained)   \
+  X(OP_ERF, erf, std::erf(x),                                                  \
+    seed*(stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x)),                    \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ERFC, erfc, std::erfc(x),                                               \
+    -(seed * (stan::math::TWO_OVER_SQRT_PI * std::exp(-x * x))),               \
+    UnaryTopology::Chained)                                                    \
+  X(OP_INV, inv, 1.0 / x, -(seed / (x * x)), UnaryTopology::Chained)           \
+  X(OP_INV_SQRT, inv_sqrt, stan::math::inv_sqrt(x),                            \
+    -((0.5 * seed) / (x * std::sqrt(x))), UnaryTopology::Chained)              \
+  X(OP_INV_SQUARE, inv_square, 1.0 / (x * x), -((2.0 * seed) / (x * x * x)),   \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LOG1M_EXP, log1m_exp, stan::math::log1m_exp(x),                         \
+    -(seed / std::expm1(-x)), UnaryTopology::Chained)                          \
+  X(OP_LOG1P_EXP, log1p_exp, stan::math::log1p_exp(x),                         \
+    seed* stan::math::inv_logit(x), UnaryTopology::Chained)                    \
+  X(OP_LOG_INV_LOGIT, log_inv_logit, stan::math::log_inv_logit(x),             \
+    seed* stan::math::inv_logit(-x), UnaryTopology::Chained)                   \
+  X(OP_LOG1M_INV_LOGIT, log1m_inv_logit, stan::math::log1m_inv_logit(x),       \
+    seed * -stan::math::inv_logit(x), UnaryTopology::Chained)                  \
+  X(OP_INV_CLOGLOG, inv_cloglog, stan::math::inv_cloglog(x),                   \
+    seed* std::exp(x - std::exp(x)), UnaryTopology::Chained)                   \
+  X(OP_SIN, sin, std::sin(x), seed* std::cos(x), UnaryTopology::Chained)       \
+  X(OP_COS, cos, std::cos(x), -(seed * std::sin(x)), UnaryTopology::Chained)   \
+  X(OP_TAN, tan, std::tan(x), seed * (1.0 + y * y), UnaryTopology::Chained)    \
+  X(OP_ASIN, asin, std::asin(x), seed / std::sqrt(1.0 - (x * x)),              \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ACOS, acos, std::acos(x), -(seed / std::sqrt(1.0 - (x * x))),           \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ATAN, atan, std::atan(x), seed / (1.0 + (x * x)),                       \
+    UnaryTopology::Chained)                                                    \
+  X(OP_SINH, sinh, std::sinh(x), seed* std::cosh(x), UnaryTopology::Chained)   \
+  X(OP_COSH, cosh, std::cosh(x), seed* std::sinh(x), UnaryTopology::Chained)   \
+  X(OP_ASINH, asinh, std::asinh(x), seed / std::sqrt(x * x + 1.0),             \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ACOSH, acosh, stan::math::acosh(x), seed / std::sqrt(x * x - 1.0),      \
+    UnaryTopology::Chained)                                                    \
+  X(OP_ATANH, atanh, stan::math::atanh(x), seed / (1.0 - x * x),               \
+    UnaryTopology::Chained)                                                    \
+  X(OP_CBRT, cbrt, std::cbrt(x), seed / ((3.0 * y) * y),                       \
+    UnaryTopology::Chained)                                                    \
+  X(OP_EXP2, exp2, std::exp2(x), (seed * y) * stan::math::LOG_TWO,             \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LOG2, log2, stan::math::log2(x), seed / (stan::math::LOG_TWO * x),      \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LOG10, log10, std::log10(x), seed / (stan::math::LOG_TEN * x),          \
+    UnaryTopology::Chained)                                                    \
+  /* Phi_approx's value is written out rather than called, because Math's */   \
+  /* two overloads disagree: the double one cubes with pow(x, 3.0), the   */   \
+  /* var one with x * x * x, and those round differently. The var one is  */   \
+  /* what a parameter reaches in CmdStan and what every route here has to */   \
+  /* agree with, so it is the one spelled.                                */   \
+  X(OP_PHI_APPROX, Phi_approx,                                                 \
+    stan::math::inv_logit(0.07056 * x * (x * x) + 1.5976 * x),                 \
+    seed*(y * (1.0 - y) * (3.0 * 0.07056 * (x * x) + 1.5976)),                 \
+    UnaryTopology::Chained)                                                    \
+  X(OP_INV_ERFC, inv_erfc, stan::math::inv_erfc(x),                            \
+    -(seed * std::exp(stan::math::LOG_SQRT_PI - stan::math::LOG_TWO + y * y)), \
+    UnaryTopology::Chained)                                                    \
+  X(OP_LAMBERT_W0, lambert_w0, stan::math::lambert_w0(x),                      \
+    seed / (x + std::exp(y)), UnaryTopology::Chained)                          \
+  X(OP_LAMBERT_WM1, lambert_wm1, stan::math::lambert_wm1(x),                   \
+    seed / (x + std::exp(y)), UnaryTopology::Chained)                          \
+  X(OP_STD_NORMAL_LOG_QF, std_normal_log_qf, stan::math::std_normal_log_qf(x), \
+    seed* std::exp(x - stan::math::std_normal_lpdf(y)),                        \
+    UnaryTopology::Chained)                                                    \
+  X(OP_TGAMMA, tgamma, stan::math::tgamma(x),                                  \
+    (seed * y) * stan::math::digamma(x), UnaryTopology::Chained)               \
+  X(OP_ABS, abs, std::fabs(x),                                                 \
+    x < 0.0   ? -seed                                                          \
+    : x > 0.0 ? seed                                                           \
+              : std::numeric_limits<double>::quiet_NaN(),                      \
+    UnaryTopology::Nonzero)                                                    \
+  X(OP_FLOOR, floor, std::floor(x), 0.0, UnaryTopology::Disconnected)          \
+  X(OP_CEIL, ceil, std::ceil(x), 0.0, UnaryTopology::Disconnected)             \
+  X(OP_ROUND, round, std::round(x), 0.0, UnaryTopology::Disconnected)          \
+  X(OP_TRUNC, trunc, std::trunc(x), 0.0, UnaryTopology::Disconnected)          \
   X(OP_STEP, step, x < 0 ? 0.0 : 1.0, 0.0, UnaryTopology::Disconnected)
 
 // Two-argument scalar math: opcode, language name, stan-math function.
@@ -518,6 +595,28 @@ constexpr bool unary_has_pullback(UnaryTopology topology, double x) {
     log_modified_bessel_first_kind)                                         \
   X(OP_LOG_RISING_FACTORIAL, log_rising_factorial, log_rising_factorial)    \
   X(OP_OWENS_T, owens_t, owens_t)
+
+// Two-argument scalar math where one argument is an INT. Stan vectorizes
+// these exactly like the list above, but stan-math's overloads take the
+// order/count/exponent as `int`, not as a promoted double, so they cannot
+// ride the var,var kernel: the int side is bound as an int on both the
+// forward and the reverse call, and only the real side has a derivative.
+// Split by which position the int occupies, because that is the only thing
+// the two kernels differ in.
+#define STANLI_SCALAR_BINARY_INT_FIRST_LIST(X)            \
+  X(OP_BESSEL_1, bessel_first_kind, bessel_first_kind)    \
+  X(OP_BESSEL_2, bessel_second_kind, bessel_second_kind)  \
+  X(OP_MODIFIED_BESSEL_1, modified_bessel_first_kind,     \
+    modified_bessel_first_kind)                           \
+  X(OP_MODIFIED_BESSEL_2, modified_bessel_second_kind,    \
+    modified_bessel_second_kind)                          \
+  X(OP_BINARY_LOG_LOSS, binary_log_loss, binary_log_loss) \
+  X(OP_LMGAMMA, lmgamma, lmgamma)
+
+#define STANLI_SCALAR_BINARY_INT_SECOND_LIST(X)                 \
+  X(OP_FALLING_FACTORIAL, falling_factorial, falling_factorial) \
+  X(OP_RISING_FACTORIAL, rising_factorial, rising_factorial)    \
+  X(OP_LDEXP, ldexp, ldexp)
 
 // The tier a density is actually built at. STANLI_LITE_LP drops the
 // propto family from every one of them: about half the library, at the
@@ -555,6 +654,9 @@ constexpr bool exact_lp_build() {
   STANLI_INT_DENSITY_LIST(DENSITY)                \
   STANLI_SCALAR_CDF_LIST(DENSITY)                 \
   STANLI_INT_CDF_LIST(DENSITY)                    \
+  STANLI_TWO_INT_CDF_LIST(DENSITY)                \
+  STANLI_TAIL_CDF_LIST(DENSITY)                   \
+  STANLI_TAIL_INT_CDF_LIST(DENSITY)               \
   STANLI_ORDERED_DENSITY_LIST(DENSITY)            \
   STANLI_SCALAR_UNARY_LIST(UNARY)
 

@@ -76,6 +76,12 @@ struct ProgramCompiler {
   // Where `target +=` accumulates, or -1 when the region may not have
   // one. Set by the caller, which also seeds it to zero.
   int target_reg = -1;
+  // Register runs allocated by the zero-length adoption in Assignment,
+  // which is the one allocation site whose write can sit under a jump.
+  // finish() fills them with NaN ahead of the program, restoring the
+  // contract run_program states (program.hpp): every register is written
+  // before it is read.
+  std::vector<std::pair<int, int>> late_bound;
 
   // Registers are never recycled. Right-hand sides are a few lines over a
   // handful of states, so the count stays in the dozens; the cap is a
@@ -110,10 +116,14 @@ struct ProgramCompiler {
   }
 
   // dst[0..n) = the given values, as one instruction.
+  Program::Instr const_instr(int dst, const double* v, int n) {
+    return Program::Instr{
+        n == 1 ? Program::CONST : Program::CONSTR, dst, pool_at(v, n), 0, 0, n};
+  }
+
   void emit_const(int dst, const double* v, int n) {
     if (n == 0) return;
-    p.code.push_back(Program::Instr{n == 1 ? Program::CONST : Program::CONSTR,
-                                    dst, pool_at(v, n), 0, 0, n});
+    p.code.push_back(const_instr(dst, v, n));
   }
 
   int konst(double v) {
@@ -147,10 +157,17 @@ struct ProgramCompiler {
       }
       case mir::Expr::FunApp:
         if (e.args.size() == 2) {
-          if (e.name == "Plus__") return cint(e.args[0]) + cint(e.args[1]);
-          if (e.name == "Minus__") return cint(e.args[0]) - cint(e.args[1]);
-          if (e.name == "Times__") return cint(e.args[0]) * cint(e.args[1]);
-          if (e.name == "IntDivide__" || e.name == "Divide__")
+          // Each operator with the named spelling beside it: on ints the
+          // alias is the operator, down to `divide`'s truncation.
+          if (e.name == "Plus__" || e.name == "add")
+            return cint(e.args[0]) + cint(e.args[1]);
+          if (e.name == "Minus__" || e.name == "subtract")
+            return cint(e.args[0]) - cint(e.args[1]);
+          if (e.name == "Times__" || e.name == "multiply" ||
+              e.name == "elt_multiply")
+            return cint(e.args[0]) * cint(e.args[1]);
+          if (e.name == "IntDivide__" || e.name == "Divide__" ||
+              e.name == "divide" || e.name == "elt_divide")
             return cint(e.args[0]) / cint(e.args[1]);
         }
         if (e.args.size() == 1 && e.name == "PMinus__") return -cint(e.args[0]);
@@ -449,6 +466,14 @@ struct ProgramCompiler {
       return typed(out, e.type_);
     }
     if (e.args.size() == 2) {
+      // An int-typed binary is integer arithmetic, and `divide` truncates
+      // where the real DIV below does not: `divide(7, 2)` is 3, not 3.5.
+      // The register file holds only reals, so fold the integer answer
+      // whenever cint can reach it rather than emitting real arithmetic.
+      if (e.type_ == "UInt") {
+        long v;
+        if (try_cint(e, &v)) return {konst((double)v), 1};
+      }
       const Range a = expr(e.args[0]), b = expr(e.args[1]);
       const bool a_scalar = is_scalar(a);
       const bool b_scalar = is_scalar(b);
@@ -456,20 +481,30 @@ struct ProgramCompiler {
         bail("array arithmetic is unsupported by the register program");
       if (!a_scalar && !b_scalar && !same_view(a, b))
         bail("binary " + e.name + " on different logical views");
-      if (e.name == "Times__" && !a_scalar && !b_scalar) {
+      // `multiply` rides with `Times__` here for the same reason it does
+      // in the graph lowering: on two containers it is linear algebra,
+      // not the elementwise MUL the register file would emit.
+      if ((e.name == "Times__" || e.name == "multiply") && !a_scalar &&
+          !b_scalar) {
         if (a.kind == ViewKind::Matrix || b.kind == ViewKind::Matrix)
           bail("matrix multiplication is unsupported by the register program");
         bail("container multiplication is unsupported by the register program");
       }
       const int n = a_scalar ? b.len : (b_scalar ? a.len : a.len);
       Program::Code c;
-      if (e.name == "Plus__")
+      // The named spellings of the operators, on the same opcodes: a
+      // region whose control flow depends on a parameter has to compile
+      // here or not at all, so a gap is a hard error rather than a slow
+      // path.
+      if (e.name == "Plus__" || e.name == "add")
         c = Program::ADD;
-      else if (e.name == "Minus__")
+      else if (e.name == "Minus__" || e.name == "subtract")
         c = Program::SUB;
-      else if (e.name == "Times__" || e.name == "EltTimes__")
+      else if (e.name == "Times__" || e.name == "EltTimes__" ||
+               e.name == "multiply" || e.name == "elt_multiply")
         c = Program::MUL;
-      else if (e.name == "Divide__" || e.name == "EltDivide__")
+      else if (e.name == "Divide__" || e.name == "EltDivide__" ||
+               e.name == "divide" || e.name == "elt_divide")
         c = Program::DIV;
       else if (e.name == "Pow__" || e.name == "pow")
         c = Program::POW;
@@ -569,6 +604,30 @@ struct ProgramCompiler {
     return r;
   }
 
+  // Close the program: prepend the NaN fills the zero-length adoption in
+  // Assignment (below) deferred.
+  // Every caller runs this once the region has compiled and before the
+  // program runs; it is idempotent, and a region with no adoption pays
+  // nothing. The fills go in front rather than at the declaration because
+  // the width is only known once the assignment inside the branch has
+  // compiled, and the jumps are the only instructions that name a code
+  // position (CONST/CONSTR's `a` is a pool index, CALL's is a call index).
+  void finish() {
+    if (late_bound.empty()) return;
+    std::vector<Program::Instr> prologue;
+    for (const auto& [reg, len] : late_bound) {
+      const std::vector<double> nan((size_t)len,
+                                    std::numeric_limits<double>::quiet_NaN());
+      prologue.push_back(const_instr(reg, nan.data(), len));
+    }
+    const int n = (int)prologue.size();
+    for (auto& instr : p.code)
+      if (instr.code == Program::JZ || instr.code == Program::JMP)
+        instr.dst += n;
+    p.code.insert(p.code.begin(), prologue.begin(), prologue.end());
+    late_bound.clear();
+  }
+
   void stmt(const mir::Stmt& s) {
     switch (s.kind) {
       case mir::Stmt::Decl: {
@@ -629,8 +688,18 @@ struct ProgramCompiler {
             // assignment to size; adopt the assigned shape. The inliner
             // assigns it exactly once, right where the call was, so no
             // two branch arms can disagree about the size.
+            //
+            // That one assignment can still sit inside a data-dependent
+            // branch -- `cond ? udf(x) : y` inlines to an assignment under
+            // `if (cond)` -- and then the arm that does not run leaves
+            // these registers unwritten. They are the variable's live-out,
+            // so the harvest reads them anyway: under the backward's var
+            // replay that is a null (or a previous call's, already
+            // recovered) vari. finish() fills them with NaN, which is what
+            // Stan holds in a value it never computed.
             Range nd = v;
             nd.reg = alloc(v.len);
+            late_bound.emplace_back(nd.reg, v.len);
             for (int k = 0; k < v.len; ++k)
               emit(Program::MOV, nd.reg + k, v.reg + k);
             it->second = nd;
@@ -698,8 +767,12 @@ struct ProgramCompiler {
         // so all this does is accumulate.
         if (target_reg < 0) bail("target += is not available in this region");
         const Range v = expr(s.target);
-        if (!is_scalar(v)) bail("target += of a container");
-        emit(Program::ADD, target_reg, target_reg, v.reg);
+        // `target += e` for a container adds `sum(e)`. Accumulating the
+        // elements in ascending order is that sum, and it is the order
+        // OP_SUM_VEC uses on the graph side, so the two paths agree to the
+        // bit. A scalar is the one-element case of the same loop.
+        for (int k = 0; k < v.len; ++k)
+          emit(Program::ADD, target_reg, target_reg, v.reg + k);
         return;
       }
       case mir::Stmt::NRFunApp:

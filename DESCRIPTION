@@ -30,7 +30,8 @@ Imports:
     withr
 Suggests:
     testthat (>= 3.0.0),
-    loo
+    loo,
+    V8
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 NeedsCompilation: yes

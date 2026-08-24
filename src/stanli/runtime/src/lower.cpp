@@ -12,6 +12,7 @@
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <functional>
 #include <initializer_list>
@@ -269,6 +270,26 @@ struct Lowering {
                        (raw.empty() ? "" : " | in: " + raw));
   }
 
+  // Every index the graph lowering sees is a bind-time constant, so the
+  // bounds CmdStan checks at runtime are checked here, before an op that
+  // would silently read a neighboring arena slot can be emitted.
+  void check_index(int64_t i, int64_t n, const char* what,
+                   const std::string& raw) {
+    if (i < 1 || i > n)
+      fail(std::string(what) + ": index " + std::to_string(i) +
+               " out of bounds for size " + std::to_string(n),
+           raw);
+  }
+  // A range with hi < lo is empty and never reads, whatever the endpoints.
+  void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
+                   const std::string& raw) {
+    if (hi >= lo && (lo < 1 || hi > n))
+      fail(std::string(what) + ": range [" + std::to_string(lo) + ", " +
+               std::to_string(hi) + "] out of bounds for size " +
+               std::to_string(n),
+           raw);
+  }
+
   int const_slot(double v) {
     auto it = const_cache.find(v);
     if (it != const_cache.end()) return it->second;
@@ -367,12 +388,25 @@ struct Lowering {
             if (e.name == "cols") return dims.cols;
             return sh.len;
           }
-          DataMap::Entry* en = td.find(e.args[0].name);
-          if (en) {
-            if (e.name == "rows")
-              return en->dims.size() == 2 ? en->dims[0] : (long)en->r.size();
-            if (e.name == "cols") return en->dims.size() == 2 ? en->dims[1] : 1;
-            return (long)std::max(en->r.size(), en->i.size());
+          // A name td knows but neither scope nor decls does: the scalar
+          // `int` input. bind_data fills both tables from a declared shape
+          // and a scalar int has none, so it falls past both -- the one
+          // case, not the none this used to claim. The data_only branch
+          // below does not catch it either, because a shape query in a
+          // real-valued context is not data_only: `real p = size(n)` in
+          // transformed parameters is AutoDiffable, so it reached the
+          // failure instead and cost the census stanc3's
+          // function-signatures/math/matrix/size.stan.
+          //
+          // Asking the interpreter is what the previous copy here should
+          // have done all along. It answers rows/cols off the MIR type, so
+          // the rank-1 orientation bug that copy carried cannot come back
+          // through this route.
+          if (td.find(e.args[0].name)) {
+            try {
+              return td.as_int(e);
+            } catch (const CompileError&) {
+            }
           }
         }
         // Shape query on a COMPUTED value: --O1 inlining substitutes call
@@ -682,6 +716,51 @@ struct Lowering {
     }
   }
 
+  // CmdStan's var_context validates every declared dimension against the
+  // supplied values before it reads one, and throws std::invalid_argument
+  // naming the variable and both shapes. Without the same check the short
+  // side is read past its end, and a host that tells bad data from a
+  // broken model by the exception type sees the wrong answer. Only the
+  // element count is compared: JSON carries a nested shape but stanc has
+  // already flattened the read, and a declaration whose extents multiply
+  // out to the supplied count is the shape the reader would produce.
+  void validate_data_dims(const std::string& name, const mir::SizedType& t) {
+    if (!data.has(name)) return;
+    const DataMap::Entry& en = data.at(name);
+    // A declared-int variable must arrive integer-typed, as CmdStan's
+    // var_context requires (JSON 1.0 is not an int there either). Without
+    // this the entry binds as typeless reals and the failure surfaces at
+    // whatever consumer touches it first, e.g. the gather index guard.
+    if ((t.base == "SInt" || (t.base == "SArray" && t.elem_base == "SInt")) &&
+        !en.is_int)
+      throw std::invalid_argument(
+          "int variable contained non-int values; processing stage=data "
+          "initialization; variable name=" +
+          name + "; base type=int");
+    const int64_t found = (int64_t)std::max(en.r.size(), en.i.size());
+    const std::vector<int64_t> declared = sized_dims(t);
+    int64_t want = 1;
+    for (int64_t d : declared) {
+      if (d < 0) fail("negative extent for data " + name, t.raw);
+      want *= d;
+    }
+    if (want == found) return;
+    const auto tuple = [](const std::vector<int64_t>& dims) {
+      std::string s = "(";
+      for (size_t k = 0; k < dims.size(); ++k) {
+        if (k) s += ',';
+        s += std::to_string(dims[k]);
+      }
+      return s + ")";
+    };
+    throw std::invalid_argument(
+        "mismatch in dimension declared and found in context; processing "
+        "stage=data initialization; variable name=" +
+        name + "; position=0; dims declared=" + tuple(declared) +
+        "; dims found=" +
+        tuple(en.dims.empty() ? std::vector<int64_t>{found} : en.dims));
+  }
+
   void bind_data(const mir::Program& p) {
     for (const auto& [name, type] : p.input_vars) {
       (void)type;
@@ -694,7 +773,10 @@ struct Lowering {
       sh.si = view_of(type, true);
       decls[name] = sh;
     };
-    for (const auto& [name, type] : p.input_vars) record(name, type);
+    for (const auto& [name, type] : p.input_vars) {
+      record(name, type);
+      validate_data_dims(name, type);
+    }
     for (const auto& st : p.prepare_data) {
       if (st.kind == mir::Stmt::Decl) record(st.decl_id, st.decl_type);
       td.exec(st);
@@ -782,8 +864,7 @@ struct Lowering {
           if (e.args[1].name == "IndexBetween") {
             const int64_t lo = eval_int(e.args[1].args[0]);
             const int64_t hi = eval_int(e.args[1].args[1]);
-            if (lo < 1 || hi < lo || hi > base.si.rows)
-              fail("matrix row range out of bounds", e.raw);
+            check_range(lo, hi, base.si.rows, "matrix row range", e.raw);
             for (int64_t i = lo; i <= hi; ++i) rows.push_back((int)i - 1);
           } else {
             DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
@@ -811,23 +892,30 @@ struct Lowering {
           const ArrayShape& sh = array_shape(base.si);
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
-          if (lo < 1 || hi < lo || hi > sh.dims.front())
+          // hi < lo is an empty slice whatever the endpoints (CmdStan's
+          // rvalue checks bounds only when a range is nonempty), and the
+          // bounds are data, so rejecting it would make compilation
+          // data-dependent.
+          if (hi >= lo && (lo < 1 || hi > sh.dims.front()))
             fail("array outer range out of bounds", e.raw);
           std::vector<int64_t> out_dims = sh.dims;
-          out_dims[0] = hi - lo + 1;
+          out_dims[0] = hi >= lo ? hi - lo + 1 : 0;
           const std::vector<int64_t> suffix(sh.dims.begin() + 1, sh.dims.end());
           const int64_t width = checked_product(suffix, "array element");
           const int64_t len = checked_product(out_dims, "array range");
           return emit_value(OP_SLICE, {base}, len,
                             array_view(std::move(out_dims), sh.leaf),
-                            {(int)((lo - 1) * width)});
+                            {(int)(hi >= lo ? (lo - 1) * width : 0)});
         }
         // Between subrange read on a 1-D value: v[a:b] is contiguous.
+        // hi < lo is empty, not negative-length.
         if (e.args.size() == 2 && e.args[1].name == "IndexBetween") {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
-          return emit_value(OP_SLICE, {base}, hi - lo + 1, view_of(e.type_),
-                            {(int)(lo - 1)});
+          check_range(lo, hi, g.slots[base.slot].len, "range", e.raw);
+          const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+          return emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+                            {(int)(len ? lo - 1 : 0)});
         }
         // A data gather on a one-dimensional scalar array keeps an exact
         // one-dimensional Array view. More structural forms need strides
@@ -838,7 +926,8 @@ struct Lowering {
           if (sh.leaf != ViewKind::Flat || sh.dims.size() != 1)
             fail("unsupported index expression", e.raw);
           DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
-          if (!iv.is_int) fail("gather index must be int data", e.raw);
+          if (!iv.is_int || iv.i.size() != iv.r.size())
+            fail("gather index must be int data", e.raw);
           std::vector<int> idata;
           idata.reserve(iv.i.size());
           for (int x : iv.i) {
@@ -852,12 +941,18 @@ struct Lowering {
         }
         // Gather by a data int array: v[idx].
         if (e.args.size() == 2 && e.args[1].name == "IndexMulti") {
+          // An empty index is a legitimate data-dependent gather (a slice
+          // whose computed length is zero); an int-flagged entry whose int
+          // mirror disagrees with its values is not.
           DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
-          if (!iv.is_int || iv.i.empty())
+          if (!iv.is_int || iv.i.size() != iv.r.size())
             fail("gather index must be int data", e.raw);
           std::vector<int> idata;
           idata.reserve(iv.i.size());
-          for (int x : iv.i) idata.push_back(x - 1);
+          for (int x : iv.i) {
+            check_index(x, g.slots[base.slot].len, "gather index", e.raw);
+            idata.push_back(x - 1);
+          }
           return emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
                             view_of(e.type_), idata);
         }
@@ -865,15 +960,18 @@ struct Lowering {
         // storage remains column-major even when either extent is zero.
         if (e.args.size() == 3 && is_matrix(base.si) &&
             e.args[1].name == "IndexSingle" && e.args[2].name == "IndexAll") {
-          const int64_t i = eval_int(e.args[1].args[0]) - 1;
+          const int64_t i = eval_int(e.args[1].args[0]);
+          check_index(i, base.si.rows, "matrix row", e.raw);
           return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
-                            view_of(e.type_), {(int)i, (int)base.si.rows});
+                            view_of(e.type_),
+                            {(int)(i - 1), (int)base.si.rows});
         }
         if (e.args.size() == 3 && is_matrix(base.si) &&
             e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
-          const int64_t j = eval_int(e.args[2].args[0]) - 1;
+          const int64_t j = eval_int(e.args[2].args[0]);
+          check_index(j, base.si.cols, "matrix column", e.raw);
           return emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.type_),
-                            {(int)(j * base.si.rows)});
+                            {(int)((j - 1) * base.si.rows)});
         }
         // Column of a canonical graph-order 2-D array (array[N, S] real):
         // each outer element is contiguous, so successive rows sit S apart.
@@ -892,9 +990,12 @@ struct Lowering {
             e.args[2].name == "IndexSingle") {
           const int64_t lo = eval_int(e.args[1].args[0]);
           const int64_t hi = eval_int(e.args[1].args[1]);
-          const int64_t j = eval_int(e.args[2].args[0]) - 1;
-          return emit_value(OP_SLICE, {base}, hi - lo + 1, view_of(e.type_),
-                            {(int)(j * base.si.rows + lo - 1)});
+          const int64_t j = eval_int(e.args[2].args[0]);
+          check_index(j, base.si.cols, "matrix column", e.raw);
+          check_range(lo, hi, base.si.rows, "matrix row range", e.raw);
+          const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+          return emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+                            {(int)(len ? (j - 1) * base.si.rows + lo - 1 : 0)});
         }
         // Params/locals with recorded dims, laid out by flat_addr above.
         // Matrix views are col-major and never take this array-major path.
@@ -903,8 +1004,11 @@ struct Lowering {
           const auto& D = *bdims;
           const bool mat = array_shape(base.si).leaf == ViewKind::Matrix;
           std::vector<int64_t> ix;
-          for (size_t d = 0; d < n_idx; ++d)
-            ix.push_back(eval_int(e.args[1 + d].args[0]) - 1);
+          for (size_t d = 0; d < n_idx; ++d) {
+            const int64_t one = eval_int(e.args[1 + d].args[0]);
+            check_index(one, D[d], "array index", e.raw);
+            ix.push_back(one - 1);
+          }
           const Addr a = flat_addr(D, mat, ix);
           if (a.stride != 1)
             return emit_value(OP_SLICE_STRIDED, {base}, a.len,
@@ -922,9 +1026,11 @@ struct Lowering {
         // Row of a column-major data matrix / 2-D array: strided slice.
         if (all_single && e.args.size() == 2 && is_matrix(base.si) &&
             e.type_ != "UReal" && e.type_ != "UInt") {
-          const int64_t t = eval_int(e.args[1].args[0]) - 1;
+          const int64_t t = eval_int(e.args[1].args[0]);
+          check_index(t, base.si.rows, "matrix row", e.raw);
           return emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
-                            view_of(e.type_), {(int)t, (int)base.si.rows});
+                            view_of(e.type_),
+                            {(int)(t - 1), (int)base.si.rows});
         }
         // Data-only slicing with no native path (e.g. one matrix out of a
         // data array of matrices) evaluates at compile time.
@@ -932,11 +1038,16 @@ struct Lowering {
         int64_t flat = 0;
         if (all_single && e.args.size() == 2 &&
             (e.type_ == "UReal" || e.type_ == "UInt")) {
-          flat = eval_int(e.args[1].args[0]) - 1;
+          const int64_t one = eval_int(e.args[1].args[0]);
+          check_index(one, g.slots[base.slot].len, "element", e.raw);
+          flat = one - 1;
         } else if (all_single && e.args.size() == 3 && is_matrix(base.si) &&
                    (e.type_ == "UReal" || e.type_ == "UInt")) {
-          flat = (eval_int(e.args[2].args[0]) - 1) * base.si.rows +
-                 (eval_int(e.args[1].args[0]) - 1);
+          const int64_t ri = eval_int(e.args[1].args[0]);
+          const int64_t cj = eval_int(e.args[2].args[0]);
+          check_index(ri, base.si.rows, "matrix row", e.raw);
+          check_index(cj, base.si.cols, "matrix column", e.raw);
+          flat = (cj - 1) * base.si.rows + (ri - 1);
         } else {
           std::string desc =
               "unsupported index expression: base=" +
@@ -1114,6 +1225,7 @@ struct Lowering {
         for (int k = 0; k < expr_out->len; ++k)
           prog->out_regs.push_back(expr_out->reg + k);
       }
+      c.finish();
     } catch (Bail& b) {
       fail("parameter-dependent region: " + b.why, s ? s->raw : e->raw);
     }
@@ -1394,6 +1506,156 @@ struct Lowering {
     return si;
   }
 
+  // Two-argument log_sum_exp / log_diff_exp. Stan vectorizes these over
+  // every container shape, so they are elementwise binaries with scalar
+  // broadcast, not reductions -- `log_diff_exp(vector[N], real)` is N
+  // values, not one. mixture.cpp's kernels already dispatch on length
+  // (each argument len 1 or len N, out len N); emitting them at width 1
+  // was what truncated the result, which the assignment then rejected.
+  Val lower_binary_mix(uint16_t opcode, const mir::Expr& e) {
+    Val a = lower_expr(e.args[0]);
+    Val b = lower_expr(e.args[1]);
+    // shape_of rejects two containers whose views disagree; what is left
+    // is one width, or one width and a broadcast scalar.
+    SlotInfo si = shape_of(a, b);
+    const int64_t n = std::max(g.slots[a.slot].len, g.slots[b.slot].len);
+    return emit_value(opcode, {a, b}, n, si);
+  }
+
+  // Two-argument scalar math with one int argument
+  // (STANLI_SCALAR_BINARY_INT_FIRST_LIST and its SECOND twin): elementwise
+  // with scalar broadcast like the all-real binaries, but shape_of does not
+  // apply. Those two sides may legitimately carry different views --
+  // `ldexp(matrix, array[,] int)` is a matrix, `falling_factorial(real,
+  // array[,] int)` is an array -- so the result takes the real side's view
+  // when it has one and the int side's when the real side is a scalar,
+  // which is what the signature list says in every case.
+  Val lower_binary_int(uint16_t opcode, bool int_first, const mir::Expr& e) {
+    Val a = lower_expr(e.args[0]);
+    Val b = lower_expr(e.args[1]);
+    const Val& re = int_first ? b : a;
+    const Val& iv = int_first ? a : b;
+    const int64_t lr = g.slots[re.slot].len, li = g.slots[iv.slot].len;
+    // Only a language scalar broadcasts. A one-element container against a
+    // wider one is the size error stan-math throws, not a broadcast.
+    if (!is_scalar(re) && !is_scalar(iv) && lr != li)
+      fail(e.name + ": arguments must match in size", e.raw);
+    const SlotInfo si = is_scalar(re) ? iv.si : re.si;
+    // The one place the two flat orders disagree: a matrix leaf is stored
+    // column-major and an int array's trailing two extents are row-major.
+    // Handing the kernel that leaf's rows and cols is what tells it to undo
+    // the difference; see IntLane in kernels/scalar_binary.cpp.
+    std::vector<int> idata;
+    if (!is_scalar(iv)) {
+      if (is_matrix(re.si)) {
+        idata = {(int)re.si.rows, (int)re.si.cols};
+      } else if (is_array(re.si)) {
+        const ArrayShape& s = array_shape(re.si);
+        if (s.leaf == ViewKind::Matrix)
+          idata = {(int)s.dims[s.dims.size() - 2], (int)s.dims.back()};
+      }
+    }
+    return emit_value(opcode, {a, b}, std::max(lr, li), si, std::move(idata));
+  }
+
+  // Stan's bound transforms, callable as ordinary functions rather than
+  // written on a declaration. `<t>_constrain(x, bounds...)` is the value
+  // half of the declaration transform, `<t>_jacobian(...)` is the same
+  // value and also adds the transform's log absolute jacobian determinant
+  // to the target, and `<t>_unconstrain(y, bounds...)` is the inverse.
+  //
+  // stanc3 marks the jacobian direction with an FnJacobian suffix and emits
+  // no separate target statement for it, so the increment has to come from
+  // here -- and only in log_prob, because the generated model instantiates
+  // write_array with `jacobian__ = false`, which drops it.
+  //
+  // Argument 0 always carries the result's shape: every signature in the
+  // library pairs it either with scalar bounds or with bounds of exactly
+  // its own type, and none of them widens a scalar first argument against a
+  // container bound.
+  std::optional<Val> lower_bound_transform(const mir::Expr& e) {
+    struct Transform {
+      const char* stem;
+      uint16_t opcode;
+      size_t arity;
+    };
+    static const Transform kTransforms[] = {
+        {"lower_bound_", OP_CONSTRAIN_LOWER, 2},
+        {"upper_bound_", OP_CONSTRAIN_UPPER, 2},
+        {"lower_upper_bound_", OP_CONSTRAIN_LU, 3},
+        {"offset_multiplier_", OP_CONSTRAIN_OFFSET_MULT, 3},
+    };
+    const Transform* tr = nullptr;
+    std::string direction;
+    for (const Transform& t : kTransforms) {
+      const std::string prefix(t.stem);
+      if (e.name.compare(0, prefix.size(), prefix) != 0) continue;
+      const std::string tail = e.name.substr(prefix.size());
+      if (tail != "constrain" && tail != "jacobian" && tail != "unconstrain")
+        continue;
+      tr = &t;
+      direction = tail;
+    }
+    if (tr == nullptr || e.args.size() != tr->arity) return std::nullopt;
+
+    std::vector<Val> a;
+    a.reserve(e.args.size());
+    for (const mir::Expr& arg : e.args) a.push_back(lower_expr(arg));
+    const int64_t n = g.slots[a[0].slot].len;
+    SlotInfo si = a[0].si;
+    std::vector<int> ins;
+    bool autodiff = false;
+    for (const Val& v : a) {
+      const int64_t len = g.slots[v.slot].len;
+      if (len != 1 && len != n)
+        fail(e.name + ": bound is neither one value nor one per element",
+             e.raw);
+      si.param_free = si.param_free && v.si.param_free;
+      autodiff = autodiff || v.autodiff;
+      ins.push_back(v.slot);
+    }
+
+    if (direction == "unconstrain") return free_transform(tr->opcode, a, si, n);
+    // The declaration kernels, unchanged: they carry the arithmetic that was
+    // measured against stan-math's rev overloads, which composing exp,
+    // inv_logit, and fma out of the elementwise ops would not reproduce.
+    // They always write the jacobian, so `_constrain` allocates the output
+    // and simply leaves it unrooted -- no term reaches the target, and its
+    // adjoint stays zero, which is exactly the no-lp overload's gradient.
+    const int jac = add_slot(1, /*is_param=*/false);
+    Val v = emit_raw(tr->opcode, ins, n, si, {}, jac, autodiff);
+    if (direction == "jacobian" && !in_write_array) target_terms.push_back(jac);
+    return v;
+  }
+
+  // The inverse transforms. stan-math has no rev overloads for these: its
+  // `log(y - lb)` is ordinary var arithmetic, which is what these
+  // elementwise ops emit, so the composition is the reference rather than an
+  // approximation of it, and no new kernel is needed.
+  Val free_transform(uint16_t opcode, const std::vector<Val>& a, SlotInfo si,
+                     int64_t n) {
+    // An intermediate keeps the argument's logical view only when it is as
+    // wide as the argument; `ub - lb` on two scalars is one value.
+    const auto elt = [&](uint16_t op, const Val& x, const Val& y) {
+      const int64_t w = std::max(g.slots[x.slot].len, g.slots[y.slot].len);
+      return emit_value(op, {x, y}, w, w == n ? si : SlotInfo{});
+    };
+    const auto un = [&](uint16_t op, const Val& x) {
+      return emit_value(op, {x}, g.slots[x.slot].len, x.si);
+    };
+    switch (opcode) {
+      case OP_CONSTRAIN_LOWER:  // lb_free: log(y - lb)
+        return un(OP_LOGV, elt(OP_SUB, a[0], a[1]));
+      case OP_CONSTRAIN_UPPER:  // ub_free: log(ub - y)
+        return un(OP_LOGV, elt(OP_SUB, a[1], a[0]));
+      case OP_CONSTRAIN_LU:  // lub_free: logit((y - lb) / (ub - lb))
+        return un(OP_LOGIT, elt(OP_DIV, elt(OP_SUB, a[0], a[1]),
+                                elt(OP_SUB, a[2], a[1])));
+      default:  // offset_multiplier_free: (y - mu) / sigma
+        return elt(OP_DIV, elt(OP_SUB, a[0], a[1]), a[2]);
+    }
+  }
+
   // Value of a data-only expression at compile time. The interpreter
   // handles most cases; a UDF-local constant lives only as a slot, so fall
   // back to that slot's recorded fill.
@@ -1643,6 +1905,7 @@ struct Lowering {
     // The stan-library names split into disjoint groups; each helper owns
     // one and declines the rest.
     if (auto v = lower_density_fn(e)) return *v;
+    if (auto v = lower_bound_transform(e)) return *v;
     if (auto v = lower_eltwise_fn(e)) return *v;
     if (auto v = lower_matrix_fn(e)) return *v;
     if (auto v = lower_ode_fn(e)) return *v;
@@ -1713,10 +1976,19 @@ struct Lowering {
       bool glm_layout = false;
       DensityShape shape = DensityShape::Plain;
       int activity_mask = -1;  // negative: derive from MIR arguments
+      // The single integer group is one outcome per lane of the vectorized
+      // reduction, so a language-level scalar broadcasts across the real
+      // arguments (see the expansion below). False for the densities whose
+      // integer group means something else: multinomial's outcome is the
+      // whole count vector, and the ordinal pair reads a cutpoint vector
+      // that is one argument rather than lanes.
+      bool lane_outcome = false;
     };
     static const std::map<std::string, DensitySpec> kDensities = {
-        {"poisson_log_lpmf", {OP_POISSON_LOG_LPMF, 2, 1}},
-        {"bernoulli_logit_lpmf", {OP_BERNOULLI_LOGIT_LPMF, 2, 1}},
+        {"poisson_log_lpmf",
+         {OP_POISSON_LOG_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
+        {"bernoulli_logit_lpmf",
+         {OP_BERNOULLI_LOGIT_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
 
     // clang-format off
         // These macros use the same lists that define opcodes and kernels.
@@ -1724,10 +1996,10 @@ struct Lowering {
         STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_TABLE)
 #undef STANLI_DENSITY_TABLE
 
-        // Discrete densities: outcome + n real arguments, one int group.
-        // Ordered cutpoints remain an ordinary real slot.
+        // Discrete densities: outcome + n real arguments, one int group,
+        // one outcome per lane.
 #define STANLI_INT_DENSITY_TABLE(code, fn, nreal, t) \
-  {#fn, {code, nreal + 1, 1}},
+  {#fn, {code, nreal + 1, 1, false, DensityShape::Plain, -1, true}},
         STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TABLE)
 #undef STANLI_INT_DENSITY_TABLE
 
@@ -1736,16 +2008,49 @@ struct Lowering {
         STANLI_SCALAR_CDF_LIST(STANLI_CDF_TABLE)
 #undef STANLI_CDF_TABLE
 
-        // Integer-outcome cdfs keep the count in the one integer group.
-#define STANLI_INT_CDF_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 1, 1}},
+        // Integer-outcome cdfs keep the count in the one integer group, and
+        // it is per-lane there too: a vectorized cdf is the product over
+        // lanes, an lcdf/lccdf the sum.
+#define STANLI_INT_CDF_TABLE(code, fn, nreal, t) \
+  {#fn, {code, nreal + 1, 1, false, DensityShape::Plain, -1, true}},
         STANLI_INT_CDF_LIST(STANLI_INT_CDF_TABLE)
-        STANLI_ORDERED_DENSITY_LIST(STANLI_INT_CDF_TABLE)
 #undef STANLI_INT_CDF_TABLE
+        // The binomials' cdfs: an outcome group and a trials group, so
+        // the two-group branch below writes both as [len, vals...] and
+        // spells a language-level scalar -1. lane_outcome stays false --
+        // that flag replicates the ONE group these do not have, and the
+        // -1 length is how these broadcast instead.
+#define STANLI_TWO_INT_CDF_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 2, 2}},
+        STANLI_TWO_INT_CDF_LIST(STANLI_TWO_INT_CDF_TABLE)
+#undef STANLI_TWO_INT_CDF_TABLE
+        // The var-tape cdfs. Same argument shapes as the two lists above,
+        // and a fixed all-active mask because their kernel binds every
+        // argument as var whatever the MIR says: one instantiation, no
+        // activity-mask expansion, and a data argument's partials
+        // computed and dropped.
+#define STANLI_TAIL_CDF_TABLE(code, fn, n, t) \
+  {#fn, {code, n, 0, false, DensityShape::Plain, (1 << n) - 1}},
+        STANLI_TAIL_CDF_LIST(STANLI_TAIL_CDF_TABLE)
+#undef STANLI_TAIL_CDF_TABLE
+#define STANLI_TAIL_INT_CDF_TABLE(code, fn, nreal, t)                        \
+  {#fn,                                                                      \
+   {code, nreal + 1, 1, false, DensityShape::Plain, (1 << nreal) - 1, true}},
+        STANLI_TAIL_INT_CDF_LIST(STANLI_TAIL_INT_CDF_TABLE)
+#undef STANLI_TAIL_INT_CDF_TABLE
+        // The ordinal densities have the same argument counts but not the
+        // same meaning: their trailing cutpoint vector is one argument, so
+        // a scalar outcome stays one lane whatever its length.
+#define STANLI_ORDERED_TABLE(code, fn, nreal, t) {#fn, {code, nreal + 1, 1}},
+        STANLI_ORDERED_DENSITY_LIST(STANLI_ORDERED_TABLE)
+#undef STANLI_ORDERED_TABLE
         // clang-format on
 
-        {"bernoulli_lpmf", {OP_BERNOULLI_LPMF, 2, 1}},
-        {"poisson_lpmf", {OP_POISSON_LPMF, 2, 1}},
-        {"neg_binomial_2_lpmf", {OP_NEG_BINOMIAL_2_LPMF, 3, 1}},
+        {"bernoulli_lpmf",
+         {OP_BERNOULLI_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
+        {"poisson_lpmf",
+         {OP_POISSON_LPMF, 2, 1, false, DensityShape::Plain, -1, true}},
+        {"neg_binomial_2_lpmf",
+         {OP_NEG_BINOMIAL_2_LPMF, 3, 1, false, DensityShape::Plain, -1, true}},
         {"binomial_lpmf", {OP_BINOMIAL_LPMF, 3, 2}},
         {"binomial_logit_lpmf", {OP_BINOMIAL_LOGIT_LPMF, 3, 2}},
         {"poisson_log_glm_lpmf", {OP_POISSON_LOG_GLM_LPMF, 4, 1, true}},
@@ -1816,8 +2121,14 @@ struct Lowering {
         fail(e.name + ": expected " + std::to_string(spec.arity) + " args");
       }
       std::vector<int> idata;
+      // Whether argument 0 was written as a bare `int` rather than an
+      // array. Same test as the two-group path below, and for the same
+      // reason: a length-1 array is a container that must match the other
+      // arguments' size, a scalar broadcasts.
+      bool scalar_outcome = false;
       if (spec.integer_args == 1) {
         idata = int_arg_values(e.args[0]);
+        scalar_outcome = e.args[0].type_ == "UInt" && idata.size() == 1;
       } else if (spec.integer_args == 2) {
         // Group length -1 marks a language-level scalar (broadcast in
         // stan-math); a length-1 array stays a vector, as CmdStan would
@@ -1846,12 +2157,58 @@ struct Lowering {
         if (spec.activity_mask < 0 && !e.args[i].data_only)
           variant |= (uint8_t)(1u << (i - spec.integer_args));
       }
+      // A scalar outcome against vectorized real arguments: replicate it to
+      // the lane count. The kernels map the whole integer group as one
+      // Eigen::VectorXi, so a scalar arrived at stan-math as a size-1
+      // container and lost against a longer argument on
+      // check_consistent_sizes -- "Failures variable has size = 1, but
+      // Number of successes parameter has size 2". Expanding here rather
+      // than adding a scalar-bound instantiation to every kernel keeps the
+      // graph identical to the one the equivalent array-outcome model
+      // produces, which is already the verified shape: each of these is a
+      // per-lane reduction (sum for the lpmfs and lcdf/lccdf, product for
+      // the cdfs), so N copies of the outcome is the same math in the same
+      // order as one broadcast scalar. binomial_logit_glm below does the
+      // same thing for the same reason.
+      if (spec.lane_outcome && scalar_outcome) {
+        int64_t lanes = 1;
+        for (int slot : ins) lanes = std::max(lanes, g.slots[slot].len);
+        if (lanes > 1) {
+          // By value: assign() may reallocate, and a reference into the
+          // vector being assigned would dangle mid-fill.
+          const int outcome = idata[0];
+          idata.assign((size_t)lanes, outcome);
+        }
+      }
       if (propto(e)) variant |= 0x80u;
       if (spec.glm_layout) {
         // X must be a data matrix; append its dims to idata.
         const SlotInfo& xsi = shapes[0];
         if (!is_matrix(xsi) || !xsi.param_free)
           fail(e.name + ": X must be a data matrix");
+        // A GLM's outcome group is one value per ROW of X, and the kernels
+        // map exactly that many out of idata -- so a group of any other
+        // length is refused here rather than read past the end of the
+        // vector. These are the entries left lane_outcome = false, and not
+        // by oversight: that expansion sizes itself from the longest real
+        // argument, which for a GLM is X at rows*cols.
+        //
+        // Nor could poisson_log_glm simply replicate to `rows`. stan-math
+        // accepts a language-level scalar outcome and broadcasts it, but
+        // its <false> form then subtracts lgamma(y+1) ONCE rather than once
+        // per row (four rows of y = 3: -4.98, against the -10.36 the
+        // replicated array gives, with identical gradients). Replicating
+        // would buy the right gradients and an lp a constant off CmdStan's,
+        // which is the one thing these kernels exist to get right. The
+        // other two were measured and do not have that problem; they share
+        // this layout and this check, so they are refused with it. Refusing
+        // by name is what the vector-alpha form already gets; see
+        // docs/coverage.md.
+        if ((int64_t)idata.size() != xsi.rows)
+          fail(e.name + ": outcome has " + std::to_string(idata.size()) +
+                   " value(s) but X has " + std::to_string(xsi.rows) +
+                   " rows; a scalar or short outcome is unsupported",
+               e.raw);
         idata.push_back((int)xsi.rows);
         idata.push_back((int)xsi.cols);
       }
@@ -1923,9 +2280,18 @@ struct Lowering {
       Val beta = lower_expr(e.args[4]);
       if (!is_matrix(X.si)) fail("binomial_logit_glm needs a matrix", e.raw);
       // Both int groups are one value per row, so a scalar broadcasts.
+      // By value, as the lane_outcome expansion above is: assign() may
+      // reallocate, and a reference into the vector being assigned would
+      // dangle mid-fill.
       const int64_t rows = X.si.rows;
-      if ((int64_t)idata.size() == 1) idata.assign(rows, idata[0]);
-      if ((int64_t)NN.size() == 1) NN.assign(rows, NN[0]);
+      if ((int64_t)idata.size() == 1) {
+        const int outcome = idata[0];
+        idata.assign(rows, outcome);
+      }
+      if ((int64_t)NN.size() == 1) {
+        const int trials = NN[0];
+        NN.assign(rows, trials);
+      }
       idata.insert(idata.end(), NN.begin(), NN.end());
       idata.push_back((int)rows);
       idata.push_back((int)X.si.cols);
@@ -1942,7 +2308,13 @@ struct Lowering {
       Val a2 = lower_expr(e.args[2]);
       Val a3 = lower_expr(e.args[3]);
       if (!is_matrix(X.si)) fail(e.name + " needs a matrix", e.raw);
-      if ((int64_t)idata.size() == 1) idata.assign(X.si.rows, idata[0]);
+      if ((int64_t)idata.size() == 1) {
+        // By value, as the lane_outcome expansion is: assign() may
+        // reallocate, and a reference into the vector being assigned would
+        // dangle mid-fill.
+        const int outcome = idata[0];
+        idata.assign(X.si.rows, outcome);
+      }
       idata.push_back((int)X.si.rows);
       idata.push_back((int)X.si.cols);
       // categorical: (y, x, alpha, beta). ordered: (y, x, beta, cuts).
@@ -1987,6 +2359,16 @@ struct Lowering {
         {"EltDivide__", OP_DIV},
         {"Pow__", OP_POW},
         {"pow", OP_POW},
+        // The named spellings of the same operators. `divide` is the one
+        // that is not simply the operator renamed: `rv / A` is a solve,
+        // but stan::math::divide only ever divides by a scalar or divides
+        // a scalar elementwise, so it is OP_DIV on every one of its
+        // overloads (deps/math/stan/math/prim/fun/divide.hpp).
+        {"add", OP_ADD},
+        {"subtract", OP_SUB},
+        {"divide", OP_DIV},
+        {"elt_multiply", OP_MUL},
+        {"elt_divide", OP_DIV},
 // Generated from STANLI_SCALAR_BINARY_LIST (optable.hpp), which also made
 // the opcode and the kernel. multiply_log is the pre-optimizer spelling of
 // lmultiply, so it rides the same opcode.
@@ -1995,7 +2377,52 @@ struct Lowering {
 #undef STANLI_BINARY_TABLE
             {"multiply_log", OP_LMULTIPLY},
     };
-    if (e.name == "Times__") {
+    // `A \ B` and `B / A` with a matrix divisor are linear solves, not
+    // elementwise division: stanc spells them with the ordinary division
+    // operators and lowers them to mdivide_left/mdivide_right. The divisor's
+    // type is the whole discriminator -- a scalar divisor is elementwise, and
+    // `./` is never a solve -- which is the rule the MIR interpreter applies,
+    // kept identical here so a solve does not mean one thing in the model
+    // block and another in transformed data.
+    if (e.name == "LDivide__" ||
+        (e.name == "Divide__" && e.args.at(1).type_ == "UMatrix")) {
+      const bool left = e.name == "LDivide__";
+      Val a = lower_expr(e.args[0]);
+      Val b = lower_expr(e.args[1]);
+      const Val& divisor = left ? a : b;
+      const Val& dividend = left ? b : a;
+      // rows <= 0 is a matrix view whose shape the lowering never resolved;
+      // the kernel would map n x n over the slot and read past it.
+      if (!is_matrix(divisor.si) || divisor.si.rows != divisor.si.cols ||
+          divisor.si.rows <= 0)
+        fail(e.name + ": divisor is not a square matrix of known size", e.raw);
+      const int64_t n = divisor.si.rows;
+      // A non-matrix dividend is the vector its side implies -- a column
+      // under `\`, a row under `/` -- the same rule Times__ follows. Either
+      // way the shared extent is n and the result has the dividend's shape.
+      const bool dm = is_matrix(dividend.si);
+      if (!dm && !is_vector(dividend.si) && !is_row_vector(dividend.si))
+        fail(e.name + ": dividend is not a matrix or vector", e.raw);
+      const int64_t shared = dm ? (left ? dividend.si.rows : dividend.si.cols)
+                                : g.slots[dividend.slot].len;
+      if (shared != n)
+        fail(e.name + ": inner dimension mismatch (" + std::to_string(n) + "x" +
+                 std::to_string(n) + " against " + std::to_string(shared) + ")",
+             e.raw);
+      const int64_t k = dm ? (left ? dividend.si.cols : dividend.si.rows) : 1;
+      Val v = emit_value(left ? OP_MDIVIDE_LEFT : OP_MDIVIDE_RIGHT, {a, b},
+                         n * k, dividend.si, {(int)n, (int)k});
+      // The kernel solves through the operand types CmdStan's generated code
+      // would have used, because stan-math answers differently for each: bit
+      // 0 is the scalar type (var reaches other overloads than double), bit 1
+      // says the dividend is a vector rather than a one-column matrix.
+      g.ops.back().variant = (uint8_t)((v.autodiff ? 1u : 0u) | (dm ? 0u : 2u));
+      return v;
+    }
+    // multiply is the named spelling of `*`, including its linear algebra:
+    // the branches below pick matvec, GEMM, outer and inner products off
+    // the operand views and the result type, which the alias shares.
+    if (e.name == "Times__" || (e.name == "multiply" && e.args.size() == 2)) {
       Val a = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);
       // Scalar on either side is an elementwise scale, whatever shape the
@@ -2014,7 +2441,7 @@ struct Lowering {
           // Data matrix * vector keeps the tuned MATVEC kernel (its
           // accumulation order is matched to the var path).
           if (g.slots[b.slot].len != a.si.cols)
-            fail("Times__: inner dimension mismatch", e.raw);
+            fail(e.name + ": inner dimension mismatch", e.raw);
           return emit_value(OP_MATVEC, {a, b}, a.si.rows, view_of("UVector"),
                             {(int)a.si.rows, (int)a.si.cols});
         }
@@ -2022,7 +2449,7 @@ struct Lowering {
         const int64_t cb = is_matrix(b.si) ? b.si.cols : 1;
         const int64_t rb = is_matrix(b.si) ? b.si.rows : g.slots[b.slot].len;
         if (rb != a.si.cols)
-          fail("Times__: inner dimension mismatch (" +
+          fail(e.name + ": inner dimension mismatch (" +
                    std::to_string(a.si.rows) + "x" + std::to_string(a.si.cols) +
                    " times " + std::to_string(rb) + "x" + std::to_string(cb) +
                    ")",
@@ -2040,7 +2467,7 @@ struct Lowering {
       }
       if (is_row_vector(a.si) && is_matrix(b.si)) {
         const int64_t k = g.slots[a.slot].len;
-        if (k != b.si.rows) fail("Times__: inner dimension mismatch", e.raw);
+        if (k != b.si.rows) fail(e.name + ": inner dimension mismatch", e.raw);
         return emit_value(OP_GEMM, {a, b}, b.si.cols, view_of("URowVector"),
                           {1, (int)k, (int)b.si.cols});
       }
@@ -2048,11 +2475,11 @@ struct Lowering {
       if (is_row_vector(a.si) && is_vector(b.si) &&
           (e.type_ == "UReal" || e.type_ == "UInt")) {
         if (g.slots[a.slot].len != g.slots[b.slot].len)
-          fail("Times__: inner dimension mismatch", e.raw);
+          fail(e.name + ": inner dimension mismatch", e.raw);
         return emit_value(OP_DOT, {a, b}, 1);
       }
       if (a.si.kind != ViewKind::Flat || b.si.kind != ViewKind::Flat)
-        fail("Times__: unsupported container product", e.raw);
+        fail(e.name + ": unsupported container product", e.raw);
       const int64_t len = std::max(g.slots[a.slot].len, g.slots[b.slot].len);
       return emit_value(OP_MUL, {a, b}, len);
     }
@@ -2088,6 +2515,21 @@ struct Lowering {
       return emit_value(bit->second, {a, b}, n, si);
     }
 
+    // The same surface with one int argument, from the two int lists in
+    // optable.hpp. The flag is which position holds the int, which is the
+    // only thing that varies across the nine.
+    static const std::map<std::string, std::pair<uint16_t, bool>> kBinInt = {
+#define STANLI_BINARY_INT_TABLE(code, name, fn) {#name, {code, true}},
+        STANLI_SCALAR_BINARY_INT_FIRST_LIST(STANLI_BINARY_INT_TABLE)
+#undef STANLI_BINARY_INT_TABLE
+#define STANLI_BINARY_INT_TABLE(code, name, fn) {#name, {code, false}},
+            STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_BINARY_INT_TABLE)
+#undef STANLI_BINARY_INT_TABLE
+    };
+    auto iit = kBinInt.find(e.name);
+    if (iit != kBinInt.end() && e.args.size() == 2)
+      return lower_binary_int(iit->second.first, iit->second.second, e);
+
     // Elementwise unaries + reductions.
     static const std::map<std::string, uint16_t> kUn = {
 // Generated from STANLI_SCALAR_UNARY_LIST (optable.hpp), which also made
@@ -2096,6 +2538,16 @@ struct Lowering {
         STANLI_SCALAR_UNARY_LIST(STANLI_UNARY_TABLE)
 #undef STANLI_UNARY_TABLE
             {"PMinus__", OP_NEG},
+        // minus is the named spelling of the unary operator, so it is the
+        // same negation over the same shapes.
+        {"minus", OP_NEG},
+        // stanc3's Lower_expr.ml maps std_normal_qf onto stan::math::inv_Phi;
+        // one opcode keeps the two spellings from drifting apart.
+        {"std_normal_qf", OP_INV_PHI},
+        // trigamma is the one unary whose derivative has no closed form to
+        // put in the shared list: Math differentiates AS121's recurrence
+        // through its own tape, so the kernel does too (scalar_unary_ad.cpp).
+        {"trigamma", OP_TRIGAMMA},
         {"exp", OP_EXPV},
         {"log", OP_LOGV},
         {"inv_logit", OP_INV_LOGIT},
@@ -2123,7 +2575,9 @@ struct Lowering {
       si.param_free = a.si.param_free;
       return emit_value(uit->second, {a}, g.slots[a.slot].len, si);
     }
-    if (e.name == "PPlus__") return lower_expr(e.args[0]);
+    // plus, and its operator spelling, are the identity on every shape.
+    if (e.name == "PPlus__" || (e.name == "plus" && e.args.size() == 1))
+      return lower_expr(e.args[0]);
     if (e.name == "logit") {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_LOGIT, {a}, g.slots[a.slot].len, a.si);
@@ -2138,19 +2592,14 @@ struct Lowering {
       return emit_value(OP_REP_VEC, {a}, n, view_of("UVector"));
     }
     if (e.name == "log_sum_exp" || e.name == "sum") {
-      if (e.name == "log_sum_exp" && e.args.size() == 2) {
-        Val a = lower_expr(e.args[0]);
-        Val b = lower_expr(e.args[1]);
-        return emit_value(OP_LSE2, {a, b}, 1);
-      }
+      // One argument is the reduction; two is the elementwise form below.
+      if (e.name == "log_sum_exp" && e.args.size() == 2)
+        return lower_binary_mix(OP_LSE2, e);
       Val a = lower_expr(e.args[0]);
       return emit_value(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a}, 1);
     }
-    if (e.name == "log_diff_exp" && e.args.size() == 2) {
-      Val a = lower_expr(e.args[0]);
-      Val b = lower_expr(e.args[1]);
-      return emit_value(OP_LOG_DIFF_EXP, {a, b}, 1);
-    }
+    if (e.name == "log_diff_exp" && e.args.size() == 2)
+      return lower_binary_mix(OP_LOG_DIFF_EXP, e);
     if (e.name == "log_mix" && e.args.size() == 3) {
       Val a = lower_expr(e.args[0]);
       Val b = lower_expr(e.args[1]);
@@ -2166,6 +2615,24 @@ struct Lowering {
     if (e.name == "dot_self") {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_DOT, {a, a}, 1);
+    }
+
+    // squared_distance(x, y) = dot_self(x - y). Two graph kernels that
+    // already carry native adjoints, so no new opcode. It does not go
+    // through shape_of: the language pairs a vector with a row_vector
+    // here, which same_view rejects and stan-math accepts, and the only
+    // thing the difference could change -- element order -- is the same
+    // on both sides because a length is all either view carries.
+    if (e.name == "squared_distance" && e.args.size() == 2) {
+      Val a = lower_expr(e.args[0]);
+      Val b = lower_expr(e.args[1]);
+      const int64_t la = g.slots[a.slot].len, lb = g.slots[b.slot].len;
+      if (la != lb) fail(e.name + ": arguments must match in size", e.raw);
+      SlotInfo si;
+      si.param_free = a.si.param_free && b.si.param_free;
+      if (la > 1) si.kind = ViewKind::Vector;
+      Val d = emit_value(OP_SUB, {a, b}, la, si);
+      return emit_value(OP_DOT, {d, d}, 1);
     }
     return std::nullopt;
   }
@@ -3078,9 +3545,17 @@ struct Lowering {
         }
         return;
       }
-      case mir::Stmt::TargetPE:
-        target_terms.push_back(lower_expr(s.target).slot);
+      case mir::Stmt::TargetPE: {
+        // Stan defines `target += e` for a container `e` as adding `sum(e)`
+        // -- CmdStan's `lp_accum__.add(e)` reduces the whole container. A
+        // target term is consumed as a scalar, so the reduction has to
+        // happen here; pushing the container's slot would silently
+        // contribute element zero alone.
+        Val t = lower_expr(s.target);
+        if (g.slots[t.slot].len != 1) t = emit_value(OP_SUM_VEC, {t}, 1);
+        target_terms.push_back(t.slot);
         return;
+      }
       case mir::Stmt::Block:
       case mir::Stmt::SList:
         for (const auto& k : s.body) lower_stmt(k);
@@ -3344,6 +3819,12 @@ struct Lowering {
 
   // Scalar terms reduce through chained ADD_N ops (6-input limit per op).
   int reduce_terms(std::vector<int> terms) {
+    // The target is a scalar, and every consumer of a term reads one value
+    // from it. A container term is therefore not a shape to accommodate but
+    // a lowering bug -- one whose symptom, before this check, was a model
+    // that sampled a wrong posterior without saying anything.
+    for (int t : terms)
+      if (g.slots[t].len != 1) fail("target term is not a scalar");
     if (terms.empty()) return const_slot(0.0);
     while (terms.size() > 1) {
       std::vector<int> next;
@@ -3469,7 +3950,16 @@ CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
       w.columns.clear();
       w.n_tp_start = w.n_gq_start = 0;
     }
-    if (!w.truncated.empty()) {
+    // STANLI_WA_FORCE_INTERP is a TEST-ONLY hook: it attaches the
+    // interpreter beside a graph that lowered the whole section, so the
+    // cross-path harness (tests/cross_path.hpp) can read both engines off
+    // one model and hold them against each other on the same draw. It
+    // changes which objects are retained, never what either engine
+    // computes -- the graph above is built identically either way. Never
+    // set it in a shipped environment: drivers PREFER an attached
+    // interpreter (capi.cpp, bridgestan_abi.cpp), so it moves every caller
+    // onto the slow per-draw path.
+    if (!w.truncated.empty() || std::getenv("STANLI_WA_FORCE_INTERP")) {
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
