@@ -2,7 +2,7 @@
 # created on first use), memoized for the session.
 stanc_ctx <- function() {
   if (is.null(.stanr_memo$stanc_context)) {
-    if (requireNamespace("V8", quietly = TRUE)) {
+    if (requireNamespace("V8", quietly = TRUE) && !(getOption("stanr_use_quickjsr", FALSE) || Sys.getenv("STANR_USE_QUICKJSR", FALSE))) {
       ctx <- V8::v8()
     } else {
       ctx <- QuickJSR::JSContext$new(stack_size = 4 * 1024 * 1024)
