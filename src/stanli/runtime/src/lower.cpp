@@ -1,19 +1,26 @@
+#include <stanli/algebra.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/constfold.hpp>
+#include <stanli/cse.hpp>
 #include <stanli/inplace.hpp>
 #include <stanli/mir_prog.hpp>
 #include <stanli/mir.hpp>
+#include <stanli/mir_decode.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/ode.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/island.hpp>
+#include <stanli/partition.hpp>
 #include <stanli/reroll.hpp>
-#include <stanli/sexp.hpp>
 #include <stanli/structured_check.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "reroll_profile.hpp"
+
 #include <algorithm>
 #include <cstdlib>
+#include <array>
+#include <chrono>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -29,6 +36,205 @@ namespace {
 
 using ShapeId = uint32_t;
 
+// Opt-in lowering telemetry.  Preparation is normally too short to justify
+// putting clocks (or even formatting) on the path, so STANLI_PROFILE_PREP is
+// deliberately separate from the executor's STANLI_PROFILE and the disabled
+// path never calls the clock. Rows are buffered until every timed compile
+// stage is done: stderr I/O must not become part of a later pass's timing.
+struct PrepTrace {
+  using Clock = std::chrono::steady_clock;
+  using Time = Clock::time_point;
+
+  enum class Extra {
+    None,
+    Rewrites,
+    Removed,
+    ConstFold,
+    Reroll,
+    Partition,
+    Regions,
+    Truncated,
+    MirBytes,
+  };
+
+  struct Row {
+    const char* graph = nullptr;
+    const char* stage = nullptr;
+    int64_t ns = 0;
+    int64_t ops = -1;
+    int64_t slots = -1;
+    int64_t fills = -1;
+    int64_t terms = -1;
+    int64_t views = -1;
+    Extra extra = Extra::None;
+    int64_t a = 0;
+    int64_t b = 0;
+    int64_t c = 0;
+    int64_t d = 0;
+    int64_t packed_rows = 0;
+    int64_t term_density = 0;
+    int64_t element_density = 0;
+    int64_t term_widen = 0;
+    int64_t element_store = 0;
+    bool deep = false;
+    int64_t params = 0;
+    int64_t slot_elems = 0;
+    int64_t fill_elems = 0;
+    int64_t idata_arrays = 0;
+    int64_t idata_elems = 0;
+    int64_t udata = 0;
+  };
+
+  explicit PrepTrace(bool enabled) : enabled_(enabled) {}
+
+  bool enabled() const { return enabled_; }
+
+  Time start() const { return enabled_ ? Clock::now() : Time{}; }
+
+  void plain(const char* graph, const char* stage, Time from,
+             Extra extra = Extra::None, int64_t a = 0) {
+    if (!enabled_) return;
+    Row& r = next();
+    r.graph = graph;
+    r.stage = stage;
+    r.ns = elapsed(from);
+    r.extra = extra;
+    r.a = a;
+  }
+
+  void graph(const char* graph_name, const char* stage, Time from,
+             const Graph& g,
+             const std::vector<std::pair<int, std::vector<double>>>& fills,
+             size_t terms, size_t views, Extra extra = Extra::None,
+             int64_t a = 0, int64_t b = 0, bool deep = false,
+             int64_t params = 0, int64_t c = 0, int64_t d = 0,
+             const detail::RerollDispositionStats* dispositions = nullptr) {
+    if (!enabled_) return;
+    Row& r = next();
+    r.graph = graph_name;
+    r.stage = stage;
+    // Stop the timer before any diagnostic scan below.
+    r.ns = elapsed(from);
+    r.ops = static_cast<int64_t>(g.ops.size());
+    r.slots = static_cast<int64_t>(g.slots.size());
+    r.fills = static_cast<int64_t>(fills.size());
+    r.terms = static_cast<int64_t>(terms);
+    r.views = static_cast<int64_t>(views);
+    r.extra = extra;
+    r.a = a;
+    r.b = b;
+    r.c = c;
+    r.d = d;
+    if (dispositions) {
+      r.packed_rows = dispositions->packed_rows;
+      r.term_density = dispositions->term_density;
+      r.element_density = dispositions->element_density;
+      r.term_widen = dispositions->term_widen;
+      r.element_store = dispositions->element_store;
+    }
+    r.deep = deep;
+    r.params = params;
+    if (deep) {
+      for (const Slot& s : g.slots) r.slot_elems += s.len;
+      for (const auto& f : fills)
+        r.fill_elems += static_cast<int64_t>(f.second.size());
+      r.idata_arrays = static_cast<int64_t>(g.idata_pool.size());
+      for (const auto& v : g.idata_pool)
+        r.idata_elems += static_cast<int64_t>(v.size());
+      r.udata = static_cast<int64_t>(g.udata_pool.size());
+    }
+  }
+
+  void report() const {
+    if (!enabled_) return;
+    for (size_t i = 0; i < size_; ++i) {
+      const Row& r = rows_[i];
+      std::string line = "stanli_prep graph=" + std::string(r.graph) +
+                         " stage=" + r.stage + " ns=" + std::to_string(r.ns);
+      const auto field = [&](const char* name, int64_t value) {
+        line += " ";
+        line += name;
+        line += "=";
+        line += std::to_string(value);
+      };
+      if (r.ops >= 0) {
+        field("ops", r.ops);
+        field("slots", r.slots);
+        field("fills", r.fills);
+        field("terms", r.terms);
+        field("views", r.views);
+      }
+      switch (r.extra) {
+        case Extra::Rewrites:
+          field("rewrites", r.a);
+          break;
+        case Extra::Removed:
+          field("removed", r.a);
+          break;
+        case Extra::ConstFold:
+          field("ops_removed", r.a);
+          field("slots_folded", r.b);
+          break;
+        case Extra::Reroll:
+          field("regions", r.a);
+          field("row_steps", r.d);
+          field("list_steps", r.b);
+          field("candidate_steps", r.c);
+          field("packed_rows", r.packed_rows);
+          field("term_density", r.term_density);
+          field("element_density", r.element_density);
+          field("term_widen", r.term_widen);
+          field("element_store", r.element_store);
+          break;
+        case Extra::Partition:
+          field("groups", r.a);
+          field("lanes", r.b);
+          field("declined", r.c);
+          field("list_steps", r.d);
+          break;
+        case Extra::Regions:
+          field("regions", r.a);
+          break;
+        case Extra::Truncated:
+          field("truncated", r.a);
+          break;
+        case Extra::MirBytes:
+          field("mir_bytes", r.a);
+          break;
+        case Extra::None:
+          break;
+      }
+      if (r.deep) {
+        field("params", r.params);
+        field("slot_elems", r.slot_elems);
+        field("fill_elems", r.fill_elems);
+        field("idata_arrays", r.idata_arrays);
+        field("idata_elems", r.idata_elems);
+        field("udata", r.udata);
+      }
+      std::fprintf(stderr, "%s\n", line.c_str());
+    }
+  }
+
+ private:
+  bool enabled_ = false;
+  std::array<Row, 32> rows_{};
+  size_t size_ = 0;
+
+  int64_t elapsed(Time from) const {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
+                                                                from)
+        .count();
+  }
+
+  Row& next() {
+    // There are currently 20 rows with a write_array graph. Keep this a fixed
+    // buffer so the profiler itself cannot show up as allocator work.
+    if (size_ >= rows_.size()) std::abort();
+    return rows_[size_++];
+  }
+};
+
 struct SlotInfo {
   int64_t rows = 0, cols = 0;  // set for matrices
   bool param_free = false;     // independent of every model parameter
@@ -36,6 +242,15 @@ struct SlotInfo {
   ShapeId shape = 0;  // nonzero exactly for Array values
 };
 static_assert(sizeof(SlotInfo) == 24);
+
+// A proof that every definitely initialized value in a graph slot is an
+// integral double in this closed interval.  Coverage is tracked separately;
+// this is deliberately outside SlotInfo because logical shape and parameter
+// provenance survive much more broadly than the narrow write_array grammar.
+struct IntRange {
+  int32_t lo = 0;
+  int32_t hi = 0;
+};
 
 bool is_matrix(const SlotInfo& si) { return si.kind == ViewKind::Matrix; }
 bool is_vector(const SlotInfo& si) { return si.kind == ViewKind::Vector; }
@@ -154,6 +369,8 @@ struct Lowering {
 
   const DataMap& data;
   std::shared_ptr<ShapeInterner> shape_pool;
+  PrepTrace& prep;
+  const char* prep_graph;
   // The MIR interpreter instance for everything DataOnly: prepare_data,
   // data-only conditions, size expressions. Its environment doubles as the
   // lowering's view of transformed data. Hooks route FnReadData to the
@@ -173,6 +390,10 @@ struct Lowering {
   CompiledModel out;
   std::map<std::string, Val> scope;     // var -> value and logical view
   std::map<std::string, long> int_env;  // data int scalars
+  std::map<int, IntRange> int_ranges;   // runtime integral slot provenance
+  // Definite initialization proof for the target construction grammar.
+  // Writes must extend one contiguous prefix; gaps/strides fail closed.
+  std::map<int, int64_t> int_initialized_prefix;
   std::map<double, int> const_cache;
   struct ObservationKey {
     int slot;
@@ -237,9 +458,10 @@ struct Lowering {
     return autodiff;
   }
 
-  explicit Lowering(const DataMap& d, std::shared_ptr<ShapeInterner> pool =
-                                          std::make_shared<ShapeInterner>())
-      : data(d), shape_pool(std::move(pool)) {}
+  explicit Lowering(
+      const DataMap& d, PrepTrace& p, const char* graph_name,
+      std::shared_ptr<ShapeInterner> pool = std::make_shared<ShapeInterner>())
+      : data(d), shape_pool(std::move(pool)), prep(p), prep_graph(graph_name) {}
 
   void observe(const Val& v, DataMap::Entry en) {
     const int64_t len = g.slots[v.slot].len;
@@ -290,6 +512,39 @@ struct Lowering {
            raw);
   }
 
+  // Every index the lowering sees is a bind-time constant, so what CmdStan
+  // bounds-checks at runtime is checked here instead.
+  std::vector<int64_t> index_positions(const mir::Expr& ix, int64_t extent,
+                                       const char* what,
+                                       const std::string& raw) {
+    std::vector<int64_t> out;
+    if (ix.name == "IndexAll") {
+      for (int64_t i = 0; i < extent; ++i) out.push_back(i);
+      return out;
+    }
+    if (ix.name == "IndexSingle") {
+      const int64_t i = eval_int(ix.args[0]);
+      check_index(i, extent, what, raw);
+      return {i - 1};
+    }
+    if (ix.name == "IndexBetween") {
+      const int64_t lo = eval_int(ix.args[0]), hi = eval_int(ix.args[1]);
+      check_range(lo, hi, extent, what, raw);
+      for (int64_t i = lo; i <= hi; ++i) out.push_back(i - 1);
+      return out;
+    }
+    if (ix.name == "IndexMulti") {
+      DataMap::Entry iv = eval_pure(ix.args[0], "an index list");
+      if (!iv.is_int) fail(std::string(what) + " needs int data", raw);
+      for (int i : iv.i) {
+        check_index(i, extent, what, raw);
+        out.push_back(i - 1);
+      }
+      return out;
+    }
+    fail(std::string("unsupported ") + what + " " + ix.name, raw);
+  }
+
   int const_slot(double v) {
     auto it = const_cache.find(v);
     if (it != const_cache.end()) return it->second;
@@ -305,6 +560,114 @@ struct Lowering {
     en.r = {v};
     observe(out, std::move(en));
     return out;
+  }
+
+  void set_int_range(const Val& v, int64_t lo, int64_t hi) {
+    int_initialized_prefix[v.slot] = g.slots[v.slot].len;
+    if (lo < std::numeric_limits<int32_t>::min() ||
+        hi > std::numeric_limits<int32_t>::max() || lo > hi) {
+      int_ranges.erase(v.slot);
+      return;
+    }
+    int_ranges[v.slot] =
+        IntRange{static_cast<int32_t>(lo), static_cast<int32_t>(hi)};
+  }
+
+  void set_int_initialized(const Val& v) {
+    int_initialized_prefix[v.slot] = g.slots[v.slot].len;
+    int_ranges.erase(v.slot);
+  }
+
+  void set_uninitialized_int_array(const Val& v) {
+    int_ranges.erase(v.slot);
+    int_initialized_prefix[v.slot] = 0;
+  }
+
+  // The fill is exactly the slot's runtime content; CmdStan seeds int
+  // locals with INT_MIN the same way.
+  void observe_fill(const Val& v, bool int_array, double initial, int64_t len) {
+    DataMap::Entry en;
+    en.r.assign((size_t)len, initial);
+    if (int_array) {
+      en.is_int = true;
+      en.i.assign((size_t)len, std::numeric_limits<int>::min());
+    }
+    observe(v, std::move(en));
+  }
+
+  // Target models build int arrays in ascending contiguous writes.  Track the
+  // initialized prefix in O(1) per immutable slot: overwrites inside it are
+  // safe, an adjacent write extends it, and any gap/stride fails closed.  The
+  // interval hull may retain overwritten values, conservatively widening the
+  // later overflow proof.
+  void propagate_int_update(const Val& out_v, const Val& base, const Val& rhs,
+                            int64_t start, int64_t stride) {
+    // A write of an observed value into an observed base stays observed:
+    // splice the element into a copy of the base's entry.
+    if (const DataMap::Entry* be = observation(base)) {
+      const DataMap::Entry* re = observation(rhs);
+      const int64_t rl = g.slots[rhs.slot].len;
+      if ((rl == 0 || re) &&
+          g.slots[out_v.slot].len == g.slots[base.slot].len) {
+        DataMap::Entry en = *be;
+        bool ok = true;
+        for (int64_t k = 0; k < rl; ++k) {
+          const int64_t at = start + k * stride;
+          if (at < 0 || at >= (int64_t)en.r.size()) {
+            ok = false;
+            break;
+          }
+          const double v = k < (int64_t)re->r.size()
+                               ? re->r[(size_t)k]
+                               : static_cast<double>(re->i.at((size_t)k));
+          en.r[(size_t)at] = v;
+          if (!en.i.empty()) en.i[(size_t)at] = (int)v;
+        }
+        if (ok) observe(out_v, std::move(en));
+      }
+    }
+    const auto base_prefix = int_initialized_prefix.find(base.slot);
+    const auto rhs_prefix = int_initialized_prefix.find(rhs.slot);
+    const int64_t rhs_len = g.slots[rhs.slot].len;
+    if (rhs_len == 0 && base_prefix != int_initialized_prefix.end() &&
+        g.slots[out_v.slot].len == g.slots[base.slot].len) {
+      int_initialized_prefix[out_v.slot] = base_prefix->second;
+      const auto base_range = int_ranges.find(base.slot);
+      if (base_range == int_ranges.end())
+        int_ranges.erase(out_v.slot);
+      else
+        int_ranges[out_v.slot] = base_range->second;
+      return;
+    }
+    if (base_prefix == int_initialized_prefix.end() ||
+        rhs_prefix == int_initialized_prefix.end() ||
+        rhs_prefix->second != rhs_len || stride != 1 || start < 0 ||
+        start > base_prefix->second || rhs_len < 0 ||
+        start > g.slots[out_v.slot].len - rhs_len ||
+        g.slots[out_v.slot].len != g.slots[base.slot].len) {
+      int_ranges.erase(out_v.slot);
+      int_initialized_prefix.erase(out_v.slot);
+      return;
+    }
+    int_initialized_prefix[out_v.slot] =
+        std::max(base_prefix->second, start + rhs_len);
+
+    const auto rhs_range = int_ranges.find(rhs.slot);
+    if (rhs_range == int_ranges.end()) {
+      int_ranges.erase(out_v.slot);
+      return;
+    }
+    IntRange range = rhs_range->second;
+    if (base_prefix->second > 0) {
+      const auto base_range = int_ranges.find(base.slot);
+      if (base_range == int_ranges.end()) {
+        int_ranges.erase(out_v.slot);
+        return;
+      }
+      range.lo = std::min(range.lo, base_range->second.lo);
+      range.hi = std::max(range.hi, base_range->second.hi);
+    }
+    int_ranges[out_v.slot] = range;
   }
 
   long eval_int(const mir::Expr& e) {
@@ -344,7 +707,32 @@ struct Lowering {
         }
         fail("unsupported int index expression", e.raw);
       }
+      case mir::Expr::TernaryIf: {
+        if (e.args.size() != 3)
+          fail("malformed conditional size expression", e.raw);
+        const bool condition = eval_int(e.args[0]) != 0;
+        return eval_int(e.args[condition ? 1 : 2]);
+      }
+      case mir::Expr::EOr: {
+        if (e.args.size() != 2)
+          fail("malformed logical size expression", e.raw);
+        return eval_int(e.args[0]) != 0 || eval_int(e.args[1]) != 0;
+      }
+      case mir::Expr::EAnd: {
+        if (e.args.size() != 2)
+          fail("malformed logical size expression", e.raw);
+        return eval_int(e.args[0]) != 0 && eval_int(e.args[1]) != 0;
+      }
+      case mir::Expr::Promotion:
+        if (e.args.size() != 1)
+          fail("malformed promoted size expression", e.raw);
+        return eval_int(e.args[0]);
       case mir::Expr::FunApp:
+        if (e.name == "sum" && e.args.size() == 1) {
+          long acc = 0;
+          for (int v : const_ints(e.args[0])) acc += v;
+          return acc;
+        }
         if (e.name == "Plus__")
           return eval_int(e.args[0]) + eval_int(e.args[1]);
         if (e.name == "Minus__")
@@ -761,10 +1149,164 @@ struct Lowering {
         tuple(en.dims.empty() ? std::vector<int64_t>{found} : en.dims));
   }
 
+  static void data_reads(const mir::Expr& e, std::set<std::string>& names) {
+    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::Internal &&
+        e.name == "FnReadData" && !e.args.empty() &&
+        e.args[0].kind == mir::Expr::LitStr)
+      names.insert(e.args[0].lit_s);
+    for (const auto& a : e.args) data_reads(a, names);
+  }
+
+  static bool direct_input_load(const mir::Stmt& s,
+                                const std::set<std::string>& inputs) {
+    if (s.kind != mir::Stmt::Assignment || !s.lhs_idx.empty() ||
+        !inputs.count(s.lhs))
+      return false;
+    std::set<std::string> reads;
+    data_reads(s.rhs, reads);
+    return reads.size() == 1 && *reads.begin() == s.lhs;
+  }
+
+  struct RebuildShape {
+    bool supported = true;
+    int loaders = 0;
+    std::string loader_lhs;
+    std::set<std::string> reads;
+    std::set<std::string> decls;
+    std::set<std::string> writes;
+  };
+
+  static void scan_rebuild(const mir::Stmt& s, RebuildShape& shape) {
+    switch (s.kind) {
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        for (const auto& k : s.body) scan_rebuild(k, shape);
+        return;
+      case mir::Stmt::For: {
+        std::set<std::string> bounds_reads;
+        data_reads(s.lower, bounds_reads);
+        data_reads(s.upper, bounds_reads);
+        if (!bounds_reads.empty()) shape.supported = false;
+        for (const auto& k : s.body) scan_rebuild(k, shape);
+        return;
+      }
+      case mir::Stmt::Decl: {
+        shape.decls.insert(s.decl_id);
+        if (!s.has_init) return;
+        std::set<std::string> reads;
+        data_reads(s.init, reads);
+        shape.reads.insert(reads.begin(), reads.end());
+        if (!reads.empty()) {
+          ++shape.loaders;
+          shape.loader_lhs = s.decl_id;
+        }
+        return;
+      }
+      case mir::Stmt::Assignment: {
+        shape.writes.insert(s.lhs);
+        std::set<std::string> reads;
+        data_reads(s.rhs, reads);
+        for (const auto& ix : s.lhs_idx) data_reads(ix, reads);
+        shape.reads.insert(reads.begin(), reads.end());
+        if (!reads.empty()) {
+          if (!s.lhs_idx.empty()) shape.supported = false;
+          ++shape.loaders;
+          shape.loader_lhs = s.lhs;
+        }
+        return;
+      }
+      default:
+        // A generated input rebuild has no effects, conditionals, target
+        // writes, validation calls, or returns. New statement kinds fall back
+        // to interpretation rather than guessing which children are safe.
+        shape.supported = false;
+        return;
+    }
+  }
+
+  static bool canonical_input_rebuild(const mir::Stmt& s,
+                                      const std::set<std::string>& inputs) {
+    if (s.kind != mir::Stmt::Block && s.kind != mir::Stmt::SList) return false;
+    RebuildShape shape;
+    scan_rebuild(s, shape);
+    if (!shape.supported || shape.loaders != 1 || shape.reads.size() != 1)
+      return false;
+    const std::string& input = *shape.reads.begin();
+    if (!inputs.count(input) || shape.loader_lhs.empty() ||
+        shape.loader_lhs == input || !shape.decls.count(shape.loader_lhs) ||
+        !shape.writes.count(input))
+      return false;
+    const auto allowed = [&](const std::string& name) {
+      return name == input || name == shape.loader_lhs || name == "pos__";
+    };
+    for (const auto& name : shape.decls)
+      if (!allowed(name)) return false;
+    for (const auto& name : shape.writes)
+      if (!allowed(name)) return false;
+    return true;
+  }
+
   void bind_data(const mir::Program& p) {
+    std::set<std::string> input_names;
+    bool all_inputs_bound = true;
+    bool use_prebound = std::getenv("STANLI_NO_DATA_PRELOAD") == nullptr;
     for (const auto& [name, type] : p.input_vars) {
-      (void)type;
-      if (data.has(name)) td.env()[name] = data.at(name);
+      input_names.insert(name);
+      if (!data.has(name)) {
+        all_inputs_bound = false;
+        continue;
+      }
+      // DataMap does not have the Stan schema, so JSON values spelled with
+      // integer tokens carry an int mirror even when the declaration is
+      // real. Reconstruct the typed value directly, without copying an
+      // irrelevant mirror for a large real matrix.
+      const DataMap::Entry& src = data.at(name);
+      if (!use_prebound) {
+        td.env()[name] = src;
+        continue;
+      }
+      DataMap::Entry dst;
+      const bool want_int = type.base == "SInt" ||
+                            (type.base == "SArray" && type.elem_base == "SInt");
+      dst.is_int = want_int;
+      dst.r = src.r;
+      dst.dims = src.dims;
+      if (want_int) {
+        if (!src.i.empty()) {
+          dst.i = src.i;
+        } else if (!src.r.empty()) {
+          // Preserve the interpreter's existing error/coercion behavior for
+          // malformed data instead of silently truncating real values here.
+          use_prebound = false;
+        }
+      }
+      td.env()[name] = std::move(dst);
+    }
+    use_prebound = use_prebound && all_inputs_bound;
+    if (use_prebound) {
+      // The generated reconstruction allocated the MIR-declared shape and
+      // copied exactly that many flat elements. Normalize to the same shape;
+      // a malformed length falls back to that checked interpreter path.
+      for (const auto& [name, type] : p.input_vars) {
+        DataMap::Entry& dst = td.env().at(name);
+        if (static_cast<int64_t>(dst.r.size()) != sized_len(type)) {
+          use_prebound = false;
+          break;
+        }
+        dst.dims.clear();
+        if (type.base != "SInt" && type.base != "SReal")
+          for (const auto& d : type.dims) dst.dims.push_back(eval_int(d));
+      }
+    }
+    if (use_prebound) {
+      // Skipping the generated declarations also skips MirInterp's normal
+      // declaration-geometry bookkeeping. Preserve it explicitly so checks
+      // on an empty outer array still see its trailing vector/matrix extents,
+      // which JSON [] cannot represent.
+      for (const auto& input : p.input_vars) {
+        const std::string& name = input.first;
+        td.set_declared_dims(name, td.env().at(name).dims);
+      }
     }
     auto record = [&](const std::string& name, const mir::SizedType& type) {
       if (type.base == "SInt") return;
@@ -779,6 +1321,19 @@ struct Lowering {
     }
     for (const auto& st : p.prepare_data) {
       if (st.kind == mir::Stmt::Decl) record(st.decl_id, st.decl_type);
+      // stanc's prepare_data first rebuilds every input from a flat
+      // FnReadData buffer. DataMap has already parsed that buffer into the
+      // same typed, column-major representation above. Replaying the
+      // canonical matrix reconstruction means one interpreted assignment
+      // per element (47 million for nn_rbm1bJ100) and used to dominate model
+      // preparation. FnReadData is compiler-internal and cannot occur in
+      // source transformed-data code, so a top-level statement containing it
+      // is input hydration, not user computation.
+      if (use_prebound &&
+          ((st.kind == mir::Stmt::Decl && input_names.count(st.decl_id)) ||
+           direct_input_load(st, input_names) ||
+           canonical_input_rebuild(st, input_names)))
+        continue;
       td.exec(st);
     }
     for (auto& [name, e] : td.env()) {
@@ -841,6 +1396,24 @@ struct Lowering {
             return constant(static_cast<double>(ii->second));
           const int s = env_slot(e.name);
           if (s >= 0) return scope.at(e.name);
+          // A declared local read before its first write: Materialize
+          // the same uninitialized container the indexed-assignment path would.
+          auto dl = decls.find(e.name);
+          if (dl != decls.end()) {
+            SlotInfo si = dl->second.si;
+            si.param_free = true;
+            Val value{add_slot(dl->second.len, false), dl->second.autodiff, si};
+            const double initial =
+                dl->second.int_array
+                    ? static_cast<double>(std::numeric_limits<int>::min())
+                    : std::numeric_limits<double>::quiet_NaN();
+            out.fills.emplace_back(
+                value.slot, std::vector<double>(dl->second.len, initial));
+            if (dl->second.int_array) set_uninitialized_int_array(value);
+            observe_fill(value, dl->second.int_array, initial, dl->second.len);
+            scope[e.name] = value;
+            return value;
+          }
           fail("unknown variable " + e.name);
         }
         return it->second;
@@ -849,6 +1422,37 @@ struct Lowering {
         // All-Single indices with compile-time values -> element read.
         Val base = lower_expr(e.args[0]);
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return base;
+        if (in_write_array && e.args.size() == 2 &&
+            e.args[1].name == "IndexSingle" &&
+            runtime_int_value(e.args[1].args[0])) {
+          const Val index = lower_expr(e.args[1].args[0]);
+          if (!is_scalar(index)) fail("runtime index is not scalar", e.raw);
+          int64_t count = 0, width = 0;
+          if (is_array(base.si)) {
+            const ArrayShape& shape = array_shape(base.si);
+            const size_t outer =
+                shape.dims.size() - (size_t)leaf_rank(shape.leaf);
+            if (outer != 1 || shape.dims.empty() ||
+                shape.leaf == ViewKind::Matrix)
+              fail("runtime index needs one outer array dimension", e.raw);
+            count = shape.dims.front();
+            width = count == 0 ? 0 : g.slots[base.slot].len / count;
+          } else if (is_vector(base.si) || is_row_vector(base.si)) {
+            count = g.slots[base.slot].len;
+            width = 1;
+          } else {
+            fail("runtime index needs a vector or flat outer array", e.raw);
+          }
+          if (count <= 0 || width <= 0 ||
+              g.slots[base.slot].len != count * width)
+            fail("runtime index has an invalid base shape", e.raw);
+          SlotInfo si = indexed_view(base.si, 1, width, e.type_);
+          Val value =
+              emit_value(OP_DYNAMIC_SLICE, {base, index}, width, si,
+                         {checked_immediate(count, "runtime index extent")});
+          value.si.param_free = false;
+          return value;
+        }
         bool all_single = true;
         for (size_t k = 1; k < e.args.size(); ++k)
           if (e.args[k].name != "IndexSingle") all_single = false;
@@ -984,6 +1588,22 @@ struct Lowering {
           return emit_value(OP_SLICE_STRIDED, {base}, N,
                             array_view({N}, ViewKind::Flat), {(int)k, (int)S});
         }
+        // Row range of the same layout: A[i, lo:hi] is contiguous.
+        if (e.args.size() == 3 && is_array(base.si) && bdims &&
+            array_shape(base.si).leaf == ViewKind::Flat && bdims->size() == 2 &&
+            e.args[1].name == "IndexSingle" &&
+            e.args[2].name == "IndexBetween") {
+          const int64_t i = eval_int(e.args[1].args[0]);
+          const int64_t lo = eval_int(e.args[2].args[0]);
+          const int64_t hi = eval_int(e.args[2].args[1]);
+          const int64_t S = (*bdims)[1];
+          check_index(i, (*bdims)[0], "array index", e.raw);
+          check_range(lo, hi, S, "array range", e.raw);
+          const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+          return emit_value(OP_SLICE, {base}, len,
+                            array_view({len}, ViewKind::Flat),
+                            {(int)(len ? (i - 1) * S + lo - 1 : 0)});
+        }
         // Row-range column read M[a:b, j] (contiguous within the column).
         if (e.args.size() == 3 && is_matrix(base.si) &&
             e.args[1].name == "IndexBetween" &&
@@ -1061,8 +1681,11 @@ struct Lowering {
         }
         return emit_value(OP_INDEX, {base}, 1, view_of(e.type_), {(int)flat});
       }
-      case mir::Expr::LitInt:
-        return constant(static_cast<double>(e.lit_i));
+      case mir::Expr::LitInt: {
+        Val v = constant(static_cast<double>(e.lit_i));
+        set_int_range(v, e.lit_i, e.lit_i);
+        return v;
+      }
       case mir::Expr::LitReal:
         return constant(e.lit);
       case mir::Expr::FunApp:
@@ -1128,6 +1751,39 @@ struct Lowering {
     return false;
   }
 
+  bool needs_runtime_control(const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::IfElse && s.cond.data_only &&
+        !try_eval_pure(s.cond))
+      return true;
+    if (s.kind == mir::Stmt::For) {
+      const long lo = eval_int(s.lower), hi = eval_int(s.upper);
+      if (lo > hi) return false;
+      const auto old = int_env.find(s.loopvar);
+      const bool had_old = old != int_env.end();
+      const long old_value = had_old ? old->second : 0;
+      bool found = false;
+      // Scan under the same compile-time loop bindings ordinary lowering
+      // will use. This keeps static conditions such as `if (t < N)` out of
+      // a region without overlooking an arm that exists only at a later t.
+      for (long v = lo; v <= hi && !found; ++v) {
+        int_env[s.loopvar] = v;
+        for (const auto& k : s.body)
+          if (needs_runtime_control(k)) {
+            found = true;
+            break;
+          }
+      }
+      if (had_old)
+        int_env[s.loopvar] = old_value;
+      else
+        int_env.erase(s.loopvar);
+      return found;
+    }
+    for (const auto& k : s.body)
+      if (needs_runtime_control(k)) return true;
+    return false;
+  }
+
   // Every name an Assignment targets anywhere in `s`, in first-seen order.
   void assigned_names(const mir::Stmt& s, std::vector<std::string>* out) {
     if (s.kind == mir::Stmt::Assignment &&
@@ -1145,18 +1801,14 @@ struct Lowering {
     // would replay them during reverse mode, so ProgramCompiler refuses them
     // until necessity islands have an execute-once effect path.
     for (const auto& [name, v] : int_env) c.ints[name] = {v};
+    std::set<std::string> outer_names;
+    for (const auto& [name, value] : scope) outer_names.insert(name);
+    for (const auto& [name, value] : decls) outer_names.insert(name);
     c.bind_extern = [&](const std::string& name, Range* r) {
       auto sc = scope.find(name);
       const int slot = sc != scope.end() ? sc->second.slot : env_slot(name);
       if (slot < 0) return false;
       const int64_t len = g.slots[slot].len;
-      // An op takes at most six inputs (graph.hpp), and each outside
-      // value the region reads is one of them.
-      if ((int)reg->in_slots.size() >= 6)
-        c.bail(
-            "a parameter-dependent region may read at most 6 values "
-            "from outside it; " +
-            name + " is one too many");
       r->reg = c.alloc((int)len);
       r->len = (int)len;
       const SlotInfo& si = scope.at(name).si;
@@ -1165,11 +1817,14 @@ struct Lowering {
       r->kind = si.kind;
       if (is_array(si)) {
         const ArrayShape& arr = array_shape(si);
-        if (arr.leaf != ViewKind::Flat || arr.dims.size() != 1)
-          c.bail("conditional arms of different logical views");
+        if (arr.leaf == ViewKind::Matrix)
+          c.bail("matrix-leaf arrays are unsupported by a runtime region");
+        r->dims = arr.dims;
       }
-      prog->ins.push_back(IslandProg::LiveIn{r->reg, (int)len});
-      reg->in_slots.push_back(slot);
+      if (len > 0) {
+        prog->ins.push_back(IslandProg::LiveIn{r->reg, (int)len});
+        reg->in_slots.push_back(slot);
+      }
       return true;
     };
     // `target +=` inside the region accumulates into a register of its
@@ -1202,13 +1857,19 @@ struct Lowering {
           view.rows = dl->second.si.rows;
           view.cols = dl->second.si.cols;
           view.kind = dl->second.si.kind;
-          c.declare(name, (int)dl->second.len, view,
-                    std::numeric_limits<double>::quiet_NaN());
+          if (is_array(dl->second.si))
+            view.dims = array_shape(dl->second.si).dims;
+          const double fill =
+              dl->second.int_array
+                  ? static_cast<double>(std::numeric_limits<int>::min())
+                  : std::numeric_limits<double>::quiet_NaN();
+          c.declare(name, (int)dl->second.len, view, fill);
         }
         c.stmt(*s);
         std::vector<std::string> assigned;
         assigned_names(*s, &assigned);
         for (const std::string& name : assigned) {
+          if (!outer_names.count(name)) continue;
           auto it = c.reals.find(name);
           if (it == c.reals.end()) continue;
           reg->out_names.push_back(name);
@@ -1236,6 +1897,7 @@ struct Lowering {
     // lost -- so this usually declines. It is asked anyway because a region
     // can reach here branch-free: a `~` refusal or an unknown name is not
     // the only way to end up compiled.
+    compact_island(*prog);
     prog->native_adj =
         gen_adjoint(*prog) && !std::getenv("STANLI_NO_NATIVE_ADJ");
     *prog_out = std::move(prog);
@@ -1249,8 +1911,39 @@ struct Lowering {
     for (int len : out_lens) packed += len;
     Op is;
     is.opcode = OP_ISLAND;
-    is.n_in = (int)reg.in_slots.size();
-    for (int k = 0; k < is.n_in; ++k) is.in[k] = reg.in_slots[k];
+    std::vector<int> inputs = reg.in_slots;
+    if (inputs.size() <= 6) {
+      for (size_t k = 0; k < prog->ins.size(); ++k) {
+        prog->ins[k].input = (int)k;
+        prog->ins[k].offset = 0;
+      }
+    } else {
+      // Op::in is deliberately compact. Pack just enough leading live-ins
+      // to leave five ordinary descriptors; the program's LiveIn records
+      // retain the individual register ranges and point into the packed one.
+      const size_t packed_count = inputs.size() - 5;
+      int packed = inputs[0];
+      int64_t packed_len = g.slots[packed].len;
+      for (size_t k = 1; k < packed_count; ++k) {
+        packed_len += g.slots[inputs[k]].len;
+        packed = emit_raw(OP_CONCAT2, {packed, inputs[k]}, packed_len, {}).slot;
+      }
+      int offset = 0;
+      for (size_t k = 0; k < packed_count; ++k) {
+        prog->ins[k].input = 0;
+        prog->ins[k].offset = offset;
+        offset += prog->ins[k].len;
+      }
+      std::vector<int> compact{packed};
+      for (size_t k = packed_count; k < inputs.size(); ++k) {
+        prog->ins[k].input = (int)compact.size();
+        prog->ins[k].offset = 0;
+        compact.push_back(inputs[k]);
+      }
+      inputs = std::move(compact);
+    }
+    is.n_in = (int)inputs.size();
+    for (int k = 0; k < is.n_in; ++k) is.in[k] = inputs[k];
     is.out = add_slot(packed, false);
     is.udata = prog.get();
     g.udata_pool.push_back(prog);
@@ -1384,6 +2077,9 @@ struct Lowering {
   // at model evaluation rather than move to construction. Propto densities
   // never fold because their value is instantiation-dependent.
   bool expr_effectful(const mir::Expr& e) {
+    if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
+        e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
+      return true;
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined && fun_effectful(e.name))
       return true;
@@ -1807,6 +2503,328 @@ struct Lowering {
     return ret;
   }
 
+  std::optional<Val> lower_multi_normal_rng(const mir::Expr& e) {
+    if (e.name != "multi_normal_rng") return std::nullopt;
+    if (!in_write_array)
+      fail("multi_normal_rng is supported only in generated quantities", e.raw);
+    if (e.args.size() != 2 || e.type_ != "UVector" ||
+        e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
+      fail("multi_normal_rng: expected one vector result", e.raw);
+    const mir::Expr& location_expr = e.args[0];
+    const mir::Expr& covariance_expr = e.args[1];
+    if (location_expr.type_ != "UVector" ||
+        location_expr.unsized.leaf != mir::UnsizedLeaf::Vector ||
+        location_expr.unsized.depth != 0)
+      fail("multi_normal_rng: expected one vector location", e.raw);
+    if (covariance_expr.type_ != "UMatrix" ||
+        covariance_expr.unsized.leaf != mir::UnsizedLeaf::Matrix ||
+        covariance_expr.unsized.depth != 0)
+      fail("multi_normal_rng: expected one covariance matrix", e.raw);
+
+    Val location = lower_expr(location_expr);
+    Val covariance = lower_expr(covariance_expr);
+    if (!is_vector(location.si))
+      fail("multi_normal_rng: location is not a logical vector", e.raw);
+    if (!is_matrix(covariance.si))
+      fail("multi_normal_rng: covariance has no known matrix shape", e.raw);
+    const int64_t k = g.slots[location.slot].len;
+    if (k > std::numeric_limits<int>::max() || covariance.si.rows != k ||
+        covariance.si.cols != k ||
+        g.slots[covariance.slot].len != checked_product({k, k}, "covariance"))
+      fail("multi_normal_rng: covariance shape must match the location", e.raw);
+
+    Val draw = emit_value(OP_RNG, {location, covariance}, k, view_of(e.type_),
+                          {static_cast<int>(k)});
+    g.ops.back().variant = kMultiNormalRngVariant;
+    draw.si.param_free = false;
+    draw.autodiff = false;
+    return draw;
+  }
+
+  std::optional<Val> lower_categorical_rng(const mir::Expr& e) {
+    if (e.name != "categorical_rng") return std::nullopt;
+    if (!in_write_array)
+      fail("categorical_rng is supported only in generated quantities", e.raw);
+    if (e.args.size() != 1 || e.type_ != "UInt" ||
+        e.unsized.leaf != mir::UnsizedLeaf::Int || e.unsized.depth != 0)
+      fail("categorical_rng: expected one scalar int result", e.raw);
+    const mir::Expr& probabilities = e.args[0];
+    if (probabilities.type_ != "UVector" || probabilities.unsized.depth != 0 ||
+        probabilities.unsized.leaf != mir::UnsizedLeaf::Vector)
+      fail("categorical_rng: expected one probability-vector argument", e.raw);
+
+    Val argument = lower_expr(probabilities);
+    if (!is_vector(argument.si))
+      fail("categorical_rng: argument is not a logical vector", e.raw);
+    Val draw = emit_value(OP_RNG, {argument}, 1, view_of(e.type_));
+    g.ops.back().variant = kCategoricalRngVariant;
+    // A successful call returns a Stan int, but deliberately do not widen
+    // this tranche into runtime-sum range reasoning. Survey only needs the
+    // scalar value; dynamic integer control and indexing still fail closed.
+    draw.si.param_free = false;
+    draw.autodiff = false;
+    set_int_initialized(draw);
+    return draw;
+  }
+
+  std::optional<Val> lower_scalar_rng(const mir::Expr& e) {
+    static const std::map<std::string, ScalarRng> kFamilies = {
+        {"poisson_log_rng", ScalarRng::PoissonLog},
+        {"uniform_rng", ScalarRng::Uniform},
+        {"bernoulli_rng", ScalarRng::Bernoulli},
+        {"normal_rng", ScalarRng::Normal},
+        {"lognormal_rng", ScalarRng::Lognormal},
+        {"binomial_rng", ScalarRng::Binomial},
+    };
+    const auto found = kFamilies.find(e.name);
+    if (found == kFamilies.end()) return std::nullopt;
+    if (!in_write_array)
+      fail(e.name + " is supported only in generated quantities", e.raw);
+    const ScalarRng family = found->second;
+    const size_t arity = scalar_rng_arity(family);
+    if (e.args.size() != arity || e.unsized.depth != 0)
+      fail(e.name + ": expected scalar result and " + std::to_string(arity) +
+               " scalar argument(s)",
+           e.raw);
+    const mir::UnsizedLeaf result_leaf = scalar_rng_is_int(family)
+                                             ? mir::UnsizedLeaf::Int
+                                             : mir::UnsizedLeaf::Real;
+    if (e.unsized.leaf != result_leaf)
+      fail(e.name + ": result type does not match RNG family", e.raw);
+    // Unlike the other scalar families, binomial's first argument is a
+    // population count. Valid stanc MIR always marks it UInt; fail closed on
+    // malformed hand-authored MIR rather than silently truncating a real in
+    // the runtime helper's graph-storage conversion.
+    if (family == ScalarRng::Binomial &&
+        e.args[0].unsized.leaf != mir::UnsizedLeaf::Int)
+      fail("binomial_rng: first argument must be int", e.raw);
+    std::vector<Val> args;
+    args.reserve(arity);
+    for (const mir::Expr& arg : e.args) {
+      if (arg.unsized.depth != 0)
+        fail(e.name + ": container arguments stay on WaInterp", e.raw);
+      args.push_back(lower_expr(arg));
+      if (!is_scalar(args.back()))
+        fail(e.name + ": container arguments stay on WaInterp", e.raw);
+    }
+    Val draw = arity == 1 ? emit_value(OP_RNG, {args[0]}, 1, view_of(e.type_))
+                          : emit_value(OP_RNG, {args[0], args[1]}, 1,
+                                       view_of(e.type_));
+    g.ops.back().variant = static_cast<uint8_t>(family);
+    // An effect is never a graph constant, even when all distribution
+    // parameters are. This also keeps downstream compile-time demands from
+    // mistaking a draw for data.
+    draw.si.param_free = false;
+    draw.autodiff = false;
+    if (scalar_rng_is_int(family)) set_int_initialized(draw);
+    if (family == ScalarRng::Bernoulli) set_int_range(draw, 0, 1);
+    return draw;
+  }
+
+  static bool is_int_sum_surface(const mir::Expr& e) {
+    return e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
+           e.name == "sum" && e.args.size() == 1 && e.type_ == "UInt" &&
+           e.unsized.leaf == mir::UnsizedLeaf::Int && e.unsized.depth == 0 &&
+           e.args[0].unsized.leaf == mir::UnsizedLeaf::Int &&
+           e.args[0].unsized.depth == 1;
+  }
+
+  // Scalar int declarations normally stay in int_env.  A sum over an array
+  // assembled from runtime RNG draws must instead bind to a graph slot.  The
+  // named-value probe is intentionally non-lowering so ordinary compile-time
+  // sums retain the interpreter path they already had.  Range validity is
+  // checked by the guarded lowering, so an unknown runtime source fails
+  // closed instead of falling back through the legacy real-valued reduction.
+  bool runtime_int_sum_candidate(const mir::Expr& e) const {
+    if (!is_int_sum_surface(e) || e.args[0].kind != mir::Expr::Var)
+      return false;
+    const auto value = scope.find(e.args[0].name);
+    return value != scope.end() && !value->second.si.param_free;
+  }
+
+  bool runtime_int_binding(const mir::Expr& e) {
+    return expr_effectful(e) || runtime_int_sum_candidate(e);
+  }
+
+  bool runtime_int_value(const mir::Expr& e) const {
+    if (e.type_ != "UInt" || e.unsized.leaf != mir::UnsizedLeaf::Int ||
+        e.unsized.depth != 0)
+      return false;
+    if (e.kind == mir::Expr::Var) {
+      auto it = scope.find(e.name);
+      return it != scope.end() && !it->second.si.param_free;
+    }
+    if (e.kind == mir::Expr::Indexed && !e.args.empty() &&
+        e.args[0].kind == mir::Expr::Var) {
+      auto it = scope.find(e.args[0].name);
+      return it != scope.end() && !it->second.si.param_free;
+    }
+    return false;
+  }
+
+  static bool prod_transpose_of(const mir::Expr& e, mir::Expr::Kind kind) {
+    return e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
+           e.args.size() == 1 &&
+           (e.name == "Transpose__" || e.name == "transpose") &&
+           e.args[0].kind == kind;
+  }
+
+  bool prod_literal_length(const mir::Expr& e) const {
+    if (e.kind == mir::Expr::LitInt) return true;
+    return e.kind == mir::Expr::Var && int_env.count(e.name) != 0;
+  }
+
+  bool prod_minus_operand(const mir::Expr& e) const {
+    // Promotion is transparent in the reader, so a promoted scalar literal
+    // still has its LitInt/LitReal kind here.
+    if (e.unsized.depth == 0 &&
+        (e.kind == mir::Expr::LitInt || e.kind == mir::Expr::LitReal))
+      return true;
+    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
+        e.name == "rep_vector" && e.args.size() == 2 &&
+        (e.args[0].kind == mir::Expr::LitInt ||
+         e.args[0].kind == mir::Expr::LitReal) &&
+        prod_literal_length(e.args[1]))
+      return true;
+    const bool vector_leaf =
+        e.unsized.depth == 0 && (e.unsized.leaf == mir::UnsizedLeaf::Vector ||
+                                 e.unsized.leaf == mir::UnsizedLeaf::RowVector);
+    if (!vector_leaf) return false;
+    if (e.kind == mir::Expr::Var) return true;
+    if (e.kind == mir::Expr::Indexed) return mir::is_matrix_row_value(e);
+    if (prod_transpose_of(e, mir::Expr::Var)) return true;
+    return mir::is_matrix_row_value(e);
+  }
+
+  bool prod_native_surface(const mir::Expr& e) const {
+    if (e.kind == mir::Expr::Var || prod_transpose_of(e, mir::Expr::Var))
+      return true;
+    if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::StanLib ||
+        e.args.size() != 2 || e.name != "Minus__")
+      return false;
+    return prod_minus_operand(e.args[0]) && prod_minus_operand(e.args[1]);
+  }
+
+  Val lower_runtime_int_sum(const mir::Expr& e) {
+    if (!in_write_array)
+      fail("runtime integer sum is supported only in generated quantities",
+           e.raw);
+    if (!is_int_sum_surface(e))
+      fail(
+          "runtime integer sum needs one one-dimensional int-array argument "
+          "and a scalar int result",
+          e.raw);
+
+    Val a = lower_expr(e.args[0]);
+    if (!is_array(a.si))
+      fail("runtime integer sum argument is not an array", e.raw);
+    const ArrayShape& shape = array_shape(a.si);
+    const int64_t len = g.slots[a.slot].len;
+    if (shape.leaf != ViewKind::Flat || shape.dims.size() != 1)
+      fail("runtime integer sum needs a one-dimensional int array", e.raw);
+    if (len <= 0) fail("runtime integer sum needs a nonempty int array", e.raw);
+    if (a.si.param_free)
+      fail("runtime integer sum needs a runtime-produced int array", e.raw);
+
+    const auto initialized = int_initialized_prefix.find(a.slot);
+    if (initialized == int_initialized_prefix.end() ||
+        initialized->second != len)
+      fail("runtime integer sum array is not definitely initialized", e.raw);
+    const auto known = int_ranges.find(a.slot);
+    if (known == int_ranges.end())
+      fail("runtime integer sum has unproved integral slot values", e.raw);
+    const IntRange range = known->second;
+    const uint64_t n = static_cast<uint64_t>(len);
+    if (range.lo < 0) {
+      const uint64_t magnitude =
+          static_cast<uint64_t>(-static_cast<int64_t>(range.lo));
+      const uint64_t capacity = static_cast<uint64_t>(
+          -static_cast<int64_t>(std::numeric_limits<int32_t>::min()));
+      if (n > capacity / magnitude)
+        fail("runtime integer sum may overflow int32 in a partial sum", e.raw);
+    }
+    if (range.hi > 0 &&
+        n > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) /
+                static_cast<uint64_t>(range.hi))
+      fail("runtime integer sum may overflow int32 in a partial sum", e.raw);
+
+    Val result = emit_value(OP_SUM_VEC, {a}, 1, view_of("UInt"));
+    result.autodiff = false;
+    // A range is only a static proof; the source itself was required to be
+    // runtime-produced.  Keeping this result non-constant prevents later
+    // compile-time geometry/control from consuming it through Val metadata.
+    result.si.param_free = false;
+    set_int_range(result, static_cast<int64_t>(range.lo) * len,
+                  static_cast<int64_t>(range.hi) * len);
+    return result;
+  }
+
+  // map_rect checks that the three job arrays have matching OUTER sizes and
+  // returns an empty vector before touching the shared parameters or the UDF
+  // when that size is zero.  This is the one map_rect case which needs no
+  // runtime callback at all (and is exercised by stanc3's mother model).
+  // Nonempty calls deliberately keep falling through to the unsupported
+  // function diagnostic.
+  std::optional<Val> lower_empty_map_rect(const mir::Expr& e) {
+    if (e.name != "map_rect") return std::nullopt;
+    if (e.args.size() != 5)
+      fail(
+          "map_rect: expected function, shared parameters, job parameters, "
+          "real data, and integer data",
+          e.raw);
+
+    // A non-variable shared-parameter expression still has to be evaluated
+    // before map_rect can take its empty-job return.  Plain zero-length
+    // locals have no materialized slot, so their declared view is enough.
+    SlotInfo shared_si;
+    if (e.args[1].kind == mir::Expr::Var) {
+      auto declared = decls.find(e.args[1].name);
+      if (declared != decls.end()) shared_si = declared->second.si;
+    }
+    if (!is_vector(shared_si)) shared_si = lower_expr(e.args[1]).si;
+    if (!is_vector(shared_si))
+      fail("map_rect: shared parameters are not a vector", e.raw);
+
+    // A default-initialized zero-length local has declaration geometry but
+    // no scope value: there are no elements to initialize or materialize.
+    // map_rect does not read it on this branch, so consult decls before
+    // asking lower_expr for a slot (mother's `tmp2` has exactly this form).
+    SlotInfo job_si;
+    if (e.args[2].kind == mir::Expr::Var) {
+      auto declared = decls.find(e.args[2].name);
+      if (declared != decls.end()) job_si = declared->second.si;
+    }
+    if (!is_array(job_si)) job_si = lower_expr(e.args[2]).si;
+    if (!is_array(job_si)) return std::nullopt;
+    const ArrayShape& job_shape = array_shape(job_si);
+    const size_t job_outer =
+        job_shape.dims.size() - (size_t)leaf_rank(job_shape.leaf);
+    if (job_shape.leaf != ViewKind::Vector || job_outer != 1 ||
+        job_shape.dims.front() != 0)
+      return std::nullopt;
+
+    Val real_data = lower_expr(e.args[3]);
+    Val int_data = lower_expr(e.args[4]);
+    if (!is_array(real_data.si) || !is_array(int_data.si))
+      fail("map_rect: job data arguments are not arrays", e.raw);
+    const ArrayShape& real_shape = array_shape(real_data.si);
+    const ArrayShape& int_shape = array_shape(int_data.si);
+    if (real_shape.leaf != ViewKind::Flat || int_shape.leaf != ViewKind::Flat ||
+        real_shape.dims.size() != 2 || int_shape.dims.size() != 2)
+      fail("map_rect: job data arguments do not have two array dimensions",
+           e.raw);
+    if (real_shape.dims.front() != 0 || int_shape.dims.front() != 0)
+      fail("map_rect: job parameters and job data sizes do not match", e.raw);
+    if (e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
+      fail("map_rect: result is not a vector", e.raw);
+
+    SlotInfo si = view_of(e.type_);
+    si.param_free = true;
+    const int slot = add_slot(0, false);
+    out.fills.emplace_back(slot, std::vector<double>{});
+    return Val{slot, false, si};
+  }
+
   Val lower_funapp(const mir::Expr& e) {
     if (e.fn_lib == mir::Expr::Lib::StanLib && e.name == "dims")
       return lower_dims(e);
@@ -1902,12 +2920,17 @@ struct Lowering {
       if (auto v = fold_const(e)) return *v;
       fail("unsupported function kind for " + e.name, e.raw);
     }
+    if (auto v = lower_empty_map_rect(e)) return *v;
     // The stan-library names split into disjoint groups; each helper owns
     // one and declines the rest.
+    if (auto v = lower_multi_normal_rng(e)) return *v;
+    if (auto v = lower_categorical_rng(e)) return *v;
+    if (auto v = lower_scalar_rng(e)) return *v;
     if (auto v = lower_density_fn(e)) return *v;
     if (auto v = lower_bound_transform(e)) return *v;
     if (auto v = lower_eltwise_fn(e)) return *v;
     if (auto v = lower_matrix_fn(e)) return *v;
+    if (auto v = lower_algebra_fn(e)) return *v;
     if (auto v = lower_ode_fn(e)) return *v;
     // A shape query in a REAL-valued expression. eval_int already answers
     // rows/cols/size from the slot or the data map, but only where an
@@ -2377,6 +3400,13 @@ struct Lowering {
 #undef STANLI_BINARY_TABLE
             {"multiply_log", OP_LMULTIPLY},
     };
+    // Once a generated int RNG has become a runtime scalar slot, named
+    // integer division is no longer foldable. OP_DIV is real division and
+    // would return 3.5 for divide(7, 2), while Stan truncates to 3. Refuse it
+    // so the whole write_array stays on WaInterp until there is a native int
+    // division op. The operator spelling is IntDivide__ and already refuses.
+    if ((e.name == "divide" || e.name == "elt_divide") && e.type_ == "UInt")
+      fail(e.name + ": runtime integer division stays on WaInterp", e.raw);
     // `A \ B` and `B / A` with a matrix divisor are linear solves, not
     // elementwise division: stanc spells them with the ordinary division
     // operators and lowers them to mdivide_left/mdivide_right. The divisor's
@@ -2582,19 +3612,84 @@ struct Lowering {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_LOGIT, {a}, g.slots[a.slot].len, a.si);
     }
+    if ((e.name == "min" || e.name == "max") && in_write_array) {
+      // Preserve the construction-time path for well-formed data-only
+      // extrema, including the scalar two-argument overload.  Dynamic
+      // lowering is deliberately much narrower.
+      if (e.args.size() == 1 || e.args.size() == 2)
+        if (auto v = fold_const(e)) return *v;
+      const mir::ExtremaKind kind = mir::extrema_kind(e);
+      if (udf_depth != 0 || kind == mir::ExtremaKind::Legacy)
+        fail("min/max expression surface stays on WaInterp", e.raw);
+      Val a = lower_expr(e.args[0]);
+      if ((!is_vector(a.si) && !is_row_vector(a.si)) || g.slots[a.slot].len < 0)
+        fail("min/max needs one vector or row-vector argument", e.raw);
+      Val result = emit_value(OP_EXTREMA_VEC, {a}, 1);
+      result.autodiff = false;
+      g.ops.back().variant = kind == mir::ExtremaKind::Max ? 1u : 0u;
+      return result;
+    }
     if (e.name == "mean") {
       Val a = lower_expr(e.args[0]);
       return emit_value(OP_MEAN, {a}, 1);
     }
-    if (e.name == "rep_vector") {
+    if (e.name == "prod" && in_write_array) {
+      // Preserve the pre-existing construction-time behavior for data-only
+      // products.  OP_PROD_VEC is only the dynamic write_array tranche.
+      if (auto v = fold_const(e)) return *v;
+      if (e.args.size() != 1 || e.type_ != "UReal" ||
+          e.unsized.leaf != mir::UnsizedLeaf::Real || e.unsized.depth != 0)
+        fail("prod needs exactly one scalar-real result", e.raw);
+      const mir::Expr& arg = e.args[0];
+      const bool vector_arg = arg.type_ == "UVector" &&
+                              arg.unsized.leaf == mir::UnsizedLeaf::Vector &&
+                              arg.unsized.depth == 0;
+      const bool row_vector_arg =
+          arg.type_ == "URowVector" &&
+          arg.unsized.leaf == mir::UnsizedLeaf::RowVector &&
+          arg.unsized.depth == 0;
+      if (!vector_arg && !row_vector_arg)
+        fail("prod needs one vector or row-vector argument", e.raw);
+      if (udf_depth != 0 || !prod_native_surface(arg))
+        fail("prod expression surface stays on WaInterp", e.raw);
+      Val a = lower_expr(arg);
+      if ((!is_vector(a.si) && !is_row_vector(a.si)) ||
+          g.slots[a.slot].len <= 0)
+        fail("prod needs a nonempty vector or row-vector argument", e.raw);
+      const mir::ProdGrouping grouping = mir::prod_grouping(arg);
+      if (grouping == mir::ProdGrouping::Legacy)
+        fail("prod expression grouping is not native", e.raw);
+      Val result = emit_value(OP_PROD_VEC, {a}, 1);
+      g.ops.back().variant = grouping == mir::ProdGrouping::Scalar ? 1u : 0u;
+      return result;
+    }
+    if (e.name == "rep_vector" || e.name == "rep_row_vector") {
       Val a = lower_expr(e.args[0]);
       const long n = eval_int(e.args[1]);
-      return emit_value(OP_REP_VEC, {a}, n, view_of("UVector"));
+      return emit_value(OP_REP_VEC, {a}, n, view_of(e.type_));
     }
     if (e.name == "log_sum_exp" || e.name == "sum") {
       // One argument is the reduction; two is the elementwise form below.
       if (e.name == "log_sum_exp" && e.args.size() == 2)
         return lower_binary_mix(OP_LSE2, e);
+      const bool int_surface =
+          e.name == "sum" &&
+          (e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int ||
+           (!e.args.empty() &&
+            e.args[0].unsized.leaf == mir::UnsizedLeaf::Int));
+      if (int_surface && in_write_array) {
+        if (runtime_int_sum_candidate(e)) return lower_runtime_int_sum(e);
+        if (!is_int_sum_surface(e))
+          fail(
+              "runtime integer sum needs one one-dimensional int-array "
+              "argument and a scalar int result",
+              e.raw);
+        if (e.args[0].kind != mir::Expr::Var || expr_effectful(e))
+          fail("direct runtime integer sum stays on WaInterp", e.raw);
+        // A param-free named array retains the legacy OP_SUM_VEC/fold path.
+      }
+      if (e.args.size() != 1)
+        fail(e.name + ": reduction needs exactly one argument", e.raw);
       Val a = lower_expr(e.args[0]);
       return emit_value(e.name == "sum" ? OP_SUM_VEC : OP_LOG_SUM_EXP, {a}, 1);
     }
@@ -2651,6 +3746,18 @@ struct Lowering {
       SlotInfo si = matrix_view(a.si.cols, a.si.rows, a.si.param_free);
       return emit_value(OP_TRANSPOSE, {a}, g.slots[a.slot].len, si,
                         {(int)a.si.rows, (int)a.si.cols});
+    }
+    if (e.name == "tcrossprod" && e.args.size() == 1) {
+      Val a = lower_expr(e.args[0]);
+      if (!is_matrix(a.si)) fail("tcrossprod: needs a matrix", e.raw);
+      SlotInfo transpose_si =
+          matrix_view(a.si.cols, a.si.rows, a.si.param_free);
+      Val transpose =
+          emit_value(OP_TRANSPOSE, {a}, g.slots[a.slot].len, transpose_si,
+                     {(int)a.si.rows, (int)a.si.cols});
+      SlotInfo si = matrix_view(a.si.rows, a.si.rows, a.si.param_free);
+      return emit_value(OP_GEMM, {a, transpose}, a.si.rows * a.si.rows, si,
+                        {(int)a.si.rows, (int)a.si.cols, (int)a.si.rows});
     }
     if ((e.name == "diag_pre_multiply" || e.name == "diag_post_multiply") &&
         e.args.size() == 2) {
@@ -2868,6 +3975,98 @@ struct Lowering {
     return std::nullopt;
   }
 
+  // The deprecated Powell algebra_solver interface:
+  //
+  //   algebra_solver(f, x, y, x_r, x_i[, rel_tol, f_tol, max_steps])
+  //
+  // x is an initial guess.  It influences which root is selected but legacy
+  // Stan Math intentionally returns value_type_t<y>, so only y participates
+  // in autodiff.  Keep x as a graph input for values while stamping the op's
+  // activity and result scalar type from y alone.
+  std::optional<Val> lower_algebra_fn(const mir::Expr& e) {
+    if (e.name != "algebra_solver") return std::nullopt;
+    if (e.args.size() != 5 && e.args.size() != 8)
+      fail("algebra_solver: expected 5 or 8 arguments", e.raw);
+    if (e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
+      fail("algebra_solver: result must be a vector", e.raw);
+
+    auto fit = fun_defs.find(e.args[0].name);
+    if (fit == fun_defs.end())
+      fail("algebra_solver: unknown algebraic system " + e.args[0].name, e.raw);
+    const mir::FunDef& f = *fit->second;
+    if (f.arg_views.size() != 4 || f.arg_names.size() != 4 ||
+        f.arg_types.size() != 4 || f.arg_views[0].depth != 0 ||
+        f.arg_views[0].leaf != mir::UnsizedLeaf::Vector ||
+        f.arg_views[1].depth != 0 ||
+        f.arg_views[1].leaf != mir::UnsizedLeaf::Vector ||
+        f.arg_views[2].depth != 1 ||
+        f.arg_views[2].leaf != mir::UnsizedLeaf::Real ||
+        f.arg_views[3].depth != 1 ||
+        f.arg_views[3].leaf != mir::UnsizedLeaf::Int)
+      fail(
+          "algebra_solver: system must take (vector, vector, array[] real, "
+          "array[] int)",
+          e.raw);
+
+    auto spec = std::make_shared<AlgebraSpec>();
+    spec->adopt(fun_defs);
+    spec->system_name = e.args[0].name;
+    spec->x_r = const_values(e.args[3]);
+    spec->x_i = const_ints(e.args[4]);
+    if (e.args.size() == 8) {
+      spec->relative_tolerance = const_values(e.args[5]).at(0);
+      spec->function_tolerance = const_values(e.args[6]).at(0);
+      spec->max_num_steps = (int64_t)eval_int(e.args[7]);
+    }
+
+    Val x = lower_expr(e.args[1]);
+    Val y = lower_expr(e.args[2]);
+    if (!is_vector(x.si) || !is_vector(y.si))
+      fail("algebra_solver: initial guess and parameters must be vectors",
+           e.raw);
+    const int64_t n = g.slots[x.slot].len;
+    if (n > std::numeric_limits<int>::max() ||
+        g.slots[y.slot].len > std::numeric_limits<int>::max() ||
+        spec->x_r.size() > (size_t)std::numeric_limits<int>::max())
+      fail(
+          "algebra_solver: argument is too large for the callback register "
+          "program",
+          e.raw);
+
+    // compile_rhs_args already provides precisely the register convention
+    // the system needs after an unused leading scalar.  Add that formal to a
+    // temporary copy; the retained source definition remains the real
+    // four-argument function used by the interpreter fallback.
+    mir::FunDef adapted = *spec->system();
+    adapted.arg_names.insert(adapted.arg_names.begin(),
+                             "__stanli_algebra_unused_time");
+    adapted.arg_types.insert(adapted.arg_types.begin(), "UReal");
+    adapted.arg_views.insert(adapted.arg_views.begin(),
+                             mir::UnsizedView{0, mir::UnsizedLeaf::Real});
+    adapted.arg_data_only.insert(adapted.arg_data_only.begin(), true);
+    std::vector<RhsArg> args(3);
+    args[0].is_param = true;
+    args[0].len = (int)g.slots[y.slot].len;
+    args[1].len = (int)spec->x_r.size();
+    args[2].is_int = true;
+    args[2].ints = spec->x_i;
+    spec->prog = compile_rhs_args(adapted, *spec->funs(), (int)n, args);
+    if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ALGEBRA"))
+      std::fprintf(stderr,
+                   "stanli: algebraic system %s falls back to the "
+                   "interpreter: %s\n",
+                   spec->system_name.c_str(), spec->prog.why.c_str());
+
+    SlotInfo si = view_of(e.type_);
+    si.param_free = x.si.param_free && y.si.param_free;
+    Val result = emit_raw(OP_ALGEBRA_SOLVER, {x.slot, y.slot}, n, si, {}, -1,
+                          y.autodiff);
+    g.ops.back().variant = y.autodiff ? 0x1u : 0x0u;
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+    return result;
+  }
+
   // stan-math's own defaults differ per solver: rk45 1e-6/1e-6/1e6 (the
   // OdeSpec field initializers), bdf 1e-10/1e-10/1e8. Using one set for
   // both left one_comp_mm's gradients 2.9e-6 off CmdStan, so both
@@ -2884,6 +4083,12 @@ struct Lowering {
   Val emit_ode(std::shared_ptr<OdeSpec> spec, const Val& z0, const Val& theta,
                int64_t N, int64_t S, SlotInfo result_si) {
     Val v = emit_value(OP_ODE, {z0, theta}, N * S, result_si, {(int)N, (int)S});
+    // Bit 2 says the low bits explicitly describe the C++ scalar types
+    // selected by stanc's adlevels: bit 0 for y0, bit 1 for theta. Runtime
+    // adjoint storage is deliberately not used for this decision -- a
+    // write_array value can depend on q while still instantiating on double.
+    g.ops.back().variant = (uint8_t)(0x4u | (z0.autodiff ? 0x1u : 0u) |
+                                     (theta.autodiff ? 0x2u : 0u));
     g.ops.back().udata = spec.get();
     g.udata_pool.push_back(std::move(spec));
     return v;
@@ -3330,6 +4535,7 @@ struct Lowering {
     int64_t len = 0;
     bool autodiff = false;
     SlotInfo si;
+    bool int_array = false;
   };
   // The only name-keyed declaration protocol. Runtime values carry the same
   // static scalar type and SlotInfo in `scope`; this registry is needed only
@@ -3342,6 +4548,30 @@ struct Lowering {
         if (s.read_transform) {
           lower_read_param(s);
         } else if (s.decl_type.base == "SInt") {
+          if (in_write_array && s.has_init && runtime_int_binding(s.init)) {
+            Val v = lower_expr(s.init);
+            SlotInfo expected = view_of(s.decl_type);
+            require_binding(v, 1, expected, s.decl_id, s.raw);
+            v.autodiff = false;
+            v.si = expected;
+            v.si.param_free = false;
+            scope[s.decl_id] = v;
+            decls[s.decl_id] = DeclView{1, false, expected};
+            int_env.erase(s.decl_id);
+            int_locals.erase(s.decl_id);
+            td.env().erase(s.decl_id);
+            return;
+          }
+          // A fresh scalar-int declaration shadows every representation of
+          // an earlier declaration with the same optimized MIR id.  In
+          // particular, a preceding runtime sum may have installed a graph
+          // value in scope/decls; leaving it there would make a later Var
+          // read win over the compile-time literal installed below.
+          scope.erase(s.decl_id);
+          decls.erase(s.decl_id);
+          td.env().erase(s.decl_id);
+          int_env.erase(s.decl_id);
+          int_locals.erase(s.decl_id);
           // Int locals are always data-only in Stan; keep them in int_env
           // so size expressions and indices resolve at compile time.
           int_locals.insert(s.decl_id);
@@ -3359,6 +4589,12 @@ struct Lowering {
           sh.len = sized_len(s.decl_type);
           sh.autodiff = !s.decl_data_only && scalar_autodiff();
           sh.si = view_of(s.decl_type);
+          // CmdStan fills every uninitialized integer container with the
+          // INT_MIN sentinel.  Runtime-sum provenance remains deliberately
+          // one-dimensional, but the value-level initialization contract is
+          // independent of rank.
+          sh.int_array =
+              s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt";
           if (s.has_init) {
             Val v = lower_expr(s.init);
             SlotInfo expected = view_of(s.decl_type, v.si.param_free);
@@ -3376,6 +4612,20 @@ struct Lowering {
         return;
       case mir::Stmt::Assignment: {
         if (s.lhs_idx.empty() && int_locals.count(s.lhs)) {
+          if (in_write_array && runtime_int_binding(s.rhs)) {
+            Val rhs = lower_expr(s.rhs);
+            SlotInfo expected = view_of("UInt");
+            require_binding(rhs, 1, expected, s.lhs, s.raw);
+            rhs.autodiff = false;
+            rhs.si = expected;
+            rhs.si.param_free = false;
+            scope[s.lhs] = rhs;
+            decls[s.lhs] = DeclView{1, false, expected};
+            int_env.erase(s.lhs);
+            int_locals.erase(s.lhs);
+            td.env().erase(s.lhs);
+            return;
+          }
           int_env[s.lhs] = eval_int(s.rhs);
           return;
         }
@@ -3393,8 +4643,14 @@ struct Lowering {
             si.param_free = true;
             prev_v =
                 Val{add_slot(dl->second.len, false), dl->second.autodiff, si};
-            out.fills.emplace_back(prev_v.slot,
-                                   std::vector<double>(dl->second.len, 0.0));
+            const double initial =
+                dl->second.int_array
+                    ? static_cast<double>(std::numeric_limits<int>::min())
+                    : std::numeric_limits<double>::quiet_NaN();
+            out.fills.emplace_back(
+                prev_v.slot, std::vector<double>(dl->second.len, initial));
+            if (dl->second.int_array) set_uninitialized_int_array(prev_v);
+            observe_fill(prev_v, dl->second.int_array, initial, dl->second.len);
           }
           const int prev = prev_v.slot;
           bool all_single = true;
@@ -3417,18 +4673,56 @@ struct Lowering {
             Val nv = emit_value(OP_SET_SLICE_STRIDED, {prev_v, rhs_v},
                                 g.slots[prev].len, out_si,
                                 {(int)i, (int)prev_v.si.rows});
+            propagate_int_update(nv, prev_v, rhs_v, i, prev_v.si.rows);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
           }
           // Between write w[a:b] = rhs (contiguous on 1-D values).
           if (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexBetween") {
+            const bool flat_1d_array =
+                is_array(prev_v.si) &&
+                array_shape(prev_v.si).dims.size() == 1 &&
+                array_shape(prev_v.si).leaf == ViewKind::Flat;
+            if (!is_vector(prev_v.si) && !is_row_vector(prev_v.si) &&
+                !flat_1d_array)
+              fail("range assignment needs a one-dimensional flat value for " +
+                       s.lhs,
+                   s.raw);
             const int64_t lo = eval_int(s.lhs_idx[0].args[0]);
             const int64_t hi = eval_int(s.lhs_idx[0].args[1]);
-            if (g.slots[rhs].len != hi - lo + 1)
+            const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+            check_range(lo, hi, g.slots[prev].len, "range assignment", s.raw);
+            if (g.slots[rhs].len != len)
               fail("range assignment size mismatch for " + s.lhs);
+            const int64_t start = len == 0 ? 0 : lo - 1;
             Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
-                                g.slots[prev].len, out_si, {(int)(lo - 1)});
+                                g.slots[prev].len, out_si, {(int)start});
+            propagate_int_update(nv, prev_v, rhs_v, start, 1);
+            scope[s.lhs] = nv;
+            td.env().erase(s.lhs);
+            return;
+          }
+          // Scatter write x[idx] = rhs. The indices are data, so spell it as
+          // one element write each; repeats then resolve last-wins as CmdStan.
+          if (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexMulti" &&
+              !is_matrix(prev_v.si)) {
+            DataMap::Entry iv =
+                eval_pure(s.lhs_idx[0].args[0], "a scatter index");
+            if (!iv.is_int) fail("scatter index must be int data", s.raw);
+            if ((int64_t)iv.i.size() != g.slots[rhs].len)
+              fail("scatter assignment size mismatch for " + s.lhs);
+            Val nv = prev_v;
+            for (size_t k = 0; k < iv.i.size(); ++k) {
+              check_index(iv.i[k], g.slots[prev].len, "scatter index", s.raw);
+              const Val el =
+                  emit_value(OP_INDEX, {rhs_v}, 1, view_of("UReal"), {(int)k});
+              const Val next =
+                  emit_value(OP_SET_INDEX, {nv, el}, g.slots[prev].len, out_si,
+                             {(int)(iv.i[k] - 1)});
+              propagate_int_update(next, nv, el, iv.i[k] - 1, 1);
+              nv = next;
+            }
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3444,6 +4738,7 @@ struct Lowering {
             Val nv =
                 emit_value(OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len,
                            out_si, {(int)(j * prev_v.si.rows)});
+            propagate_int_update(nv, prev_v, rhs_v, j * prev_v.si.rows, 1);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3455,11 +4750,42 @@ struct Lowering {
             const int64_t lo = eval_int(s.lhs_idx[0].args[0]);
             const int64_t hi = eval_int(s.lhs_idx[0].args[1]);
             const int64_t j = eval_int(s.lhs_idx[1].args[0]) - 1;
-            if (g.slots[rhs].len != hi - lo + 1)
+            if (j < 0 || j >= prev_v.si.cols)
+              fail("column assignment index out of bounds for " + s.lhs);
+            const int64_t len = hi >= lo ? hi - lo + 1 : 0;
+            check_range(lo, hi, prev_v.si.rows, "row-range assignment", s.raw);
+            if (g.slots[rhs].len != len)
               fail("range assignment size mismatch for " + s.lhs);
-            Val nv =
-                emit_value(OP_SET_SLICE, {prev_v, rhs_v}, g.slots[prev].len,
-                           out_si, {(int)(j * prev_v.si.rows + lo - 1)});
+            const int64_t start = len == 0 ? 0 : j * prev_v.si.rows + lo - 1;
+            Val nv = emit_value(OP_SET_SLICE, {prev_v, rhs_v},
+                                g.slots[prev].len, out_si, {(int)start});
+            propagate_int_update(nv, prev_v, rhs_v, start, 1);
+            scope[s.lhs] = nv;
+            td.env().erase(s.lhs);
+            return;
+          }
+          // Columns outermost, as CmdStan's assign walks them: a repeated
+          // index has to resolve last-wins in the same order.
+          if (!all_single && s.lhs_idx.size() == 2 && is_matrix(prev_v.si)) {
+            const std::vector<int64_t> ri = index_positions(
+                s.lhs_idx[0], prev_v.si.rows, "block assignment row", s.raw);
+            const std::vector<int64_t> ci = index_positions(
+                s.lhs_idx[1], prev_v.si.cols, "block assignment column", s.raw);
+            if ((int64_t)(ri.size() * ci.size()) != g.slots[rhs].len)
+              fail("block assignment size mismatch for " + s.lhs, s.raw);
+            Val nv = prev_v;
+            for (size_t j = 0; j < ci.size(); ++j)
+              for (size_t i = 0; i < ri.size(); ++i) {
+                const Val el =
+                    emit_value(OP_INDEX, {rhs_v}, 1, view_of("UReal"),
+                               {(int)(j * ri.size() + i)});
+                const Val next =
+                    emit_value(OP_SET_INDEX, {nv, el}, g.slots[prev].len,
+                               out_si, {(int)(ci[j] * prev_v.si.rows + ri[i])});
+                propagate_int_update(next, nv, el,
+                                     ci[j] * prev_v.si.rows + ri[i], 1);
+                nv = next;
+              }
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3486,6 +4812,7 @@ struct Lowering {
                            : emit_value(OP_SET_SLICE, {prev_v, rhs_v},
                                         g.slots[prev].len, out_si,
                                         {(int)a.off}));
+            propagate_int_update(nv, prev_v, rhs_v, a.off, a.stride);
             scope[s.lhs] = nv;
             td.env().erase(s.lhs);
             return;
@@ -3505,6 +4832,7 @@ struct Lowering {
           }
           Val nv = emit_value(OP_SET_INDEX, {prev_v, rhs_v}, g.slots[prev].len,
                               out_si, {(int)flat});
+          propagate_int_update(nv, prev_v, rhs_v, flat, 1);
           scope[s.lhs] = nv;
           td.env().erase(s.lhs);
           return;
@@ -3558,6 +4886,10 @@ struct Lowering {
       }
       case mir::Stmt::Block:
       case mir::Stmt::SList:
+        if (in_write_array && needs_runtime_control(s)) {
+          lower_param_ifelse(s);
+          return;
+        }
         for (const auto& k : s.body) lower_stmt(k);
         return;
       case mir::Stmt::Skip:
@@ -3775,6 +5107,17 @@ struct Lowering {
         int_env.erase(s.loopvar);
         return;
       }
+      case mir::Stmt::While: {
+        // Unrolled like For. The bound only turns a nonterminating unroll
+        // into an error instead of an out-of-memory kill.
+        for (int64_t guard = 0;; ++guard) {
+          auto c = try_eval_pure(s.cond);
+          if (!c) fail("while condition is not data", s.raw);
+          if (c->r.at(0) == 0.0) return;
+          if (guard > 1000000) fail("while loop did not terminate", s.raw);
+          for (const auto& k : s.body) lower_stmt(k);
+        }
+      }
       case mir::Stmt::IfElse: {
         // The guards are data-only and fold away below (both flags are
         // pinned on), so this is the only chance to note that a CSV
@@ -3801,9 +5144,12 @@ struct Lowering {
           if (!c && s.body.size() > 1) lower_stmt(s.body[1]);
           return;
         }
-        if (s.cond.data_only)
-          fail("data-only condition is unavailable in the lexical frame",
-               s.raw);
+        // Data-only or not, an unfoldable condition compiles to an island.
+        // Data-only says the MIR adlevel is DataOnly, not that the values are
+        // in the interpreter's frame: a UDF local built by indexed assignment
+        // lives in the graph, and only the region compiler can read it there.
+        // The island's live-outs come back parameter-dependent, which costs
+        // adjoints such a branch does not need but is never wrong.
         lower_param_ifelse(s);
         return;
       }
@@ -3847,6 +5193,7 @@ struct Lowering {
   // lowering, and the same passes, because generated quantities are unrolled
   // over the data exactly like the model block is.
   CompiledModel::WriteArray run_write_array(const mir::Program& p) {
+    const auto total_time = prep.start();
     for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
     in_write_array = true;
     // stanc3 guards the two emission groups on these flags; the sampler wants
@@ -3854,23 +5201,65 @@ struct Lowering {
     int_env["emit_transformed_parameters__"] = 1;
     int_env["emit_generated_quantities__"] = 1;
     CompiledModel::WriteArray wa;
+    const auto lower_time = prep.start();
     try {
       for (const auto& s : p.generate_quantities) lower_stmt(s);
     } catch (const CompileError& e) {
-      // Whatever lowered before the failure is still correct and still worth
-      // emitting: an `normal_rng` late in generated quantities should not
-      // cost us the transformed parameters ahead of it.
+      // Keep the valid prefix for diagnostics, but drivers select WaInterp
+      // whenever this marker is set and it evaluates the whole section from
+      // statement zero. There is no continuation frame for an arbitrary
+      // nested failure or its lexical live-outs.
       wa.truncated = e.what();
     }
     std::vector<int> roots = jac_slots;
     for (const auto& v : out.views) roots.push_back(v.slot);
-    make_inplace_updates(g, roots);
-    forward_stores_to_loads(g, roots);
-    reroll(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "lower", lower_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Truncated, !wa.truncated.empty());
+    const auto inplace_time = prep.start();
+    const int inplace = make_inplace_updates(g, roots);
+    prep.graph(prep_graph, "inplace", inplace_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Rewrites, inplace);
+    const auto forward_time = prep.start();
+    const int forwarded = forward_stores_to_loads(g, roots);
+    prep.graph(prep_graph, "store_forward", forward_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
+               forwarded);
+    const auto reroll_time = prep.start();
+    RerollStats rerolled;
+    detail::RerollDispositionStats reroll_dispositions;
+    if (prep.enabled()) {
+      detail::ProfiledRerollStats profiled =
+          detail::reroll_profiled(g, out.fills, target_terms, roots);
+      rerolled = profiled.work;
+      reroll_dispositions = profiled.dispositions;
+    } else {
+      rerolled = reroll(g, out.fills, target_terms, roots);
+    }
+    prep.graph(prep_graph, "reroll", reroll_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Reroll,
+               rerolled.regions, rerolled.list_steps, false, 0,
+               rerolled.candidate_steps, rerolled.row_steps,
+               &reroll_dispositions);
+    // Re-roll can replace many element writes with copying slice stores.
+    // Give those new ops the same last-use proof as the scalar stores.
+    const auto post_reroll_inplace_time = prep.start();
+    const int post_reroll_inplace =
+        rerolled.regions ? make_inplace_updates(g, roots) : 0;
+    prep.graph(prep_graph, "post_reroll_inplace", post_reroll_inplace_time, g,
+               out.fills, target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Rewrites, post_reroll_inplace);
+    const auto finalize_time = prep.start();
     // Nothing reads a result here, but forward() asserts a scalar result
     // slot, so point it at one.
     g.result_slot = const_slot(0.0);
     wa.n_unconstrained = out.n_unconstrained;
+    prep.graph(prep_graph, "finalize", finalize_time, g, out.fills,
+               target_terms.size(), out.views.size());
+    prep.graph(prep_graph, "total", total_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::None, 0,
+               0, true, out.n_unconstrained);
     wa.graph = std::move(g);
     // A section stanc did not emit a guard for (or one lowering stopped
     // short of) has no columns of its own: it starts where the CSV ends.
@@ -3885,9 +5274,16 @@ struct Lowering {
   }
 
   CompiledModel run(const mir::Program& p) {
+    const auto total_time = prep.start();
     for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+    const auto bind_time = prep.start();
     bind_data(p);
+    prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
+               target_terms.size(), out.views.size());
+    const auto lower_time = prep.start();
     for (const auto& s : p.log_prob) lower_stmt(s);
+    prep.graph(prep_graph, "lower", lower_time, g, out.fills,
+               target_terms.size(), out.views.size());
     // Jacobian terms and constrained-parameter views are read straight out
     // of the arena, so no op consumes them and the pass cannot infer them.
     std::vector<int> roots = jac_slots;
@@ -3897,21 +5293,107 @@ struct Lowering {
     std::vector<int> update_roots = roots;
     update_roots.insert(update_roots.end(), target_terms.begin(),
                         target_terms.end());
-    make_inplace_updates(g, update_roots);  // off under STANLI_NO_INPLACE
+    const auto inplace_time = prep.start();
+    const int inplace =
+        make_inplace_updates(g, update_roots);  // off under STANLI_NO_INPLACE
+    prep.graph(prep_graph, "inplace", inplace_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Rewrites, inplace);
     // Deleting the write/read-back pairs first is what leaves a plain
     // arithmetic lane for reroll to vectorize.
-    forward_stores_to_loads(g, update_roots);
+    const auto forward_time = prep.start();
+    const int forwarded = forward_stores_to_loads(g, update_roots);
+    prep.graph(prep_graph, "store_forward", forward_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
+               forwarded);
     // After the update chains collapse, so a data-only chain is one slot
     // rather than N; before reroll, so the lanes it sees have data operands.
-    const_fold(g, out.fills, update_roots);
-    reroll(g, out.fills, target_terms, roots);  // off under STANLI_NO_REROLL
+    const auto constfold_time = prep.start();
+    const ConstFoldStats constfolded = const_fold(g, out.fills, update_roots);
+    prep.graph(prep_graph, "constfold", constfold_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::ConstFold, constfolded.ops_removed,
+               constfolded.slots_folded);
+    const auto reroll_time = prep.start();
+    RerollStats rerolled;
+    detail::RerollDispositionStats reroll_dispositions;
+    if (prep.enabled()) {
+      detail::ProfiledRerollStats profiled =
+          detail::reroll_profiled(g, out.fills, target_terms, roots);
+      rerolled = profiled.work;
+      reroll_dispositions = profiled.dispositions;
+    } else {
+      rerolled = reroll(g, out.fills, target_terms, roots);  // STANLI_NO_REROLL
+    }
+    prep.graph(prep_graph, "reroll", reroll_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Reroll,
+               rerolled.regions, rerolled.list_steps, false, 0,
+               rerolled.candidate_steps, rerolled.row_steps,
+               &reroll_dispositions);
+    // Target terms may have been replaced by vector reductions, so rebuild
+    // the implicit-root set before considering the slice stores reroll made.
+    std::vector<int> post_reroll_roots = roots;
+    post_reroll_roots.insert(post_reroll_roots.end(), target_terms.begin(),
+                             target_terms.end());
+    const auto post_reroll_inplace_time = prep.start();
+    const int post_reroll_inplace =
+        rerolled.regions ? make_inplace_updates(g, post_reroll_roots) : 0;
+    prep.graph(prep_graph, "post_reroll_inplace", post_reroll_inplace_time, g,
+               out.fills, target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Rewrites, post_reroll_inplace);
+    // After re-roll, which keeps first crack at the contiguous shapes it
+    // already handles, and before CSE, which would merge ops shared between
+    // lanes and leave the lanes no longer whole.
+    const auto partition_time = prep.start();
+    const PartitionStats parted =
+        partition_lanes(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "partition", partition_time, g, out.fills,
+               target_terms.size(), out.views.size(),
+               PrepTrace::Extra::Partition, parted.groups, parted.lanes, false,
+               0, parted.declined, parted.list_steps);
+    // Same proof the slice stores re-roll makes get: rebuilt from the terms
+    // partition just replaced.
+    std::vector<int> post_partition_roots = roots;
+    post_partition_roots.insert(post_partition_roots.end(),
+                                target_terms.begin(), target_terms.end());
+    const auto post_partition_inplace_time = prep.start();
+    const int post_partition_inplace =
+        parted.groups ? make_inplace_updates(g, post_partition_roots) : 0;
+    prep.graph(prep_graph, "post_partition_inplace",
+               post_partition_inplace_time, g, out.fills, target_terms.size(),
+               out.views.size(), PrepTrace::Extra::Rewrites,
+               post_partition_inplace);
+    // After every pass that emits a slice store, and before islands, whose
+    // bodies name outer slots in a payload this rename cannot reach.
+    const auto elide_time = prep.start();
+    const int elided = elide_full_extent_stores(g, post_partition_roots);
+    prep.graph(prep_graph, "elide_stores", elide_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Removed,
+               elided);
+    // After reroll, whose lane matching needs the repeated ops it hoists to
+    // still be there, and before islands, so they compile the smaller
+    // residue.
+    const auto cse_time = prep.start();
+    const CseStats cse_st = cse(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "cse", cse_time, g, out.fills, target_terms.size(),
+               out.views.size(), PrepTrace::Extra::Removed, cse_st.ops_removed);
     // LAST, after every other pass has had first crack: compile whatever
     // scalar residue survives (recurrences the re-roll can never widen)
     // into island ops. Off under STANLI_NO_ISLAND.
-    carve_islands(g, out.fills, target_terms, roots);
+    const auto island_time = prep.start();
+    const int islands = carve_islands(g, out.fills, target_terms, roots);
+    prep.graph(prep_graph, "island", island_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::Regions,
+               islands);
+    const auto reduce_time = prep.start();
     std::vector<int> all = target_terms;
     all.insert(all.end(), jac_slots.begin(), jac_slots.end());
     g.result_slot = reduce_terms(all);
+    prep.graph(prep_graph, "reduce", reduce_time, g, out.fills,
+               target_terms.size(), out.views.size());
+    prep.graph(prep_graph, "total", total_time, g, out.fills,
+               target_terms.size(), out.views.size(), PrepTrace::Extra::None, 0,
+               0, true, out.n_unconstrained);
     out.graph = std::move(g);
     return std::move(out);
   }
@@ -3919,25 +5401,32 @@ struct Lowering {
 
 }  // namespace
 
-CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
+CompiledModel compile_model(const std::string& mir_text, const DataMap& data) {
+  const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
+  PrepTrace prep(prep_env && prep_env[0] != '0');
+  const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,
   // keeps the generate_quantities statements and UDF bodies alive for the
   // model's whole life.
-  auto prog =
-      std::make_shared<mir::Program>(mir::read_program(sexp::parse(tmir_text)));
-  Lowering lo(data);
+  const auto parse_time = prep.start();
+  auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
+  prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
+             static_cast<int64_t>(mir_text.size()));
+  Lowering lo(data, prep, "log_prob");
   CompiledModel cm = lo.run(*prog);
   if (!prog->generate_quantities.empty()) {
     // A second lowering, over the transformed data the first one already
     // interpreted: re-running prepare_data would double preparation time on
     // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
-    Lowering wa(data, lo.shape_pool);
+    Lowering wa(data, prep, "write_array", lo.shape_pool);
+    const auto env_copy_time = prep.start();
     wa.td.env() = lo.td.env();
     wa.int_env = lo.int_env_data;
     // bind_data owns immutable declaration shape and physical-layout facts;
     // write_array skips that expensive pass, so its fresh lexical lowering
     // receives the facts together with the already-prepared environment.
     wa.decls = lo.decls;
+    prep.plain("write_array", "env_copy", env_copy_time);
     CompiledModel::WriteArray w = wa.run_write_array(*prog);
     if (w.n_unconstrained != cm.n_unconstrained) {
       // The two graphs read the same draw; if they disagree on its length the
@@ -3976,6 +5465,8 @@ CompiledModel compile_model(const std::string& tmir_text, const DataMap& data) {
     }
     cm.write_array = std::move(w);
   }
+  prep.plain("compile", "total", compile_time);
+  prep.report();
   return cm;
 }
 

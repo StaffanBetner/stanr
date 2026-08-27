@@ -1,25 +1,27 @@
 // ODE integrator ops. stan-math does the solving and the sensitivities; the
 // right-hand side is the model's own user-defined function, evaluated at
-// runtime by the MIR interpreter (see mir_interp.hpp) because the integrator
-// picks the times, so the body cannot be inlined at compile time.
+// runtime by a compiled register program (with the MIR interpreter as its
+// fallback) because the integrator picks the times, so the body cannot be
+// inlined at compile time.
 //
 // One solve per gradient, in the forward sweep, with the solution's jacobian
 // stashed for the backward one.
 //
-// The forward pass has to solve the coupled system (states plus
-// sensitivities) rather than the plain state system: the adaptive step
+// A differentiated forward pass has to solve the states plus the active
+// sensitivities rather than the plain state system: the adaptive step
 // controller sees the coupled error estimate, so at the loose tolerances
 // these models use a states-only solve lands on visibly different values
 // (measured 3e-2 relative on lotka_volterra, whose atol is 1e-3). Since it
-// pays for the sensitivities anyway, it may as well keep them -- the
-// backward is then a matrix-vector product instead of a second solve.
+// pays for those sensitivities anyway, it keeps them -- the backward is then
+// a matrix-vector product instead of a second solve. A fully data-only call
+// has no sensitivities and takes the plain double solve.
 //
 // Reading them out is cheap. stan-math integrates the coupled system on
-// doubles and only builds precomputed-gradient varis for the solution
-// itself, so the nested tape left standing after a solve holds the inputs
-// and the outputs and nothing else; one reverse sweep per output element
-// walks a few dozen varis, against several hundred right-hand-side
-// evaluations for a solve.
+// doubles and builds each solution element as one precomputed-gradient vari
+// directly connected to the active inputs. Chaining that selected output node
+// yields one Jacobian row without walking its sibling output nodes. After one
+// initial tape reset, only that output and those inputs need clearing between
+// rows; the graph backward later applies the rows in Stan's reverse order.
 #include <stanli/graph.hpp>
 #include <stanli/packet.hpp>
 #include <stanli/mir_interp.hpp>
@@ -28,6 +30,7 @@
 
 #include <stan/math.hpp>
 
+#include <type_traits>
 #include <vector>
 
 namespace stanli {
@@ -42,20 +45,35 @@ struct MirRhs {
   const OdeSpec* spec;
 
   template <typename T_y, typename T_param>
+  std::vector<stan::return_type_t<T_y, T_param>> eval(
+      const double& t, const T_y* y, size_t n_y,
+      const std::vector<T_param>& theta, const std::vector<double>& x_r,
+      const std::vector<int>& x_i, std::ostream* msgs = nullptr) const {
+    using T = stan::return_type_t<T_y, T_param>;
+    if (spec->prog.ok) {
+      // Seed mixed scalar inputs directly into the result-typed register file.
+      // theta.size(), rather than prog.n_th, retains promotion of lowering's
+      // unread no-parameter placeholder in the old tape position.
+      std::vector<T> out;
+      run_rhs<T>(spec->prog, t, y, theta.data(), theta.size(), x_r.data(), out);
+      return out;
+    }
+    // Preserve the interpreter adapter exactly. The modern caller used to
+    // make this state vector before entering MirRhs; doing it here keeps the
+    // fallback's ownership and evaluation path unchanged.
+    std::vector<T_y> state;
+    if (n_y != 0) state.assign(y, y + n_y);
+    return (*this)(t, state, theta, x_r, x_i, msgs);
+  }
+
+  template <typename T_y, typename T_param>
   std::vector<stan::return_type_t<T_y, T_param>> operator()(
       const double& t, const std::vector<T_y>& y,
       const std::vector<T_param>& theta, const std::vector<double>& x_r,
-      const std::vector<int>& x_i, std::ostream* = nullptr) const {
+      const std::vector<int>& x_i, std::ostream* msgs = nullptr) const {
     using T = stan::return_type_t<T_y, T_param>;
-    if (spec->prog.ok) {
-      // y and theta arrive as T_y / T_param, which are T or double; the
-      // register file is T, so promote through a small staging buffer only
-      // when they differ.
-      std::vector<T> out, ys(y.begin(), y.end()),
-          ths(theta.begin(), theta.end());
-      run_rhs<T>(spec->prog, T(t), ys.data(), ths.data(), x_r.data(), out);
-      return out;
-    }
+    if (spec->prog.ok)
+      return eval(t, y.data(), y.size(), theta, x_r, x_i, msgs);
     // Rebuild the formal argument list the right-hand side declares.
     // MirInterp::call binds positionally by declared type, so the real
     // arguments have to arrive already split out of the packed theta and
@@ -99,8 +117,8 @@ struct VarRhs {
              const std::vector<double>& x_r,
              const std::vector<int>& x_i) const {
     using T = stan::return_type_t<T_y, T_param>;
-    const std::vector<T_y> yv(y.data(), y.data() + y.size());
-    const std::vector<T> dy = MirRhs{spec}(t, yv, theta, x_r, x_i);
+    const std::vector<T> dy =
+        MirRhs{spec}.eval(t, y.data(), (size_t)y.size(), theta, x_r, x_i);
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(dy.size());
     for (size_t i = 0; i < dy.size(); ++i) out(i) = dy[i];
     return out;
@@ -110,9 +128,11 @@ struct VarRhs {
 // in = {z_init, theta}; data ts / x_r / x_i and tolerances live in the spec.
 // out = N_ts * S, array-major (time outer, state inner), matching Stan's
 // array[N, S] layout.
-template <typename T>
-std::vector<std::vector<T>> solve(const OdeSpec& s, const std::vector<T>& z0,
-                                  const std::vector<T>& theta) {
+template <typename T_y0, typename T_theta>
+std::vector<std::vector<stan::return_type_t<T_y0, T_theta>>> solve(
+    const OdeSpec& s, const std::vector<T_y0>& z0,
+    const std::vector<T_theta>& theta) {
+  using T = stan::return_type_t<T_y0, T_theta>;
   // The deprecated entry points, unchanged: the four corpus ODE models
   // are verified against exactly this call.
   if (s.legacy) {
@@ -127,7 +147,7 @@ std::vector<std::vector<T>> solve(const OdeSpec& s, const std::vector<T>& z0,
   }
 
   VarRhs f{&s};
-  Eigen::Matrix<T, Eigen::Dynamic, 1> y0((Eigen::Index)z0.size());
+  Eigen::Matrix<T_y0, Eigen::Dynamic, 1> y0((Eigen::Index)z0.size());
   for (size_t i = 0; i < z0.size(); ++i) y0((Eigen::Index)i) = z0[i];
   // Dispatch on the solver the model actually named. Mapping adams onto
   // bdf (or ckrk onto rk45) agrees to tolerance on an easy system and is
@@ -159,9 +179,71 @@ std::vector<std::vector<T>> solve(const OdeSpec& s, const std::vector<T>& z0,
   return out;
 }
 
+// Solve with the scalar types selected at lowering. OP_ODE variant bit 2 marks
+// an explicit type mask: low bit y0, next bit theta (1 = var). Variant zero is
+// the compatibility encoding for hand-built graphs and means the former
+// both-var behavior.
+// The scratch layout remains [y0 columns, theta columns] for every activity
+// combination; inactive columns are explicit zeros for deterministic scratch,
+// while ode_bwd gates their scatter with the same type mask.
+template <bool YAutodiff, bool ThetaAutodiff>
+void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
+  using T_y0 = std::conditional_t<YAutodiff, var, double>;
+  using T_theta = std::conditional_t<ThetaAutodiff, var, double>;
+  const int64_t S = ctx.in[0].len, P = ctx.in[1].len, W = S + P;
+  double* J = ctx.scratch;
+
+  if constexpr (!YAutodiff && !ThetaAutodiff) {
+    // A data-only solve has no reason to construct a nested reverse-mode tape.
+    std::vector<T_y0> z0(ctx.in[0].data, ctx.in[0].data + S);
+    std::vector<T_theta> th(ctx.in[1].data, ctx.in[1].data + P);
+    const auto solv = solve(s, z0, th);
+    for (size_t n = 0; n < solv.size(); ++n)
+      for (int64_t k = 0; k < S; ++k)
+        ctx.out.data[(int64_t)n * S + k] = solv[n][k];
+    for (int64_t i = 0; i < ctx.out.len * W; ++i) J[i] = 0.0;
+  } else {
+    stan::math::nested_rev_autodiff nested;
+    std::vector<T_y0> z0(ctx.in[0].data, ctx.in[0].data + S);
+    std::vector<T_theta> th(ctx.in[1].data, ctx.in[1].data + P);
+    const auto solv = solve(s, z0, th);
+    for (size_t n = 0; n < solv.size(); ++n)
+      for (int64_t k = 0; k < S; ++k)
+        ctx.out.data[(int64_t)n * S + k] = solv[n][k].val();
+
+    // d(solution)/d(z_init, theta), row per flattened solution element.
+    // Harvest last-to-first to retain the row order ode_bwd and the former
+    // all-var solve used. Each solution is a precomputed-gradient node whose
+    // one chain call writes this raw row directly to the active inputs.
+    stan::math::set_zero_all_adjoints_nested();
+    for (int64_t o = ctx.out.len; o-- > 0;) {
+      auto* output = solv[(size_t)(o / S)][(size_t)(o % S)].vi_;
+      output->adj_ = 1.0;
+      output->chain();
+      if constexpr (YAutodiff) {
+        for (int64_t i = 0; i < S; ++i) {
+          J[o * W + i] = z0[(size_t)i].adj();
+          z0[(size_t)i].vi_->adj_ = 0.0;
+        }
+      } else {
+        for (int64_t i = 0; i < S; ++i) J[o * W + i] = 0.0;
+      }
+      if constexpr (ThetaAutodiff) {
+        for (int64_t i = 0; i < P; ++i) {
+          J[o * W + S + i] = th[(size_t)i].adj();
+          th[(size_t)i].vi_->adj_ = 0.0;
+        }
+      } else {
+        for (int64_t i = 0; i < P; ++i) J[o * W + S + i] = 0.0;
+      }
+      output->adj_ = 0.0;
+    }
+  }
+}
+
 void ode_fwd(KernelCtx& ctx) {
   const OdeSpec& s = *static_cast<const OdeSpec*>(ctx.udata);
-  const int64_t S = ctx.in[0].len, P = ctx.in[1].len, W = S + P;
+  const int64_t S = ctx.in[0].len, P = ctx.in[1].len;
   // The value alone: solve the states, skip the sensitivities and the
   // jacobian nobody is going to read. This is what CmdStan's
   // log_prob<double> does, and at a solution grazing zero it is a
@@ -177,36 +259,31 @@ void ode_fwd(KernelCtx& ctx) {
         ctx.out.data[(int64_t)n * S + k] = solv[n][k];
     return;
   }
-  stan::math::nested_rev_autodiff nested;
-  std::vector<var> z0(ctx.in[0].data, ctx.in[0].data + S);
-  std::vector<var> th(ctx.in[1].data, ctx.in[1].data + P);
-  auto solv = solve(s, z0, th);
-  for (size_t n = 0; n < solv.size(); ++n)
-    for (int64_t k = 0; k < S; ++k)
-      ctx.out.data[(int64_t)n * S + k] = solv[n][k].val();
-
-  // d(solution)/d(z_init, theta), row per flattened solution element. Swept
-  // last element first so the adjoint accumulation in ode_bwd runs in the
-  // same order the reverse sweep over these varis used to, which keeps the
-  // gradient bit-identical to what a second solve produced.
-  double* J = ctx.scratch;
-  for (int64_t o = ctx.out.len; o-- > 0;) {
-    stan::math::set_zero_all_adjoints_nested();
-    stan::math::grad(solv[(size_t)(o / S)][(size_t)(o % S)].vi_);
-    for (int64_t i = 0; i < S; ++i) J[o * W + i] = z0[(size_t)i].adj();
-    for (int64_t i = 0; i < P; ++i) J[o * W + S + i] = th[(size_t)i].adj();
-  }
+  const uint8_t type_mask =
+      (ctx.variant & 0x4u) != 0 ? (ctx.variant & 0x3u) : 0x3u;
+  if (type_mask == 0x3u)
+    ode_fwd_typed<true, true>(ctx, s);
+  else if (type_mask == 0x1u)
+    ode_fwd_typed<true, false>(ctx, s);
+  else if (type_mask == 0x2u)
+    ode_fwd_typed<false, true>(ctx, s);
+  else
+    ode_fwd_typed<false, false>(ctx, s);
 }
 
 void ode_bwd(KernelCtx& ctx) {
-  if (ctx.in_adj[0].data == nullptr && ctx.in_adj[1].data == nullptr) return;
+  const uint8_t type_mask =
+      (ctx.variant & 0x4u) != 0 ? (ctx.variant & 0x3u) : 0x3u;
+  const bool y_active = (type_mask & 0x1u) != 0 && ctx.in_adj[0].data;
+  const bool theta_active = (type_mask & 0x2u) != 0 && ctx.in_adj[1].data;
+  if (!y_active && !theta_active) return;
   const int64_t S = ctx.in[0].len, P = ctx.in[1].len, W = S + P;
   const double* J = ctx.scratch;
   for (int64_t o = ctx.out.len; o-- > 0;) {
     const double a = ctx.out_adj_vec.data[o];
-    if (ctx.in_adj[0].data)
+    if (y_active)
       for (int64_t i = 0; i < S; ++i) ctx.in_adj[0].data[i] += a * J[o * W + i];
-    if (ctx.in_adj[1].data)
+    if (theta_active)
       for (int64_t i = 0; i < P; ++i)
         ctx.in_adj[1].data[i] += a * J[o * W + S + i];
   }

@@ -1,14 +1,16 @@
 // Matrix-valued legacy ops: GP covariance, cholesky_decompose, diag_matrix,
-// multi_normal(_cholesky). Forward runs the prim (double) implementation;
-// backward replays the same call on a nested var tape and seeds the output
-// adjoints with the dot trick. Correct by construction against the code
-// CmdStan runs, at the cost of a nested tape per gradient.
+// multi_normal(_cholesky). Most forwards run the prim (double)
+// implementation and backwards replay the same call on a nested var tape,
+// seeded with the dot trick. The profiled single-vector Cholesky density below
+// is the compact native exception: it retains Stan Math's closed-form matrix
+// partials from forward to backward.
 //
 // Matrices live in slots column-major, matching Eigen and the rest of the
 // pipeline, so a flat slot maps straight onto Map<MatrixXd>.
 #include <stanli/graph.hpp>
 #include <stanli/legacy.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/packet.hpp>
 
 #include <stan/math.hpp>
 
@@ -179,6 +181,65 @@ template <bool Grad, typename... Args>
   return value;
 }
 
+double* tail_stash(double* s, const VarM& M) {
+  for (int64_t i = 0; i < M.size(); ++i) *s++ = M.data()[i].adj();
+  return s;
+}
+double* tail_stash(double* s, const VarV& v) {
+  for (int64_t i = 0; i < v.size(); ++i) *s++ = v(i).adj();
+  return s;
+}
+double* tail_stash(double* s, const stan::math::var& x) {
+  *s++ = x.adj();
+  return s;
+}
+double* tail_stash(double* s, const std::vector<VarV>& xs) {
+  for (const auto& x : xs) s = tail_stash(s, x);
+  return s;
+}
+
+// finish_tail_density split across the sweeps: one tape per gradient, gradded
+// in the FORWARD with a seed of 1, contracted in the backward. That is only
+// bitwise for a density whose reverse sweep multiplies the output adjoint in
+// once per operand -- the partials_propagator family. Densities that reduce
+// through var arithmetic (wishart, lkj, wiener, multi_normal_prec) round the
+// two orders differently and stay on the two-tape form above.
+template <typename... Args>
+[[gnu::always_inline]] inline double tail_density_fwd(
+    KernelCtx& ctx, const stan::math::var& density, const Args&... args) {
+  const double value = density.val();
+  if (!values_only()) {
+    stan::math::grad(density.vi_);
+    double* s = ctx.scratch;
+    ((s = tail_stash(s, args)), ...);
+  }
+  return value;
+}
+
+// Mirror of tail_density_fwd's layout: one partial per element of the first
+// NArgs inputs, in slot order.
+template <int NArgs>
+void tail_density_bwd(KernelCtx& ctx) {
+  const double* s = ctx.scratch;
+  const double w = ctx.out_adj;
+  for (int k = 0; k < NArgs; ++k) {
+    if (ctx.in_adj[k].data)
+      Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
+          w * Eigen::Map<const Eigen::ArrayXd>(s, ctx.in[k].len);
+    s += ctx.in[k].len;
+  }
+}
+
+template <int NArgs>
+int64_t tail_density_scratch(const Op& op, const Slot* slots) {
+  int64_t t = 0;
+  for (int k = 0; k < NArgs && k < op.n_in; ++k) {
+    if (op.in[k] < 0) return 0;
+    t += slots[op.in[k]].len;
+  }
+  return t;
+}
+
 // ---- multi_normal_lpdf(y | mu, Sigma) -------------------------------------
 // in = {y, mu, Sigma}; idata = {n}. Propto and per-argument activity follow
 // the density convention: stan-math drops terms by argument type, so inactive
@@ -237,19 +298,23 @@ double mn_eval(KernelCtx& ctx) {
     else
       v_out = aS ? (am ? call(ysd, mu, S) : call(ysd, mud, S))
                  : (am ? call(ysd, mu, Sd) : call(ysd, mud, Sd));
-    const double vv = v_out.val();
-    if constexpr (Grad) {
-      var jj = v_out * ctx.out_adj;
-      stan::math::grad(jj.vi_);
-      // y stays hand-written here: it is a std::vector<VarV>, not a VarV.
-      if (ay && ctx.in_adj[0].data)
-        for (int64_t k = 0; k < m; ++k)
-          for (int64_t i = 0; i < n; ++i)
-            ctx.in_adj[0].data[k * n + i] += ys[k](i).adj();
-      if (am) tail_scatter(ctx, 1, mu);
-      if (aS) tail_scatter(ctx, 2, S);
+    if constexpr (Kind == kMnPrec) {
+      const double vv = v_out.val();
+      if constexpr (Grad) {
+        var jj = v_out * ctx.out_adj;
+        stan::math::grad(jj.vi_);
+        // y stays hand-written here: it is a std::vector<VarV>, not a VarV.
+        if (ay && ctx.in_adj[0].data)
+          for (int64_t k = 0; k < m; ++k)
+            for (int64_t i = 0; i < n; ++i)
+              ctx.in_adj[0].data[k * n + i] += ys[k](i).adj();
+        if (am) tail_scatter(ctx, 1, mu);
+        if (aS) tail_scatter(ctx, 2, S);
+      }
+      return vv;
+    } else {
+      return tail_density_fwd(ctx, v_out, ys, mu, S);
     }
-    return vv;
   }
   if (ay && am && aS)
     out = call(y, mu, S);
@@ -268,24 +333,118 @@ double mn_eval(KernelCtx& ctx) {
   else
     return call(yd, mud, Sd);
 
-  const double v = out.val();
-  if constexpr (Grad) {
-    var j = out * ctx.out_adj;
-    stan::math::grad(j.vi_);
-    if (ay) tail_scatter(ctx, 0, y);
-    if (am) tail_scatter(ctx, 1, mu);
-    if (aS) tail_scatter(ctx, 2, S);
+  if constexpr (Kind == kMnPrec) {
+    const double v = out.val();
+    if constexpr (Grad) {
+      var j = out * ctx.out_adj;
+      stan::math::grad(j.vi_);
+      if (ay) tail_scatter(ctx, 0, y);
+      if (am) tail_scatter(ctx, 1, mu);
+      if (aS) tail_scatter(ctx, 2, S);
+    }
+    return v;
+  } else {
+    return tail_density_fwd(ctx, out, y, mu, S);
   }
-  return v;
 }
 void mn_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_eval<false>(ctx); }
-void mn_bwd(KernelCtx& ctx) { mn_eval<true>(ctx); }
+void mn_bwd(KernelCtx& ctx) { tail_density_bwd<3>(ctx); }
 void mnprec_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = mn_eval<false, kMnPrec>(ctx);
 }
 void mnprec_bwd(KernelCtx& ctx) { mn_eval<true, kMnPrec>(ctx); }
-void mnc_fwd(KernelCtx& ctx) { ctx.out.data[0] = mn_eval<false, kMnChol>(ctx); }
-void mnc_bwd(KernelCtx& ctx) { mn_eval<true, kMnChol>(ctx); }
+
+// gp_regr's single-observation Cholesky density has data y and mu, active L,
+// and propto=true. In that exact instantiation Stan Math's partials
+// propagator computes a closed-form L pullback in doubles, then builds a var
+// edge around it. Retain that matrix in scratch during the forward instead of
+// rebuilding an AoS var matrix and nested tape in both sweeps. The equality
+// checks here are deliberately strict: every other activity, propto, and
+// vectorized shape stays on mn_eval's generic replay.
+inline bool mnc_native_variant(uint8_t variant, const int* idata,
+                               int64_t n_idata) {
+  return variant == 0x84u && idata != nullptr && n_idata == 2 &&
+         idata[0] >= 0 && idata[1] == 1;
+}
+
+bool mnc_native_shape(const KernelCtx& ctx) {
+  if (!mnc_native_variant(ctx.variant, ctx.idata, ctx.n_idata) ||
+      ctx.n_in != 3 || ctx.out.len != 1)
+    return false;
+  const int64_t n = ctx.idata[0];
+  return ctx.in[0].len == n && ctx.in[1].len == n && ctx.in[2].len == n * n;
+}
+
+double mnc_native_fwd(KernelCtx& ctx) {
+  static constexpr const char* function = "multi_normal_cholesky_lpdf";
+  const int64_t n = ctx.idata[0];
+  CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
+  CMapM L(ctx.in[2].data, n, n);
+
+  // Copy the pinned single-vector Stan Math overload's checks and
+  // arithmetic order. That overload intentionally does not call
+  // check_cholesky_factor; changing its observable domain here would make the
+  // native and fallback paths disagree.
+  stan::math::check_size_match(function, "Size of random variable", y.size(),
+                               "size of location parameter", mu.size());
+  stan::math::check_size_match(function, "Size of random variable", y.size(),
+                               "rows of covariance parameter", L.rows());
+  stan::math::check_size_match(function, "Size of random variable", y.size(),
+                               "columns of covariance parameter", L.cols());
+  stan::math::check_finite(function, "Location parameter", mu);
+  stan::math::check_not_nan(function, "Random variable", y);
+  if (n == 0) return 0.0;
+
+  VecD y_minus_mu = y - mu;
+  MatD inv_L = stan::math::mdivide_left_tri<Eigen::Lower>(L);
+  Eigen::RowVectorXd half;
+  half = (inv_L.template triangularView<Eigen::Lower>() *
+          y_minus_mu.template cast<double>())
+             .transpose();
+
+  VecD scaled_diff;
+  if (!values_only()) {
+    scaled_diff =
+        (half * inv_L.template triangularView<Eigen::Lower>()).transpose();
+  }
+
+  double logp(0.0);
+  logp += stan::math::sum(stan::math::log(inv_L.diagonal()));
+  if (!values_only())
+    MapM(ctx.scratch, n, n) = scaled_diff * half - inv_L.transpose();
+  logp -= 0.5 * stan::math::sum(stan::math::dot_self(half));
+  return logp;
+}
+
+void mnc_fwd(KernelCtx& ctx) {
+  ctx.out.data[0] = mnc_native_shape(ctx) ? mnc_native_fwd(ctx)
+                                          : mn_eval<false, kMnChol>(ctx);
+}
+void mnc_bwd(KernelCtx& ctx) {
+  if (!mnc_native_shape(ctx)) {
+    tail_density_bwd<3>(ctx);
+    return;
+  }
+  if (!ctx.in_adj[2].data) return;
+  const int64_t n = ctx.idata[0];
+  for (int64_t i = 0; i < n * n; ++i)
+    ctx.in_adj[2].data[i] += ctx.out_adj * ctx.scratch[i];
+}
+
+// Everything that misses the native gate replays through mn_eval, which
+// stashes one partial per input element instead of the pullback's n*n.
+int64_t mnc_scratch(const Op& op, const Slot* slots) {
+  if (op.n_in != 3 || op.out < 0 || slots == nullptr || op.in[0] < 0 ||
+      op.in[1] < 0 || op.in[2] < 0)
+    return 0;
+  if (!mnc_native_variant(op.variant, op.idata, op.n_idata))
+    return tail_density_scratch<3>(op, slots);
+  const int64_t n = op.idata[0];
+  if (slots[op.in[0]].len != n || slots[op.in[1]].len != n ||
+      slots[op.in[2]].len != n * n || slots[op.out].len != 1)
+    return tail_density_scratch<3>(op, slots);
+  return n * n;
+}
 
 // ---- general matrix product: out = A * B ----------------------------------
 // idata = {rows_a, cols_a, cols_b}; either side may carry adjoints.
@@ -543,32 +702,66 @@ void transpose_bwd(KernelCtx& ctx) {
 // SelfAdjointEigenSolver, which is what stan-math uses.
 void eigvals_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
+  if (n == 0) return;
   MatD a = CMapM(ctx.in[0].data, n, n);
-  Eigen::Map<VecD>(ctx.out.data, n) = stan::math::eigenvalues_sym(a);
+  if (values_only()) {
+    Eigen::Map<VecD>(ctx.out.data, n) = stan::math::eigenvalues_sym(a);
+    return;
+  }
+  // Keep the decomposition that stan-math's reverse callback would retain.
+  // The old backward rebuilt a nested var matrix and decomposed it again;
+  // retaining the vectors makes the pullback the same two GEMMs with no
+  // second eigensolve or tape.  Use stan-math's exact check spelling before
+  // dropping to the Eigen solver its prim implementation wraps.
+  stan::math::check_symmetric("eigenvalues_sym", "m", a);
+  Eigen::SelfAdjointEigenSolver<MatD> solver(a);
+  Eigen::Map<VecD>(ctx.out.data, n) = solver.eigenvalues();
+  MapM(ctx.scratch, n, n) = solver.eigenvectors();
 }
 void eigvals_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
   const int64_t n = ctx.idata[0];
-  nary_bwd(ctx, [&](std::vector<VarV>& xs) {
-    VarM a(n, n);
-    for (int64_t j = 0; j < n; ++j)
-      for (int64_t i = 0; i < n; ++i) a(i, j) = xs[0](j * n + i);
-    return stan::math::eigenvalues_sym(a);
-  });
+  if (n == 0) return;
+  CMapM eigenvecs(ctx.scratch, n, n);
+  CMapV eigenvals_adj(ctx.out_adj_vec.data, n);
+  // stan/math/rev/fun/eigenvalues_sym.hpp, in the same association order.
+  MapM(ctx.in_adj[0].data, n, n) +=
+      eigenvecs * eigenvals_adj.asDiagonal() * eigenvecs.transpose();
 }
 void eigvecs_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
+  if (n == 0) return;
   MatD a = CMapM(ctx.in[0].data, n, n);
-  MapM(ctx.out.data, n, n) = stan::math::eigenvectors_sym(a);
+  // eigenvectors_sym's prim check deliberately names eigenvalues_sym; retain
+  // that observable spelling together with its underlying full solver.
+  stan::math::check_symmetric("eigenvalues_sym", "m", a);
+  Eigen::SelfAdjointEigenSolver<MatD> solver(a);
+  MapM(ctx.out.data, n, n) = solver.eigenvectors();
+  if (!values_only()) Eigen::Map<VecD>(ctx.scratch, n) = solver.eigenvalues();
 }
 void eigvecs_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
   const int64_t n = ctx.idata[0];
-  nary_bwd(ctx, [&](std::vector<VarV>& xs) {
-    VarM a(n, n);
-    for (int64_t j = 0; j < n; ++j)
-      for (int64_t i = 0; i < n; ++i) a(i, j) = xs[0](j * n + i);
-    return stan::math::eigenvectors_sym(a);
-  });
+  if (n == 0) return;
+  CMapM eigenvecs(ctx.out.data, n, n);
+  CMapV eigenvals(ctx.scratch, n);
+  CMapM eigenvecs_adj(ctx.out_adj_vec.data, n, n);
+  // stan/math/rev/fun/eigenvectors_sym.hpp, expression for expression.
+  Eigen::MatrixXd f = (1 / (eigenvals.rowwise().replicate(n).transpose() -
+                            eigenvals.rowwise().replicate(n))
+                               .array());
+  f.diagonal().setZero();
+  MapM(ctx.in_adj[0].data, n, n) +=
+      eigenvecs * f.cwiseProduct(eigenvecs.transpose() * eigenvecs_adj) *
+      eigenvecs.transpose();
 }
+
+int64_t eigvals_scratch(const Op& op, const Slot*) {
+  const int64_t n = op.idata[0];
+  return n * n;
+}
+
+int64_t eigvecs_scratch(const Op& op, const Slot*) { return op.idata[0]; }
 
 // ---- tail densities: one nested var tape, no hand-written derivative ----
 // Everything below binds EVERY argument as var, calls the unmodified
@@ -805,7 +998,7 @@ double lkjcov_eval(KernelCtx& ctx) {
 // coefficient matrix, a second int group), so they take the var tape.
 // idata = [outcome..., rows, cols] and, for binomial, the trial counts.
 enum GlmKind { kBinomLogitGlm, kCatLogitGlm, kOrdLogisticGlm };
-template <bool Grad, GlmKind Kind>
+template <GlmKind Kind>
 double tglm_eval(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[ctx.n_idata - 2];
   const int64_t cols = ctx.idata[ctx.n_idata - 1];
@@ -824,7 +1017,7 @@ double tglm_eval(KernelCtx& ctx) {
                                                              beta)
                  : stan::math::binomial_logit_glm_lpmf<false>(nn, NN, X, alpha,
                                                               beta);
-    return finish_tail_density<Grad>(ctx, out, X, alpha, beta);
+    return tail_density_fwd(ctx, out, X, alpha, beta);
   } else {
     std::vector<int> y(ctx.idata, ctx.idata + rows);
     if constexpr (Kind == kCatLogitGlm) {
@@ -834,7 +1027,7 @@ double tglm_eval(KernelCtx& ctx) {
                                                                   beta)
                    : stan::math::categorical_logit_glm_lpmf<false>(y, X, alpha,
                                                                    beta);
-      return finish_tail_density<Grad>(ctx, out, X, alpha, beta);
+      return tail_density_fwd(ctx, out, X, alpha, beta);
     } else {
       // in = {X, beta, cutpoints}; alpha above is beta for this one.
       VarV beta = tail_v(ctx, 1, cols);
@@ -843,7 +1036,7 @@ double tglm_eval(KernelCtx& ctx) {
           propto
               ? stan::math::ordered_logistic_glm_lpmf<true>(y, X, beta, cuts)
               : stan::math::ordered_logistic_glm_lpmf<false>(y, X, beta, cuts);
-      return finish_tail_density<Grad>(ctx, out, X, beta, cuts);
+      return tail_density_fwd(ctx, out, X, beta, cuts);
     }
   }
 }
@@ -851,17 +1044,14 @@ double tglm_eval(KernelCtx& ctx) {
 void lkjcov_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkjcov_eval<false>(ctx); }
 void lkjcov_bwd(KernelCtx& ctx) { lkjcov_eval<true>(ctx); }
 void blglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<false, kBinomLogitGlm>(ctx);
+  ctx.out.data[0] = tglm_eval<kBinomLogitGlm>(ctx);
 }
-void blglm_bwd(KernelCtx& ctx) { tglm_eval<true, kBinomLogitGlm>(ctx); }
 void clglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<false, kCatLogitGlm>(ctx);
+  ctx.out.data[0] = tglm_eval<kCatLogitGlm>(ctx);
 }
-void clglm_bwd(KernelCtx& ctx) { tglm_eval<true, kCatLogitGlm>(ctx); }
 void olglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<false, kOrdLogisticGlm>(ctx);
+  ctx.out.data[0] = tglm_eval<kOrdLogisticGlm>(ctx);
 }
-void olglm_bwd(KernelCtx& ctx) { tglm_eval<true, kOrdLogisticGlm>(ctx); }
 
 // ---- the cdfs the recorder cannot take ---------------------------------
 // Same reason ordered_probit and wiener are here, one step further out:
@@ -964,16 +1154,21 @@ void register_matrix_kernels() {
   STANLI_TAIL_INT_CDF_LIST(STANLI_REGISTER_TAIL_CDF)
 #undef STANLI_REGISTER_TAIL_CDF
   register_kernel(OP_LKJ_COV_LPDF, Kernel{lkjcov_fwd, lkjcov_bwd, nullptr});
-  register_kernel(OP_BINOMIAL_LOGIT_GLM_LPMF,
-                  Kernel{blglm_fwd, blglm_bwd, nullptr});
-  register_kernel(OP_CATEGORICAL_LOGIT_GLM_LPMF,
-                  Kernel{clglm_fwd, clglm_bwd, nullptr});
-  register_kernel(OP_ORDERED_LOGISTIC_GLM_LPMF,
-                  Kernel{olglm_fwd, olglm_bwd, nullptr});
+  register_kernel(
+      OP_BINOMIAL_LOGIT_GLM_LPMF,
+      Kernel{blglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
+  register_kernel(
+      OP_CATEGORICAL_LOGIT_GLM_LPMF,
+      Kernel{clglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
+  register_kernel(
+      OP_ORDERED_LOGISTIC_GLM_LPMF,
+      Kernel{olglm_fwd, tail_density_bwd<3>, tail_density_scratch<3>});
   register_kernel(OP_DIAG_MATRIX, Kernel{diag_fwd, diag_bwd, nullptr});
   register_kernel(OP_CHOLESKY, Kernel{chol_fwd, chol_bwd, nullptr});
-  register_kernel(OP_MULTI_NORMAL_CHOL_LPDF, Kernel{mnc_fwd, mnc_bwd, nullptr});
-  register_kernel(OP_MULTI_NORMAL_LPDF, Kernel{mn_fwd, mn_bwd, nullptr});
+  register_kernel(OP_MULTI_NORMAL_CHOL_LPDF,
+                  Kernel{mnc_fwd, mnc_bwd, mnc_scratch});
+  register_kernel(OP_MULTI_NORMAL_LPDF,
+                  Kernel{mn_fwd, mn_bwd, tail_density_scratch<3>});
   register_kernel(OP_MULTI_NORMAL_PREC_LPDF,
                   Kernel{mnprec_fwd, mnprec_bwd, nullptr});
   register_kernel(OP_GEMM, Kernel{gemm_fwd, gemm_bwd, nullptr});
@@ -982,9 +1177,9 @@ void register_matrix_kernels() {
   register_kernel(OP_MDIVIDE_RIGHT,
                   Kernel{solve_fwd<false>, solve_bwd<false>, nullptr});
   register_kernel(OP_EIGENVALUES_SYM,
-                  Kernel{eigvals_fwd, eigvals_bwd, nullptr});
+                  Kernel{eigvals_fwd, eigvals_bwd, eigvals_scratch});
   register_kernel(OP_EIGENVECTORS_SYM,
-                  Kernel{eigvecs_fwd, eigvecs_bwd, nullptr});
+                  Kernel{eigvecs_fwd, eigvecs_bwd, eigvecs_scratch});
   register_kernel(OP_TRANSPOSE, Kernel{transpose_fwd, transpose_bwd, nullptr});
   register_kernel(OP_LKJ_CORR_CHOL_LPDF, Kernel{lkj_fwd, lkj_bwd, nullptr});
   register_kernel(OP_LKJ_CORR_LPDF, Kernel{lkjc_fwd, lkjc_bwd, nullptr});

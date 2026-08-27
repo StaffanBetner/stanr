@@ -7,13 +7,23 @@
 
 #include <stanli/mir_prog.hpp>
 
-#include <algorithm>
-#include <cmath>
 #include <stdexcept>
 
 namespace stanli {
 
 namespace {
+
+// The register regions run_rhs seeds before the program starts, in the order
+// the fields appear on RhsProgram.
+void compact_rhs(RhsProgram& p) {
+  std::vector<std::pair<int, int>> seeded{
+      {p.t_reg, 1}, {p.y0, p.n_y}, {p.th0, p.n_th}, {p.xr0, p.n_xr}};
+  compact_program(p, seeded);
+  p.t_reg = seeded[0].first;
+  p.y0 = seeded[1].first;
+  p.th0 = seeded[2].first;
+  p.xr0 = seeded[3].first;
+}
 
 bool supported_rhs_view(const mir::UnsizedView& view) {
   if (view.depth > 1) return false;
@@ -111,6 +121,7 @@ RhsProgram compile_rhs_args(
              " values for " + std::to_string(n_y) + " states");
     for (int k = 0; k < out.len; ++k) p.out_regs.push_back(out.reg + k);
     c.finish();
+    compact_rhs(p);
     p.ok = true;
   } catch (Bail& b) {
     p.ok = false;
