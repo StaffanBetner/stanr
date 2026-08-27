@@ -24,9 +24,11 @@
 
 #include <stan/math.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace stanli {
@@ -50,47 +52,57 @@ enum ProgramOpFlag : uint16_t {
   kProgramSaveOut = 1u << 7,
   kProgramNoOutput = 1u << 8,
   kProgramRangeOutput = 1u << 9,
+  kProgramReadB = 1u << 10,
+  kProgramReadC = 1u << 11,
 };
 
-#define STANLI_PROGRAM_CODE_LIST(X)                                       \
-  X(CONST, kProgramNoInputs)                                              \
-  X(CONSTR, kProgramNoInputs | kProgramRangeOutput)                       \
-  X(MOV, 0)                                                               \
-  X(MOVR, kProgramRangeA | kProgramRangeOutput)                           \
-  X(ADD, 0)                                                               \
-  X(SUB, 0)                                                               \
-  X(MUL, kProgramSaveA | kProgramSaveB)                                   \
-  X(DIV, kProgramSaveA | kProgramSaveB)                                   \
-  X(POW, kProgramSaveA | kProgramSaveB | kProgramSaveOut)                 \
-  X(FMAX, kProgramSaveA | kProgramSaveB)                                  \
-  X(FMIN, kProgramSaveA | kProgramSaveB)                                  \
-  X(NEG, 0)                                                               \
-  X(EXP, kProgramSaveOut)                                                 \
-  X(LOG, kProgramSaveA)                                                   \
-  X(SQRT, kProgramSaveOut)                                                \
-  X(SQUARE, kProgramSaveA)                                                \
-  X(INV, kProgramSaveA)                                                   \
-  X(FABS, kProgramSaveA)                                                  \
-  X(INV_LOGIT, kProgramSaveOut)                                           \
-  X(LOG1M, kProgramSaveA)                                                 \
-  X(TANH, kProgramSaveA)                                                  \
-  X(GT, 0)                                                                \
-  X(GE, 0)                                                                \
-  X(LT, 0)                                                                \
-  X(LE, 0)                                                                \
-  X(EQ, 0)                                                                \
-  X(NE, 0)                                                                \
-  X(JZ, kProgramNoAdjoint | kProgramNoOutput)                             \
-  X(JMP, kProgramNoAdjoint | kProgramNoOutput)                            \
-  X(LOG_RANGE, kProgramRangeA | kProgramSaveA | kProgramRangeOutput)      \
-  X(EXP_RANGE, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)    \
-  X(DOT, kProgramRangeA | kProgramRangeB | kProgramSaveA | kProgramSaveB) \
-  X(LSE_RANGE, kProgramRangeA | kProgramSaveA | kProgramSaveOut)          \
-  X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)      \
-  X(LSE2, kProgramSaveA | kProgramSaveB)                                  \
-  X(LOG_MIX, kProgramSaveA | kProgramSaveB | kProgramSaveC)               \
-  X(FMA, kProgramSaveA | kProgramSaveB)                                   \
-  X(DENSITY, 0)                                                           \
+// `a` is an operand wherever kProgramNoInputs is absent; b and c are not,
+// and the ones that are not hold register zero rather than nothing, so
+// which registers a program actually reads needs saying. DENSITY's arity
+// decides its own (program_density.hpp) and CALL's payload decides its own.
+#define STANLI_PROGRAM_CODE_LIST(X)                                          \
+  X(CONST, kProgramNoInputs)                                                 \
+  X(CONSTR, kProgramNoInputs | kProgramRangeOutput)                          \
+  X(MOV, 0)                                                                  \
+  X(MOVR, kProgramRangeA | kProgramRangeOutput)                              \
+  X(ADD, kProgramReadB)                                                      \
+  X(SUB, kProgramReadB)                                                      \
+  X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
+  X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
+  X(POW, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)    \
+  X(FMAX, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
+  X(FMIN, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
+  X(NEG, 0)                                                                  \
+  X(EXP, kProgramSaveOut)                                                    \
+  X(LOG, kProgramSaveA)                                                      \
+  X(SQRT, kProgramSaveOut)                                                   \
+  X(SQUARE, kProgramSaveA)                                                   \
+  X(INV, kProgramSaveA)                                                      \
+  X(FABS, kProgramSaveA)                                                     \
+  X(INV_LOGIT, kProgramSaveOut)                                              \
+  X(LOG1M, kProgramSaveA)                                                    \
+  X(TANH, kProgramSaveA)                                                     \
+  X(GT, kProgramReadB)                                                       \
+  X(GE, kProgramReadB)                                                       \
+  X(LT, kProgramReadB)                                                       \
+  X(LE, kProgramReadB)                                                       \
+  X(EQ, kProgramReadB)                                                       \
+  X(NE, kProgramReadB)                                                       \
+  X(DYN_INDEX, kProgramReadB | kProgramNoAdjoint)                            \
+  X(MAX_RANGE, kProgramRangeA | kProgramNoAdjoint)                           \
+  X(JZ, kProgramNoAdjoint | kProgramNoOutput)                                \
+  X(JMP, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)            \
+  X(LOG_RANGE, kProgramRangeA | kProgramSaveA | kProgramRangeOutput)         \
+  X(EXP_RANGE, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)       \
+  X(DOT, kProgramRangeA | kProgramRangeB | kProgramReadB | kProgramSaveA |   \
+             kProgramSaveB)                                                  \
+  X(LSE_RANGE, kProgramRangeA | kProgramSaveA | kProgramSaveOut)             \
+  X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)         \
+  X(LSE2, kProgramReadB | kProgramSaveA | kProgramSaveB)                     \
+  X(LOG_MIX, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB | \
+                 kProgramSaveC)                                              \
+  X(FMA, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB)      \
+  X(DENSITY, 0)                                                              \
   X(CALL, 0)
 
 struct Program {
@@ -118,8 +130,9 @@ struct Program {
     // propto-OFF only (the island carver refuses propto). With no
     // term-dropping the value does not depend on which arguments are
     // autodiff, so binding all of them as T reproduces the scalar op's
-    // value exactly; the extra partials computed for data arguments are
-    // discarded when the executor hands the island a null adjoint.
+    // value exactly. The backward is where activity matters, and it is
+    // the generated adjoint that carries the per-argument mask
+    // (adjoint.hpp).
     // Any graph kernel, by opcode: the payload is calls[a]. This is the
     // union point with the graph executor -- one instruction gives the
     // register machine the graph's whole vocabulary, and its derivative
@@ -140,7 +153,7 @@ struct Program {
   // way every value is. `bwd_in`/`bwd_out` are where the VALUES live at
   // backward time -- the same registers, unless the adjoint generator
   // had to checkpoint them (some kernel backwards re-read their inputs;
-  // backward_ignores_input_values is a whitelist, not a guarantee).
+  // backward_ignores_values is a whitelist, not a guarantee).
   struct Call {
     uint16_t opcode = 0;
     uint8_t variant = 0;
@@ -196,6 +209,13 @@ inline constexpr int program_output_len(const Program::Instr& instr) {
 
 static_assert(program_code_count() == static_cast<size_t>(Program::CALL) + 1,
               "every Program::Code needs exactly one ProgramOpSpec");
+
+// Drop the initializer fills and the copies the MIR spells out, then
+// renumber away whatever registers that leaves unreferenced (program.cpp).
+// `seeded` names the register ranges the caller writes before the program
+// runs -- an ODE argument region, an island live-in -- and comes back in the
+// new numbering along with the program.
+void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded);
 
 // Assemble the forward context for `call` over the register file `reg`.
 // Backward-only fields are left null; run_adjoint fills its own.
@@ -308,6 +328,21 @@ void run_program(const Program& p, T* reg) {
       case Program::NE:
         d() = T(stan::math::value_of(ra()) != stan::math::value_of(rb()));
         break;
+      case Program::DYN_INDEX: {
+        const double raw = stan::math::value_of(rb());
+        if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+            raw > static_cast<double>(I.len))
+          throw std::out_of_range("register-program index out of range");
+        d() = reg[(size_t)(I.a + I.c + static_cast<int32_t>(raw) - 1)];
+        break;
+      }
+      case Program::MAX_RANGE: {
+        std::vector<T> owning;
+        if (I.len > 0)
+          owning.assign(&reg[(size_t)I.a], &reg[(size_t)(I.a + I.len)]);
+        d() = stan::math::max(owning);
+        break;
+      }
       case Program::JZ:
         if (stan::math::value_of(ra()) == 0.0) pc = I.dst - 1;
         break;

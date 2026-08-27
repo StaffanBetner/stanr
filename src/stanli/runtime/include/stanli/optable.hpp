@@ -34,7 +34,9 @@ namespace stanli {
   X(OP_SET_INDEX_INPLACE)           \
   X(OP_SLICE)                       \
   X(OP_SET_SLICE)                   \
+  X(OP_SET_SLICE_INPLACE)           \
   X(OP_SET_SLICE_STRIDED)           \
+  X(OP_SET_SLICE_STRIDED_INPLACE)   \
   X(OP_SLICE_STRIDED)               \
   X(OP_GATHER)                      \
   X(OP_CONCAT2)                     \
@@ -71,11 +73,15 @@ namespace stanli {
   X(OP_ORDERED_LOGISTIC_GLM_LPMF)   \
   X(OP_NORMAL_ID_GLM_LPDF)          \
   X(OP_TRANSPOSE)                   \
+  X(OP_ALGEBRA_SOLVER)              \
   X(OP_ODE)                         \
+  X(OP_RNG)                         \
   X(OP_ISLAND)                      \
   X(OP_EIGENVALUES_SYM)             \
   X(OP_EIGENVECTORS_SYM)            \
   X(OP_LOG_SUM_EXP)                 \
+  X(OP_LOG_SUM_EXP_ROWS)            \
+  X(OP_SUM_ROWS)                    \
   X(OP_LSE2)                        \
   X(OP_LOG_DIFF_EXP)                \
   X(OP_LOG_MIX)                     \
@@ -144,7 +150,10 @@ namespace stanli {
   X(OP_CATEGORICAL)                 \
   X(OP_REJECT)                      \
   X(OP_PRINT)                       \
-  X(OP_DIRICHLET_LPDF)
+  X(OP_DIRICHLET_LPDF)              \
+  X(OP_PROD_VEC)                    \
+  X(OP_EXTREMA_VEC)                 \
+  X(OP_DYNAMIC_SLICE)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry
@@ -678,6 +687,7 @@ constexpr uint8_t kRerollDensity = 1 << 0;
 constexpr uint8_t kRerollIdataDensity = 1 << 1;
 constexpr uint8_t kRerollAnyDensity = kRerollDensity | kRerollIdataDensity;
 constexpr uint8_t kRerollWidenable = 1 << 2;
+// Backward reads adjoints/scratch only, never input or output value buffers.
 constexpr uint8_t kBackwardValueFree = 1 << 3;
 }  // namespace op_trait
 
@@ -707,6 +717,12 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_POISSON_LPMF:
     case OP_POISSON_LOG_LPMF:
     case OP_NEG_BINOMIAL_2_LPMF:
+    // Two integer groups rather than one, so their lanes concatenate group by
+    // group. Only partition.cpp does that; legacy re-roll's one-immediate
+    // path refuses them.
+    case OP_BINOMIAL_LPMF:
+    case OP_BINOMIAL_LOGIT_LPMF:
+    case OP_BETA_BINOMIAL_LPMF:
 #define STANLI_INT_DENSITY_TRAIT(code, fn, nreal, tier) case code:
       STANLI_INT_DENSITY_LIST(STANLI_INT_DENSITY_TRAIT)
 #undef STANLI_INT_DENSITY_TRAIT
@@ -723,6 +739,7 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_SUB:
     case OP_MUL:
     case OP_DIV:
+    case OP_POW:
     case OP_FMA:
     case OP_NEG:
     case OP_EXPV:
@@ -736,15 +753,22 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_LOG1M_INV_LOGIT:
       return op_trait::kRerollWidenable;
 
-    // Backward routes adjoints without rereading input values. This permits
-    // a later destructive update to reuse the input buffer safely.
+    // Backward routes adjoints without rereading input OR output values. This
+    // permits a later destructive update to reuse an input buffer, and a
+    // store-produced output to become the next update's base.
     case OP_INDEX:
     case OP_SLICE:
     case OP_SLICE_STRIDED:
     case OP_GATHER:
     case OP_SET_INDEX:
     case OP_SET_INDEX_INPLACE:
+    case OP_SET_SLICE:
+    case OP_SET_SLICE_INPLACE:
+    case OP_SET_SLICE_STRIDED:
+    case OP_SET_SLICE_STRIDED_INPLACE:
     case OP_LOG_SUM_EXP:
+    case OP_LOG_SUM_EXP_ROWS:
+    case OP_SUM_ROWS:
       return op_trait::kBackwardValueFree;
     default:
       return 0;
@@ -753,6 +777,27 @@ constexpr uint8_t op_traits(uint16_t opcode) {
 
 constexpr bool has_op_trait(uint16_t opcode, uint8_t trait) {
   return (op_traits(opcode) & trait) != 0;
+}
+
+// Ops no rewrite may run a different number of times than the graph says.
+// Most are effects -- a merged print prints once, a hoisted draw returns the
+// same number twice, a folded check throws at compile time -- and
+// OP_CATEGORICAL rides along because its per-op spec payload is not
+// comparable, so two of them are never known to be the same computation.
+constexpr bool is_effectful_op(uint16_t opcode) {
+  switch (opcode) {
+    case OP_CHECK_STRUCTURED:
+    case OP_CHECK_MATCHING_DIMS:
+    case OP_CHECK_LOWER:
+    case OP_CHECK_UPPER:
+    case OP_CATEGORICAL:
+    case OP_RNG:
+    case OP_PRINT:
+    case OP_REJECT:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // "OP_NORMAL_LPDF" for a known opcode, "OP_?" otherwise. Diagnostics and
